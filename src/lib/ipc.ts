@@ -2027,6 +2027,21 @@ export function qaWindowRecord(): Promise<void> {
   return invokeOrMock('qa_window_record', undefined, () => undefined);
 }
 
+export function qaOpenProviderSettings(): Promise<void> {
+  return invokeOrMock('qa_open_provider_settings', undefined, () => undefined);
+}
+
+export function getQaServiceStatus(): Promise<CredentialsStatus> {
+  return invokeOrMock('qa_get_service_status', undefined, () => ({
+    activeAsrProvider: 'volcengine', activeLlmProvider: '',
+    asrConfigured: false, llmConfigured: false, volcengineConfigured: false, arkConfigured: false,
+  }));
+}
+
+export function qaTakeProviderSettingsRequest(): Promise<boolean> {
+  return invokeOrMock('qa_take_provider_settings_request', undefined, () => false);
+}
+
 export function qaWindowPin(pinned: boolean): Promise<void> {
   return invokeOrMock('qa_window_pin', { pinned }, () => undefined);
 }

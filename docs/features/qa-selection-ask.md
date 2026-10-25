@@ -22,6 +22,18 @@
   recognition and the configured AI answering service. It does not switch the
   normal Listener dictation input or change device key mappings.
 - The QA panel runs in a separate webview and can be pinned or dismissed.
+- The main page and question window show separate configuration-presence
+  indicators for Volcengine recognition and the actual active answering service.
+  Start stays unavailable until both are configured; Finish remains available
+  for a recording already in progress. Configured does not imply healthy
+  networking, valid authentication or available quota.
+- **Open provider settings** goes directly to the Providers page, including
+  when the main window has not yet been created. Inline setup help uses the
+  same APP ID, Access Token and Resource ID names as the settings fields.
+- Interface-language changes synchronize to existing question/capsule windows
+  without changing provider credentials or device settings. Missing QA speech
+  configuration is reported in the current interface language before selection
+  capture or microphone startup.
 - Selection Ask uses current selection/context where platform support allows it.
 - Closing the QA window clears the QA session state.
 - On Windows, show and hide share one GUI-thread native visibility path. The

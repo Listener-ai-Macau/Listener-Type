@@ -16,6 +16,7 @@ import { getSettings, isTauri, qaWindowDismiss, qaWindowPin, qaWindowRecord } fr
 import type { QaChatMessage, QaStatePayload, UserPreferences } from '../lib/types';
 import { formatComboLabel } from '../lib/hotkey';
 import { renderQaMarkdown, renderQaPlainText } from '../lib/qaMarkdown';
+import { QaPreparation, useQaPreparation } from '../components/QaPreparation';
 
 const SELECTION_PREVIEW_MAX = 60;
 
@@ -23,6 +24,7 @@ type Status = 'idle' | 'recording' | 'thinking' | 'error';
 
 export function QaPanel() {
   const { t, i18n } = useTranslation();
+  const preparation = useQaPreparation();
   const [messages, setMessages] = useState<QaChatMessage[]>([]);
   const [status, setStatus] = useState<Status>('idle');
   const [errorMsg, setErrorMsg] = useState<string>('');
@@ -105,7 +107,7 @@ export function QaPanel() {
               break;
             case 'error':
               setStatus('error');
-              setErrorMsg(payload.error ?? tRef.current('qa.error'));
+              setErrorMsg(payload.error === 'qa_speech_setup_required' ? tRef.current('qaPreparation.speechNeeded') : payload.error ?? tRef.current('qa.error'));
               setStreamingAnswer('');
               setLevel(0);
               break;
@@ -196,6 +198,7 @@ export function QaPanel() {
 
   const onRecord = async () => {
     const action = status === 'recording' ? 'stop' : 'start';
+    if (action === 'start' && !preparation.ready) return;
     if (status === 'thinking' || pendingActions.current.has(action)) return;
     pendingActions.current.add(action); setRequestedActions(new Set(pendingActions.current));
     setErrorMsg('');
@@ -254,9 +257,10 @@ export function QaPanel() {
       </div>
       <div data-qa-actions style={{ padding: '10px 14px', borderTop: '1px solid var(--ol-line)', display: 'grid', gap: 6 }}>
         <div style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--ol-ink-3)' }}>{t('qa.microphoneSource')}</div>
+        <QaPreparation preparation={preparation} compact />
         <button data-qa-record-control onMouseDown={event => event.preventDefault()} onClick={() => void onRecord()}
-          disabled={status === 'thinking' || requestedActions.has(status === 'recording' ? 'stop' : 'start')}
-          style={{ border: 0, borderRadius: 8, padding: '10px 12px', background: 'var(--ol-blue)', color: 'white', font: 'inherit', fontSize: 13, cursor: status === 'thinking' ? 'wait' : 'pointer' }}>
+          disabled={status === 'thinking' || (status !== 'recording' && !preparation.ready) || requestedActions.has(status === 'recording' ? 'stop' : 'start')}
+          style={{ border: 0, borderRadius: 8, padding: '10px 12px', background: 'var(--ol-blue)', color: 'white', font: 'inherit', fontSize: 13, opacity: status !== 'recording' && !preparation.ready ? .45 : 1, cursor: status === 'thinking' ? 'wait' : status !== 'recording' && !preparation.ready ? 'not-allowed' : 'pointer' }}>
           {t(status === 'recording' ? 'qa.submitButton' : status === 'thinking' ? 'qa.thinking' : 'qa.startButton')}
         </button>
         <div style={{ fontSize: 10.5, color: 'var(--ol-ink-4)' }}>{t('qa.shortcutHint', { recordHotkey: recordHotkeyLabel })}</div>

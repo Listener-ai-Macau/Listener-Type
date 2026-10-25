@@ -20,6 +20,7 @@ import { deviceAutosaveTranslations } from './deviceAutosave';
 import { localTranslationMessages } from './localTranslation';
 import { savedDraftCopyMessages } from './savedDraftCopy';
 import { styleEditorMessages, vocabPresetMessages } from './styleEditor';
+import { qaPreparationMessages } from './qaPreparation';
 
 export const SUPPORTED_LOCALES = ['zh-CN', 'zh-TW', 'en', 'ja', 'ko'] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
@@ -86,6 +87,10 @@ for (const [locale, styleEditor] of Object.entries(styleEditorMessages)) {
 
 export default i18n;
 
+for (const [locale, qaPreparation] of Object.entries(qaPreparationMessages)) {
+  i18n.addResourceBundle(locale, 'translation', { qaPreparation }, true, true);
+}
+
 /**
  * 当前持久化偏好。'system' 表示跟随系统；具体语言 tag 表示用户已显式选择。
  * 与 i18n.language 不同：i18n.language 永远是已 resolve 的具体语言。
@@ -98,7 +103,7 @@ export function getLocalePreference(): SupportedLocale | typeof FOLLOW_SYSTEM_VA
  * 写入用户偏好并立即切换 i18n 语言。
  * pref === 'system' 时清除存储项，重新走 navigator 检测。
  */
-export async function setLocalePreference(
+async function applyLocalePreference(
   pref: SupportedLocale | typeof FOLLOW_SYSTEM_VALUE,
 ): Promise<SupportedLocale> {
   const resolved = resolveLocalePreference(pref);
@@ -108,6 +113,46 @@ export async function setLocalePreference(
     window.localStorage.setItem(LOCALE_STORAGE_KEY, pref);
   }
   await i18n.changeLanguage(resolved);
+  return resolved;
+}
+
+const LOCALE_CHANGED_EVENT = 'listener-type:ui-locale-changed';
+const localeWindowId = Math.random().toString(36).slice(2);
+const validPreference = (value: unknown): value is SupportedLocale | typeof FOLLOW_SYSTEM_VALUE =>
+  value === FOLLOW_SYSTEM_VALUE || SUPPORTED_LOCALES.includes(value as SupportedLocale);
+
+// Each native WebView has its own i18next instance. Persisting the main view's
+// choice alone leaves an already-created QA/capsule view in its old language.
+// This channel carries only a UI locale, never provider preferences or secrets.
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', event => {
+    if (event.key === LOCALE_STORAGE_KEY) {
+      void i18n.changeLanguage(resolveLocalePreference(getStoredLocale() ?? FOLLOW_SYSTEM_VALUE));
+    }
+  });
+  if ('__TAURI_INTERNALS__' in window) {
+    void import('@tauri-apps/api/event').then(async ({ listen }) => {
+      await listen<{ preference: unknown; source: string }>(LOCALE_CHANGED_EVENT, event => {
+        if (event.payload.source !== localeWindowId && validPreference(event.payload.preference)) {
+          void applyLocalePreference(event.payload.preference);
+        }
+      });
+      // Close the async listener-startup gap without rewriting other settings.
+      await i18n.changeLanguage(resolveLocalePreference(getStoredLocale() ?? FOLLOW_SYSTEM_VALUE));
+    }).catch(cause => console.warn('[i18n] native locale listener unavailable', cause));
+  }
+}
+
+export async function setLocalePreference(
+  pref: SupportedLocale | typeof FOLLOW_SYSTEM_VALUE,
+): Promise<SupportedLocale> {
+  const resolved = await applyLocalePreference(pref);
+  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+    try {
+      const { emit } = await import('@tauri-apps/api/event');
+      await emit(LOCALE_CHANGED_EVENT, { preference: pref, source: localeWindowId });
+    } catch (cause) { console.warn('[i18n] native locale notification failed', cause); }
+  }
   return resolved;
 }
 

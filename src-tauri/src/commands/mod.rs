@@ -2025,6 +2025,38 @@ pub async fn qa_window_record(coord: CoordinatorState<'_>) -> Result<(), String>
     coord.qa_window_record().await
 }
 
+static QA_PROVIDER_SETUP_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[tauri::command]
+pub fn qa_get_service_status() -> CredentialsStatus {
+    // Match the providers actually used by QA, rather than ordinary dictation's
+    // selected ASR or an obsolete preference. Return presence only, no values.
+    let snap = CredentialsVault::snapshot();
+    let active_llm_provider = CredentialsVault::get_active_llm();
+    let speech = volcengine_configured(&snap);
+    let answers = llm_configured_for_provider(&active_llm_provider, &snap);
+    CredentialsStatus {
+        active_asr_provider: "volcengine".into(), active_llm_provider,
+        asr_configured: speech, llm_configured: answers,
+        volcengine_configured: speech, ark_configured: answers,
+    }
+}
+
+#[tauri::command]
+pub fn qa_open_provider_settings(app: tauri::AppHandle) {
+    use tauri::Emitter;
+    // Retain the request before lazy main-window creation. Its event listener
+    // registers first, then drains this flag, so the initial click is not lost.
+    QA_PROVIDER_SETUP_PENDING.store(true, std::sync::atomic::Ordering::SeqCst);
+    crate::show_main_window(&app);
+    let _ = app.emit("qa:provider-setup-requested", ());
+}
+
+#[tauri::command]
+pub fn qa_take_provider_settings_request(window: tauri::WebviewWindow) -> bool {
+    window.label() == "main" && QA_PROVIDER_SETUP_PENDING.swap(false, std::sync::atomic::Ordering::SeqCst)
+}
+
 // ─────────────────────────── 自定义组合键 ───────────────────────────
 
 /// 测试一个组合键是否可以注册（验证格式，不实际注册）。

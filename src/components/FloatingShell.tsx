@@ -35,6 +35,7 @@ import {
   isTauri,
   openSystemSettings,
   recoverEmbeddedBleDevice,
+  qaTakeProviderSettingsRequest,
 } from '../lib/ipc';
 import type { DeviceCustomKeyAppPage, EmbeddedBleRepairResult, EmbeddedBleRuntimeStatus } from '../lib/types';
 import { type SettingsSectionId } from '../pages/Settings';
@@ -167,6 +168,22 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
     setSettingsProviderFocus(providerFocus);
     setSettingsOpen(true);
   };
+
+  useEffect(() => {
+    if (!isTauri) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    const consume = async () => {
+      if (!cancelled && await qaTakeProviderSettingsRequest() && !cancelled) openSettings('providers');
+    };
+    void (async () => {
+      const handle = await listen('qa:provider-setup-requested', () => { void consume(); });
+      if (cancelled) { handle(); return; }
+      unlisten = handle;
+      await consume();
+    })().catch(cause => console.warn('[qa] provider-settings navigation failed', cause));
+    return () => { cancelled = true; unlisten?.(); };
+  }, []);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;

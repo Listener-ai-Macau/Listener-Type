@@ -3580,7 +3580,7 @@ pub(crate) fn apply_chinese_script_preference(text: &str, pref: ChineseScriptPre
 fn ensure_qa_volcengine_credentials() -> Result<(), String> {
     let creds = read_volc_credentials();
     if creds.app_id.trim().is_empty() || creds.access_token.trim().is_empty() {
-        Err("请先在设置中填写火山引擎 ASR App Key 和 Access Key".to_string())
+        Err("qa_speech_setup_required".to_string())
     } else {
         Ok(())
     }
@@ -4203,6 +4203,14 @@ async fn begin_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
     // 重置 SSE 取消标志：上一轮可能 set 过的 true 留着会让本轮流式立即 break。
     inner.qa_stream_cancelled.store(false, Ordering::SeqCst);
 
+    // Reject missing speech configuration before reading any source selection
+    // or opening a microphone. Only report the stable code to localized UI.
+    if let Err(message) = ensure_qa_volcengine_credentials() {
+        log::warn!("[coord] QA: ASR credentials missing: {message}");
+        finish_qa_with_error(inner, session_id, message.clone());
+        return Err(message);
+    }
+
     // 抓选区。每轮按 Option 都重新抓一次：用户多轮提问中可以重新选别处文字。
     // 浮窗 focus:false，原 app 仍是 frontmost，AX/Cmd+C fallback 都能拿到。
     let selection = capture_selection();
@@ -4226,19 +4234,8 @@ async fn begin_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
         }
     }
 
-    // 2. 凭据缺失走静默 fallback：与 dictation 一致的"用户的话不丢"约定。
-    //    缺火山凭据 → 后续 Recorder 仍会跑，只是 ASR 拿不到结果，end_qa_session
-    //    会发 idle 事件关浮窗。
-    //    注意：QA 强制走 Volcengine 流式（见下方注释），所以这里必须直接校验
-    //    Volcengine 字段，不能复用 `ensure_asr_credentials`——后者会按用户在设置
-    //    里选的 active_asr 走 OpenAI 兼容分支，让 QA 把 `asr.api_key` 当成必要项，
-    //    或在 Volcengine 凭据其实为空时误判通过。Codex P1，PR #213。
-    if let Err(message) = ensure_qa_volcengine_credentials() {
-        log::warn!("[coord] QA: ASR credentials missing: {message}");
-        finish_qa_with_error(inner, session_id, format!("缺少 ASR 凭据：{message}"));
-        return Err(message);
-    }
-
+    // 2. Speech credentials were checked before selection capture. Permission
+    // failures also finish this QA session before opening the recorder.
     if let Err(message) = ensure_microphone_permission(inner) {
         log::warn!("[coord] QA: microphone permission gate failed: {message}");
         finish_qa_with_error(inner, session_id, message.clone());

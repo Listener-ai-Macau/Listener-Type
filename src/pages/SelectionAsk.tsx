@@ -13,11 +13,13 @@ import { SavedToast } from '../components/SavedToast';
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import { defaultQaShortcut, formatComboLabel } from '../lib/hotkey';
 import type { UserPreferences } from '../lib/types';
+import { QaPreparation, useQaPreparation } from '../components/QaPreparation';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'failed';
 
 export function SelectionAsk() {
   const { t } = useTranslation();
+  const preparation = useQaPreparation();
   const opening = useRef(false);
   const [openingPanel, setOpeningPanel] = useState(false);
   const [openingError, setOpeningError] = useState(false);
@@ -104,6 +106,7 @@ export function SelectionAsk() {
         <div style={{ display: 'grid', gap: 8, justifyItems: 'start' }}>
           <Btn onClick={() => void openPanel()} disabled={openingPanel}>{t('qa.openButton')}</Btn>
           <p style={{ margin: 0, fontSize: 12, lineHeight: 1.6, color: 'var(--ol-ink-3)' }}>{t('qa.simpleHowto')}</p>
+          <QaPreparation preparation={preparation} />
           {openingError && <span role="alert" style={{ color: 'var(--ol-err)', fontSize: 12 }}>{t('qa.actionFailed')}</span>}
         </div>
       </Card>
