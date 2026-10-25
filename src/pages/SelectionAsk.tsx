@@ -7,7 +7,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Card, PageHeader } from './_atoms';
+import { Btn, Card, PageHeader } from './_atoms';
+import { qaWindowOpen } from '../lib/ipc';
 import { SavedToast } from '../components/SavedToast';
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import { defaultQaShortcut, formatComboLabel } from '../lib/hotkey';
@@ -17,6 +18,15 @@ type SaveState = 'idle' | 'saving' | 'saved' | 'failed';
 
 export function SelectionAsk() {
   const { t } = useTranslation();
+  const opening = useRef(false);
+  const [openingPanel, setOpeningPanel] = useState(false);
+  const [openingError, setOpeningError] = useState(false);
+  const openPanel = async () => {
+    if (opening.current) return;
+    opening.current = true; setOpeningPanel(true); setOpeningError(false);
+    try { await qaWindowOpen(); } catch { setOpeningError(true); }
+    finally { opening.current = false; setOpeningPanel(false); }
+  };
   const { prefs, refresh, updatePrefs: savePrefs } = useHotkeySettings();
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveMessage, setSaveMessage] = useState('');
@@ -90,6 +100,13 @@ export function SelectionAsk() {
       <PageHeader title={t('selectionAsk.title')} />
 
       <SavedToast saveState={saveState} message={saveMessage} />
+      <Card>
+        <div style={{ display: 'grid', gap: 8, justifyItems: 'start' }}>
+          <Btn onClick={() => void openPanel()} disabled={openingPanel}>{t('qa.openButton')}</Btn>
+          <p style={{ margin: 0, fontSize: 12, lineHeight: 1.6, color: 'var(--ol-ink-3)' }}>{t('qa.simpleHowto')}</p>
+          {openingError && <span role="alert" style={{ color: 'var(--ol-err)', fontSize: 12 }}>{t('qa.actionFailed')}</span>}
+        </div>
+      </Card>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {/* 1. 历史保存 — 小型自适宽度模块，避免在宽页面里拉成一条长横条 */}
@@ -148,8 +165,6 @@ export function SelectionAsk() {
             <li>{t('selectionAsk.howto.step1', { hotkey: enabled ? currentLabel : defaultHotkeyLabel })}</li>
             <li>{t('selectionAsk.howto.step2')}</li>
             <li>{t('selectionAsk.howto.step3', { recordHotkey: recordHotkeyLabel })}</li>
-            <li>{t('selectionAsk.howto.step4', { recordHotkey: recordHotkeyLabel })}</li>
-            <li>{t('selectionAsk.howto.step5', { hotkey: enabled ? currentLabel : defaultHotkeyLabel })}</li>
           </ol>
         </Card>
       </div>

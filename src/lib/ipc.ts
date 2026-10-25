@@ -2019,6 +2019,14 @@ export function qaWindowDismiss(): Promise<void> {
   return invokeOrMock('qa_window_dismiss', undefined, () => undefined);
 }
 
+export function qaWindowOpen(): Promise<void> {
+  return invokeOrMock('qa_window_open', undefined, () => undefined);
+}
+
+export function qaWindowRecord(): Promise<void> {
+  return invokeOrMock('qa_window_record', undefined, () => undefined);
+}
+
 export function qaWindowPin(pinned: boolean): Promise<void> {
   return invokeOrMock('qa_window_pin', { pinned }, () => undefined);
 }

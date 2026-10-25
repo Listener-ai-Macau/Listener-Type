@@ -1,6 +1,6 @@
 // QaPanel.tsx — 划词追问浮窗 v2（issue #118 v2）。
 //
-// 触发链路（v2 双 hotkey）：
+// 可见按钮直接复用既有 QA 生命周期；快捷键仍可用：
 //   1) 用户按 Cmd+Shift+;（默认）→ 后端 toggle 浮窗可见性。
 //      显示时发 `qa:state { kind: "idle", messages: [] }`。
 //   2) 浮窗可见时，用户按 rightOption（主听写键的复用）→ 录音；
@@ -12,7 +12,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getSettings, isTauri, qaWindowDismiss, qaWindowPin } from '../lib/ipc';
+import { getSettings, isTauri, qaWindowDismiss, qaWindowPin, qaWindowRecord } from '../lib/ipc';
 import type { QaChatMessage, QaStatePayload, UserPreferences } from '../lib/types';
 import { formatComboLabel } from '../lib/hotkey';
 import { renderQaMarkdown, renderQaPlainText } from '../lib/qaMarkdown';
@@ -28,6 +28,8 @@ export function QaPanel() {
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [selectionPreview, setSelectionPreview] = useState<string>('');
   const [pinned, setPinned] = useState(false);
+  const pendingActions = useRef(new Set<'start' | 'stop'>());
+  const [requestedActions, setRequestedActions] = useState(new Set<'start' | 'stop'>());
   /** 流式 LLM 答案：answer_delta 累积、answer 事件来时清空（最终内容已落到 messages）。 */
   const [streamingAnswer, setStreamingAnswer] = useState<string>('');
   /** 录音电平：0..1。后端每帧 33ms 通过 qa:level emit。详见 issue #162。 */
@@ -189,7 +191,22 @@ export function QaPanel() {
   };
 
   const onClose = () => {
-    void qaWindowDismiss();
+    void qaWindowDismiss().catch(() => { setErrorMsg(t('qa.closeFailed')); setStatus('error'); });
+  };
+
+  const onRecord = async () => {
+    const action = status === 'recording' ? 'stop' : 'start';
+    if (status === 'thinking' || pendingActions.current.has(action)) return;
+    pendingActions.current.add(action); setRequestedActions(new Set(pendingActions.current));
+    setErrorMsg('');
+    try { await qaWindowRecord(); }
+    catch (cause) {
+      const code = String(cause).replace(/^Error: /, '');
+      setErrorMsg(t(code === 'qa_dictation_busy' ? 'qa.dictationBusy' : code === 'qa_ota_busy' ? 'qa.otaBusy' : 'qa.actionFailed'));
+      setStatus('error');
+    } finally {
+      pendingActions.current.delete(action); setRequestedActions(new Set(pendingActions.current));
+    }
   };
 
   // ── 自动滚动到底（新消息进来时）────────────────────────────────────
@@ -235,6 +252,15 @@ export function QaPanel() {
           <ErrorRow message={errorMsg} t={t} recordHotkey={recordHotkeyLabel} />
         )}
       </div>
+      <div data-qa-actions style={{ padding: '10px 14px', borderTop: '1px solid var(--ol-line)', display: 'grid', gap: 6 }}>
+        <div style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--ol-ink-3)' }}>{t('qa.microphoneSource')}</div>
+        <button data-qa-record-control onMouseDown={event => event.preventDefault()} onClick={() => void onRecord()}
+          disabled={status === 'thinking' || requestedActions.has(status === 'recording' ? 'stop' : 'start')}
+          style={{ border: 0, borderRadius: 8, padding: '10px 12px', background: 'var(--ol-blue)', color: 'white', font: 'inherit', fontSize: 13, cursor: status === 'thinking' ? 'wait' : 'pointer' }}>
+          {t(status === 'recording' ? 'qa.submitButton' : status === 'thinking' ? 'qa.thinking' : 'qa.startButton')}
+        </button>
+        <div style={{ fontSize: 10.5, color: 'var(--ol-ink-4)' }}>{t('qa.shortcutHint', { recordHotkey: recordHotkeyLabel })}</div>
+      </div>
       <StatusBar status={status} t={t} recordHotkey={recordHotkeyLabel} />
     </div>
   );
@@ -275,7 +301,7 @@ function Toolbar({ pinned, onTogglePin, onClose }: ToolbarProps) {
           />
         </svg>
       </IconBtn>
-      <IconBtn label={t('qa.closeTooltip')} onClick={onClose}>
+      <IconBtn label={t('qa.closeTooltip')} onClick={onClose} labelVisible>
         <svg width="11" height="11" viewBox="0 0 11 11">
           <path
             d="M1.5 1.5l8 8M9.5 1.5l-8 8"
@@ -294,9 +320,10 @@ interface IconBtnProps {
   active?: boolean;
   onClick: () => void;
   children: React.ReactNode;
+  labelVisible?: boolean;
 }
 
-function IconBtn({ label, active, onClick, children }: IconBtnProps) {
+function IconBtn({ label, active, onClick, children, labelVisible }: IconBtnProps) {
   return (
     <button
       onClick={onClick}
@@ -304,11 +331,13 @@ function IconBtn({ label, active, onClick, children }: IconBtnProps) {
       aria-label={label}
       style={{
         ...iconBtnBaseStyle,
+        ...(labelVisible ? { width: 'auto', padding: '0 9px', gap: 6 } : {}),
         color: active ? 'var(--ol-blue)' : 'var(--ol-ink-3)',
         background: active ? 'rgba(101,123,112,0.12)' : 'transparent',
       }}
     >
       {children}
+      {labelVisible && <span style={{ fontSize: 11 }}>{label}</span>}
     </button>
   );
 }

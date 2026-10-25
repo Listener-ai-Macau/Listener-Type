@@ -1890,6 +1890,27 @@ impl Coordinator {
         close_qa_panel(&self.inner);
     }
 
+    pub fn qa_window_open(&self) {
+        let visible = self.inner.qa_state.lock().panel_visible;
+        if !visible {
+            qa::open_qa_panel(&self.inner);
+        }
+    }
+
+    pub async fn qa_window_record(&self) -> Result<(), String> {
+        if self.inner.state.lock().phase != SessionPhase::Idle {
+            return Err("qa_dictation_busy".into());
+        }
+        if self.inner.embedded_ble_ota_active.load(Ordering::SeqCst) {
+            return Err("qa_ota_busy".into());
+        }
+        if !self.inner.qa_state.lock().panel_visible {
+            return Err("qa_panel_closed".into());
+        }
+        qa::handle_qa_option_edge(&self.inner).await;
+        Ok(())
+    }
+
     /// 用户点 📌 切换 pinned 状态。pinned=true 时浮窗不自动隐藏。
     pub fn qa_window_pin(&self, pinned: bool) {
         self.inner.qa_state.lock().pinned = pinned;

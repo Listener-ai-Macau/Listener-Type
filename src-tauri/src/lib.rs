@@ -282,6 +282,8 @@ const WRY_DEFAULT_DISABLED_WEBVIEW2_FEATURES: &str = "msWebOOUI,msPdfOOUI,msSmar
 /// 第一次 show 时把 QA 浮窗摆到屏幕底部居中；之后的 show 不再 reposition，
 /// 让用户拖动后的位置在 hide → show 之间得以保持。详见 issue #118 v2。
 static QA_WINDOW_POSITIONED: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "windows")]
+static QA_WINDOW_VISIBILITY_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static APP_QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
 static TRAY_MICROPHONE_WATCHER_STOPPING: AtomicBool = AtomicBool::new(false);
 use tauri::menu::{
@@ -1076,6 +1078,8 @@ pub fn run() {
             commands::set_open_app_hotkey,
             commands::qa_window_dismiss,
             commands::qa_window_pin,
+            commands::qa_window_open,
+            commands::qa_window_record,
             commands::validate_combo_hotkey,
             commands::set_combo_hotkey,
             commands::validate_provider_credentials,
@@ -3229,7 +3233,7 @@ pub(crate) fn show_qa_window<R: tauri::Runtime>(app: &AppHandle<R>, content_kind
         });
     }
     #[cfg(target_os = "windows")]
-    if !show_qa_window_no_activate(&window) {
+    if !set_qa_window_visibility_no_activate(&window, true) {
         log::warn!("[qa] show_no_activate failed; falling back to window.show()");
         if let Err(e) = window.show() {
             log::warn!("[qa] show fallback failed: {e}");
@@ -3277,6 +3281,12 @@ fn make_qa_window_draggable_macos<R: tauri::Runtime>(window: &tauri::WebviewWind
 /// 隐藏 QA 窗口。供 commands::qa_window_dismiss / coordinator session 收尾共用。
 pub(crate) fn hide_qa_window<R: tauri::Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window("qa") {
+        // ShowWindow bypasses Tao's VISIBLE cache. Calling only window.hide()
+        // then sees hidden->hidden and skips the actual HWND (Owner180).
+        #[cfg(target_os = "windows")]
+        if set_qa_window_visibility_no_activate(&window, false) {
+            return;
+        }
         let _ = window.hide();
     }
 }
@@ -3334,24 +3344,32 @@ fn apply_capsule_windows_no_activate_style<R: tauri::Runtime>(window: &tauri::We
 fn apply_capsule_windows_no_activate_style<R: tauri::Runtime>(_window: &tauri::WebviewWindow<R>) {}
 
 #[cfg(target_os = "windows")]
-fn show_qa_window_no_activate<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> bool {
+fn set_qa_window_visibility_no_activate<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>, visible: bool) -> bool {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::Win32::Foundation::HWND;
-    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNOACTIVATE};
-
-    let Ok(handle) = window.window_handle() else {
-        return false;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, IsWindowVisible, SetWindowLongPtrW, ShowWindow,
+        GWL_EXSTYLE, SW_HIDE, SW_SHOWNOACTIVATE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     };
-    let RawWindowHandle::Win32(raw) = handle.as_raw() else {
-        return false;
-    };
-    let hwnd = HWND(raw.hwnd.get() as *mut _);
-    if hwnd.0.is_null() {
-        return false;
-    }
-
-    let _ = unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
-    true
+    let generation = QA_WINDOW_VISIBILITY_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    let target = window.clone();
+    // Both directions use one HWND visibility owner, on its GUI thread. Last
+    // intent wins even when a hotkey/close arrives before a queued show runs.
+    window.run_on_main_thread(move || {
+        if QA_WINDOW_VISIBILITY_GENERATION.load(Ordering::SeqCst) != generation { return; }
+        let Ok(handle) = target.window_handle() else { return; };
+        let RawWindowHandle::Win32(raw) = handle.as_raw() else { return; };
+        let hwnd = HWND(raw.hwnd.get() as *mut _);
+        if hwnd.0.is_null() { return; }
+        unsafe {
+            if visible {
+                let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | WS_EX_NOACTIVATE.0 as isize | WS_EX_TOOLWINDOW.0 as isize);
+            }
+            let _ = ShowWindow(hwnd, if visible { SW_SHOWNOACTIVATE } else { SW_HIDE });
+            log::info!("[qa] native visibility requested={visible} actual={} generation={generation}", IsWindowVisible(hwnd).as_bool());
+        }
+    }).is_ok()
 }
 
 /// 选择胶囊应落位的显示器：优先光标所在屏（用户正在看的屏幕），其次胶囊窗口

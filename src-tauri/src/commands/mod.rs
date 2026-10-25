@@ -2015,6 +2015,16 @@ pub fn qa_window_pin(coord: CoordinatorState<'_>, pinned: bool) {
     coord.qa_window_pin(pinned);
 }
 
+#[tauri::command]
+pub fn qa_window_open(coord: CoordinatorState<'_>) {
+    coord.qa_window_open();
+}
+
+#[tauri::command]
+pub async fn qa_window_record(coord: CoordinatorState<'_>) -> Result<(), String> {
+    coord.qa_window_record().await
+}
+
 // ─────────────────────────── 自定义组合键 ───────────────────────────
 
 /// 测试一个组合键是否可以注册（验证格式，不实际注册）。

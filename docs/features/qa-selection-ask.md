@@ -3,7 +3,7 @@
 ## Status
 
 - status: `implemented`
-- scope: separate QA/selection question flow with its own hotkey and floating QA window
+- scope: a question window with visible open, record and finish controls; optional keyboard shortcuts
 
 ## Source Map
 
@@ -16,9 +16,18 @@
 ## Behavior
 
 - QA hotkey is independent from dictation hotkey and translation hotkey.
+- Open the question window from Selection Ask. Choose **Start question**, speak,
+  then choose **Finish and ask**. The keyboard shortcuts remain optional.
+- This flow uses the selected **computer microphone**, Volcengine speech
+  recognition and the configured AI answering service. It does not switch the
+  normal Listener dictation input or change device key mappings.
 - The QA panel runs in a separate webview and can be pinned or dismissed.
 - Selection Ask uses current selection/context where platform support allows it.
 - Closing the QA window clears the QA session state.
+- On Windows, show and hide share one GUI-thread native visibility path. The
+  latest visibility intent wins; a stale queued show must not undo Close. This
+  avoids mixing raw HWND visibility with Tao's cached hidden state. Pointer
+  controls do not activate the window or take the source app's text selection.
 
 ## Verification
 
