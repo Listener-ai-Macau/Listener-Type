@@ -37,8 +37,16 @@ export function Tools({ onOpen, onTryText, onOpenAudioFile, onOpenSavedDrafts }:
         <Icon name="chevRight" size={15} style={{ color: 'var(--ol-ink-4)', flexShrink: 0 }} />
       </button>)}
     </div>
-    <details style={{ marginTop: 18, color: 'var(--ol-ink-3)', fontSize: 12 }}>
-      <summary style={{ cursor: 'pointer', padding: '7px 0' }}>{t('firstUse.moreTools')}</summary>
+    <details className="ol-tools-more" style={{ marginTop: 18, color: 'var(--ol-ink-3)', fontSize: 12 }}>
+      <summary style={{ display: 'flex', alignItems: 'center', gap: 9, cursor: 'pointer',
+        padding: '11px 14px', border: '0.5px solid var(--ol-line)', borderRadius: 'var(--ol-r-md)',
+        background: 'var(--ol-surface)', color: 'var(--ol-ink-2)', fontSize: 13, fontWeight: 600,
+        listStyle: 'none' }}>
+        <span className="ol-tools-more-chevron" aria-hidden="true" style={{ display: 'inline-flex' }}>
+          <Icon name="chevRight" size={15} />
+        </span>
+        {t('firstUse.moreTools')}
+      </summary>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, paddingTop: 10 }}>
         <Btn size="sm" onClick={onTryText}>{t('overview.tryTypedText')}</Btn>
         <Btn size="sm" onClick={onOpenSavedDrafts}>{t('textDraft.title')}</Btn>
@@ -52,6 +60,11 @@ export function Tools({ onOpen, onTryText, onOpenAudioFile, onOpenSavedDrafts }:
     <style>{`
       .ol-tool-card:hover { border-color: var(--ol-ink-4) !important; }
       .ol-tool-card:focus-visible { outline: 2px solid var(--ol-ink-3); outline-offset: 3px; }
+      .ol-tools-more > summary::-webkit-details-marker { display: none; }
+      .ol-tools-more > summary:hover { border-color: var(--ol-ink-4) !important; }
+      .ol-tools-more > summary:focus-visible { outline: 2px solid var(--ol-ink-3); outline-offset: 3px; }
+      .ol-tools-more-chevron { transition: transform .16s ease; }
+      .ol-tools-more[open] > summary .ol-tools-more-chevron { transform: rotate(90deg); }
       @media (max-width: 760px) { .ol-tools-grid { grid-template-columns: minmax(0, 1fr) !important; } }
     `}</style>
   </>;
