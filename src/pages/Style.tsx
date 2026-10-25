@@ -400,14 +400,14 @@ export function Style() {
       const created = existing ?? await createStylePackFromTemplate(template);
       showSaveStatus('saved', copy.createSuccess, true);
       await loadPacks(created.id);
-      // Re-fetch list, then open the editor on the new pack
+      // The ready-to-use preset stays in the library; blank packs need editing.
       if (editorCloseTimer.current !== null) {
         window.clearTimeout(editorCloseTimer.current);
         editorCloseTimer.current = null;
       }
       setEditorClosing(false);
       setSelectedId(created.id);
-      setEditorOpen(true);
+      setEditorOpen(!everyday);
     } catch (createError) {
       showSaveStatus('failed', copy.createFailed(String(createError)));
     } finally {
@@ -589,7 +589,7 @@ export function Style() {
                 {rawPack && <Btn size="sm" variant="ghost" onClick={() => setTrialPack(clonePack(rawPack))}>
                   {t('style.trial.open', { name: rawPresentation?.name })}
                 </Btn>}
-                <Pill tone="outline">{copy.listCount(packs.length)}</Pill>
+                <Pill tone="outline">{busy === 'loading' ? t('common.loading') : copy.listCount(packs.length)}</Pill>
               </div>
             </div>
           </div>
