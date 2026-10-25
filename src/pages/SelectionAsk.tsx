@@ -161,6 +161,8 @@ export function SelectionAsk() {
           </button>
         </div>
 
+        <p data-qa-history-help style={{ margin: 0, fontSize: 11.5, lineHeight: 1.6, color: 'var(--ol-ink-3)' }}>{t('qaPreparation.historyHelp')}</p>
+
         {/* 2. 使用方法 */}
         <Card>
           <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{t('selectionAsk.howto.title')}</div>

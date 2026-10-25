@@ -274,7 +274,8 @@ export function QaPanel() {
         </button>
         <div style={{ fontSize: 10.5, color: 'var(--ol-ink-4)' }}>{t('qa.shortcutHint', { recordHotkey: recordHotkeyLabel })}</div>
       </div>
-      <StatusBar status={status} t={t} recordHotkey={recordHotkeyLabel} />
+      <StatusBar status={status} t={t} recordHotkey={recordHotkeyLabel}
+        idleLabel={preparation.ready ? undefined : t(!preparation.credentials ? preparation.failed ? 'qaPreparation.unknown' : 'qaPreparation.checking' : 'qaPreparation.setupRequired')} />
     </div>
   );
 }
@@ -589,16 +590,18 @@ function StatusBar({
   status,
   t,
   recordHotkey,
+  idleLabel,
 }: {
   status: Status;
   t: ReturnType<typeof useTranslation>['t'];
   recordHotkey: string;
+  idleLabel?: string;
 }) {
   let label = '';
   let dotColor = 'transparent';
   switch (status) {
     case 'idle':
-      label = t('qa.statusIdle', { recordHotkey });
+      label = idleLabel ?? t('qa.statusIdle', { recordHotkey });
       dotColor = 'rgba(0,0,0,0.18)';
       break;
     case 'recording':
@@ -615,7 +618,7 @@ function StatusBar({
       break;
   }
   return (
-    <div style={statusBarStyle}>
+    <div data-qa-status style={statusBarStyle}>
       <span
         style={{
           width: 7,

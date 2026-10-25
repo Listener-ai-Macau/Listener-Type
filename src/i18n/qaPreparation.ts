@@ -1,5 +1,7 @@
 export const qaPreparationMessages = {
   'zh-CN': {
+    setupRequired: '请先完成服务配置',
+    historyHelp: '开启后，每轮问题和回答会保存在本机“历史”。关闭后不新增问答历史；当前浮窗中的会话在关闭时清除。这项开关不会停止云识别和回答所需的数据发送。',
     speech: '语音识别（火山引擎）', answers: 'AI 回答', checking: '检查中', configured: '已配置', missing: '未配置', unknown: '状态未知',
     openSettings: '打开提供商设置', helpTitle: '需要配置什么？', retry: '重新检查',
     readFailed: '暂时无法读取配置状态，请重新检查。', openFailed: '未能打开设置，请从 Type 设置进入“提供商”。',
@@ -9,6 +11,8 @@ export const qaPreparationMessages = {
     costs: '识别与回答是两项服务，需要分别准备；可来自同一服务商。云端用量按你使用的服务计费。',
   },
   'zh-TW': {
+    setupRequired: '請先完成服務設定',
+    historyHelp: '開啟後，每輪問題和回答會儲存在本機「歷史」。關閉後不新增問答歷史；目前浮窗中的對話在關閉時清除。此開關不會停止雲端辨識及回答所需的資料傳送。',
     speech: '語音辨識（火山引擎）', answers: 'AI 回答', checking: '檢查中', configured: '已設定', missing: '未設定', unknown: '狀態未知',
     openSettings: '開啟提供者設定', helpTitle: '需要設定什麼？', retry: '重新檢查',
     readFailed: '暫時無法讀取設定狀態，請重新檢查。', openFailed: '無法開啟設定，請從 Type 設定進入「提供者」。',
@@ -18,6 +22,8 @@ export const qaPreparationMessages = {
     costs: '辨識與回答是兩項服務，需要分別準備；可來自同一提供者。雲端用量依你使用的服務計費。',
   },
   en: {
+    setupRequired: 'Complete service setup to ask a question',
+    historyHelp: 'When on, each question and answer is saved in local History. When off, no new question history is added; the current window’s conversation is cleared when closed. This switch does not stop the data sent for cloud recognition and answers.',
     speech: 'Speech recognition (Volcengine)', answers: 'AI answers', checking: 'Checking', configured: 'Configured', missing: 'Not configured', unknown: 'Unknown',
     openSettings: 'Open provider settings', helpTitle: 'What do I need to configure?', retry: 'Check again',
     readFailed: 'Configuration status could not be read. Please check again.', openFailed: 'Settings could not open. Go to Type Settings → Providers.',
@@ -27,6 +33,8 @@ export const qaPreparationMessages = {
     costs: 'Recognition and answers are separate services to prepare; they can use the same provider. Cloud usage is billed by the services you use.',
   },
   ja: {
+    setupRequired: '先にサービスの設定を完了してください',
+    historyHelp: 'オンにすると各質問と回答をこのPCの「履歴」に保存します。オフでは新しい問答履歴を追加せず、現在のウィンドウの会話は閉じると消去されます。この切り替えでクラウドの音声認識や回答に必要なデータ送信が止まるわけではありません。',
     speech: '音声認識（Volcengine）', answers: 'AIの回答', checking: '確認中', configured: '設定済み', missing: '未設定', unknown: '不明',
     openSettings: 'プロバイダー設定を開く', helpTitle: '何を設定する必要がありますか？', retry: '再確認',
     readFailed: '設定状況を読み取れませんでした。再確認してください。', openFailed: '設定を開けませんでした。Typeの設定から「プロバイダー」を開いてください。',
@@ -36,6 +44,8 @@ export const qaPreparationMessages = {
     costs: '音声認識と回答はそれぞれ設定が必要なサービスです。同じ事業者を利用することもできます。クラウドの利用料金は各サービスに従います。',
   },
   ko: {
+    setupRequired: '먼저 서비스 설정을 완료하세요',
+    historyHelp: '켜면 각 질문과 답변을 이 컴퓨터의 기록에 저장합니다. 끄면 새 질문 기록을 추가하지 않으며 현재 창의 대화는 창을 닫을 때 지워집니다. 이 설정은 클라우드 인식과 답변에 필요한 데이터 전송을 중지하지 않습니다.',
     speech: '음성 인식 (Volcengine)', answers: 'AI 답변', checking: '확인 중', configured: '설정됨', missing: '설정되지 않음', unknown: '알 수 없음',
     openSettings: '제공업체 설정 열기', helpTitle: '무엇을 설정해야 하나요?', retry: '다시 확인',
     readFailed: '설정 상태를 읽지 못했습니다. 다시 확인하세요.', openFailed: '설정을 열지 못했습니다. Type 설정에서 제공업체를 여세요.',
