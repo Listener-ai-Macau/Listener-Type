@@ -22,6 +22,10 @@
   recognition and the configured AI answering service. It does not switch the
   normal Listener dictation input or change device key mappings.
 - The QA panel runs in a separate webview and can be pinned or dismissed.
+- The initial question window is 360 × 300 logical pixels and can be resized
+  down to 320 × 260. Setup help and conversation content scroll separately from
+  the fixed Close and recording controls; longer answers do not enlarge the
+  window automatically.
 - The main page and question window show separate configuration-presence
   indicators for Volcengine recognition and the actual active answering service.
   Start stays unavailable until both are configured; Finish remains available

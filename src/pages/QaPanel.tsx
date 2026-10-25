@@ -233,7 +233,8 @@ export function QaPanel() {
     <div style={shellStyle}>
       <Toolbar pinned={pinned} onTogglePin={onTogglePin} onClose={onClose} />
       <div ref={scrollRef} style={contentStyle}>
-        {messages.length === 0 && status === 'idle' && (
+        {!preparation.ready && <QaPreparation preparation={preparation} />}
+        {messages.length === 0 && status === 'idle' && preparation.ready && (
           <EmptyHint t={t} recordHotkey={recordHotkeyLabel} />
         )}
         {messages.length === 0 && status === 'recording' && (
@@ -266,7 +267,6 @@ export function QaPanel() {
       </div>
       <div data-qa-actions style={{ padding: '10px 14px', borderTop: '1px solid var(--ol-line)', display: 'grid', gap: 6 }}>
         <div style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--ol-ink-3)' }}>{t('qa.microphoneSource')}</div>
-        <QaPreparation preparation={preparation} compact />
         <button data-qa-record-control onMouseDown={event => event.preventDefault()} onClick={() => void onRecord()}
           disabled={status === 'thinking' || (status !== 'recording' && !preparation.ready) || requestedActions.has(status === 'recording' ? 'stop' : 'start')}
           style={{ border: 0, borderRadius: 8, padding: '10px 12px', background: 'var(--ol-blue)', color: 'white', font: 'inherit', fontSize: 13, opacity: status !== 'recording' && !preparation.ready ? .45 : 1, cursor: status === 'thinking' ? 'wait' : status !== 'recording' && !preparation.ready ? 'not-allowed' : 'pointer' }}>

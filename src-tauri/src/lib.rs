@@ -746,7 +746,7 @@ pub fn run() {
                 let _ = capsule.hide();
             }
 
-            // QA 浮窗（issue #118）：紧贴胶囊上方 8pt、屏幕底部居中、380×440。
+            // QA starts compact above the capsule; users can resize for longer answers.
             // 启动时 hide()，等 coordinator 在 open_qa_panel 时再 show + 首次定位。
             // tauri.conf.json 里需要声明 label="qa" 的窗口（前端 agent 负责）；
             // 这里 get_webview_window 返回 None 时直接跳过，不影响主流程。
@@ -3153,10 +3153,10 @@ fn wait_for_app_activation<R: Runtime>(app: &AppHandle<R>) {
 #[cfg(not(target_os = "macos"))]
 fn wait_for_app_activation<R: Runtime>(_app: &AppHandle<R>) {}
 
-/// QA 浮窗的目标尺寸（issue #118）。胶囊默认 220×96 + Dock 80pt + 8pt gap，
-/// 算下来 QA 窗口顶部坐标 = h - 80 - 96 - 8 - 280。
-const QA_WINDOW_WIDTH: f64 = 380.0;
-const QA_WINDOW_HEIGHT: f64 = 440.0;
+/// Compact initial size in logical pixels, matching tauri.conf.json. The
+/// question/setup content scrolls independently of the fixed action controls.
+const QA_WINDOW_WIDTH: f64 = 360.0;
+const QA_WINDOW_HEIGHT: f64 = 300.0;
 /// 胶囊与 QA 窗口的间距，与设计稿一致。
 const QA_WINDOW_GAP_TO_CAPSULE: f64 = 8.0;
 /// 给 macOS Dock 留的下边距（与 capsule 同源）。
