@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build185 / Firmware37
+# Listener v1.0.6-rc1 · Type build186 / Firmware37
 
 | Download | File |
 | --- | --- |
@@ -6,6 +6,8 @@
 | **ESP32-S3 firmware · USB or Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 ## In this app update
+
+Empty WAV files now have a specific empty-file message rather than incorrectly showing the60-second limit. Oversize and unreadable-file errors remain distinct, and choosing a valid file after an error permits retry. This fixes an original file-input classification defect; no recognition service, model or microphone path was changed. An independent software user completed one included11.5-second English sample transcription and Copy; this is file-tool evidence, not real-time or hardware qualification.
 
 The question window starts at a compact 360 × 300 logical pixels, with resizable edges and a 320 × 260 minimum. Setup help and long answers scroll within the content area while recording and Close controls remain visible. The window no longer forces the previous 380 × 440 size.
 
@@ -23,12 +25,14 @@ RC1 is a prerelease. Strong background-speech separation, some physical/global-k
 
 ## File identity
 
-- Type source: `750731d844955cb737bf176e6367732c698211ef` · `build-source/type183-20261025`
-- MSI: 299393024 bytes · SHA256 `72494d4c26973ea6b9adc35c46896116067b5c58334cb471763baa4ba09007d8`
+- Type source: `09cf1ae4aad549d189c89090272ffb81e607615d` · `build-source/type186-20261025`
+- MSI: 299384832 bytes · SHA256 `9940526f5b9cf9980380de0b6f00392deb4868e540714914dd223f3e0ef8cfd4`
 - Firmware37 source: `87ea79ec3d6e34a95d09b73e2a5848207a919f1c` · runtime `9d7fbbe67ed0223d`
 - ZIP: 1956799 bytes · SHA256 `fea25f0bf8f0d20edbb1e0ac326a5f026a0145915384372bde5f58d29b528b84`
 
 ## 中文说明
+
+空WAV文件现在单独提示为空，不再误报超过60秒；超长、读取失败仍分别提示，重新选择有效文件可继续操作。修复的是录音文件入口原有的错误分类，不改识别服务、模型或麦克风路径。独立软件体验员完成了一次内置11.5秒英文样例转写及复制；这不等于实时语音或硬件验收通过。
 
 提问窗默认从380×440缩为360×300，可调整大小、最小320×260；配置帮助与长回答在内容区滚动，固定开始／结束／关闭控件保持可见。已做匹配原生默认／最小尺寸、机械缩放及关闭重开检查，不等于真人拖拽、讲话／识别／回答通过。
 

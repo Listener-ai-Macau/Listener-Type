@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-25T13:46:47.552406+08:00",
+  "updatedAt": "2026-10-25T14:46:17.442040+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 185,
-    "source": "750731d844955cb737bf176e6367732c698211ef",
-    "sourceTag": "build-source/type185-20261025",
+    "build": 186,
+    "source": "09cf1ae4aad549d189c89090272ffb81e607615d",
+    "sourceTag": "build-source/type186-20261025",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "72494d4c26973ea6b9adc35c46896116067b5c58334cb471763baa4ba09007d8",
-    "sizeBytes": 299393024,
-    "exeSha256": "466eae5ff35a4a2f6378e7989d1387d28ba02f266113ae56eaa9baa943548a5e",
+    "sha256": "9940526f5b9cf9980380de0b6f00392deb4868e540714914dd223f3e0ef8cfd4",
+    "sizeBytes": 299384832,
+    "exeSha256": "a15a793e204c44908f9e986e5820034ac00389c9990eda6035f07b227dfcdb37",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -493,7 +493,11 @@
     "qaLocalHistoryExplanationNativePass": true,
     "qaCompactDefaultAndMechanicalMinResizeNativePass": true,
     "qaNativeResizablePropertyAndFramePass": true,
-    "qaDefaultMinFixedActionsLayoutPass": true
+    "qaDefaultMinFixedActionsLayoutPass": true,
+    "audioFileEmptyVsOversizeNativePass": true,
+    "audioFileValidReselectionNativePass": true,
+    "audioFileFiveLocaleCopyAndControlledReadErrorPass": true,
+    "audioFileIndependentIncludedSampleAsrAndCopyPass": true
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -511,6 +515,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build185-20261025"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build186-20261025"
   }
 }
