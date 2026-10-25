@@ -10,7 +10,7 @@
 
 | 用途 | 直接下載 |
 | --- | --- |
-| **Windows 軟體** | **[下載 MSI · Type build186](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows 軟體** | **[下載 MSI · Type build187](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **韌體：USB 燒寫 / 藍牙 OTA** | **[下載韌體 ZIP · 兩種方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 <!-- listener-local-text-entry -->
@@ -41,7 +41,7 @@
 Type 預設使用 **USB 有線燒寫**，能力已內建；無需另裝 Python、ESP-IDF 或其他燒寫軟體。
 裝置設定各自獨立：選擇一台有線／藍牙裝置並讀取；完成編輯後自動儲存明確修改，讀取或切換裝置不會寫入電腦預設值。名稱、燈光、電源、按鍵與旋鈕設定儲存在所選裝置。請配套使用本頁 MSI 與韌體 ZIP。
 
-Type build186：空錄音檔案不再誤報成超時長，換選有效檔案後可繼續；保留精簡、可調整大小的提問窗及關閉、設定、語言修復。日常聽寫和韌體37沿用。
+Type build187：問答的共用開始入口在收音前同時檢查辨識和回答設定，與按鈕判斷一致；缺回答設定會立即提示。保留精簡可調提問窗、檔案入口修復，日常聽寫和韌體37沿用。
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 

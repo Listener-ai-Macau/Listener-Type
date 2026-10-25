@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-25T14:46:17.442040+08:00",
+  "updated_at": "2026-10-25T15:36:25.921863+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -8191,6 +8191,42 @@
       "machine_accepted_scope": [
         "Exact186 native zero-byte vs oversize file-input classification, valid reselection enables retry, previous185 corrupt-format rejection retained. Five-locale frontend empty/oversize/read/sample-failure distinctions. One independent customer actual included-file ASR and Copy, no microphone/hardware/real-time/whole-product qualification."
       ]
+    },
+    {
+      "id": "qa_start_requires_both_service_setups_before_capture",
+      "subject": "Common QA admission must agree with the disabled Start button and reject missing answering service before reading selection or opening capture",
+      "state": "exact187_native_synthetic_speech_only_admission_error_and_close_passed_voice_global_unknown",
+      "protects": [
+        "All QA starts reuse the same qa_get_service_status as the UI, including configured answer provider",
+        "Missing speech or answers rejects before capture_selection/Recorder/openASR; new answer code uses existing localized setup help",
+        "Existing system-vault refresh retained; presence remains separate from credentials/network/quota health",
+        "Only new starts check setup; active Recording stop dispatch and existing error/close lifecycle retained"
+      ],
+      "guards": [
+        "Repository qa_start_requires_both_services_shown_by_the_ui plus actual function pre-capture extracted four-combination harness; fake status/no hardware",
+        "check187_qa_setup_native.py --root <exact187 keyless private station>: synthetic ASR fields, missing answers; never run on186 or daily Type"
+      ],
+      "pending_human_scope": [
+        "Actual physical/global key, microphone speech/selection-to-answer, authentication/quota and long-term behavior remain unqualified by this no-capture setup batch."
+      ],
+      "repo": "type",
+      "commit": "3ebfb66c4ea1ddd55f819a94395b543b58574d7d",
+      "commit_subject": "Require both QA services before any recording entry captures audio",
+      "humanAccepted": false,
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build187\\source-audit.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build186\\qa-admission186-source-counterexample.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build186\\qa187-admission-source-check.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE186-presale-20261025\\customer-experience.md",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE186-presale-20261025\\return-use.md",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-FIRST_USE186-aftersale-audio-file-20261025\\customer-experience.md",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native187-snapshot-20261025-153305\\qa187-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261025-build187\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261025-build187\\type187-installed.json"
+      ],
+      "machine_accepted_scope": [
+        "Exact187 native common QA start with synthetic ASR presence/missing answer setup rejects with localized Chinese answer-setup error before capture; disabled Start and ordinary Close from error state pass; four actual-source admission combinations and retained OS-vault refresh compile/run. No speech, physical/global key, authentication or quota qualification."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -9370,7 +9406,8 @@
         "qa_followup_selection_and_honest_saved_answer_history",
         "qa_ota_admission_and_canonical_shortcut_label",
         "qa_windows_native_visibility_and_readiness_locale_setup",
-        "qa_compact_resizable_window_keeps_actions_visible"
+        "qa_compact_resizable_window_keeps_actions_visible",
+        "qa_start_requires_both_service_setups_before_capture"
       ],
       "paths": {
         "type": [
