@@ -6492,3 +6492,75 @@ fn translation_unknown_new_fields_cannot_reset_existing_provider_preferences() {
         assert!(read.translation_source_language.is_empty());
     }
 }
+
+// Explicit acceptance probe only: the private runner supplies a non-private
+// fixed PCM fixture and disposable copies of the already-authorized services.
+// This deliberately bypasses Recorder/selection capture, so it cannot qualify
+// a microphone, global shortcut, selected external text or native UI rendering.
+#[tokio::test]
+#[ignore = "Requires explicit private-profile existing-service QA acceptance opt-in"]
+async fn qa_saved_pcm_existing_services_answer_and_history() {
+    assert_eq!(std::env::var("LISTENER_TYPE_QA_EXISTING_SERVICES_OPT_IN").as_deref(), Ok("1"));
+    let root = PathBuf::from(std::env::var("LISTENER_TYPE_DATA_DIR").unwrap());
+    assert!(root.to_string_lossy().contains("accept131-rust-"));
+    assert!(std::env::var("LISTENER_TYPE_CREDENTIAL_NAMESPACE").is_ok());
+    let pcm = std::fs::read(std::env::var("LISTENER_TYPE_QA_FIXED_PCM").unwrap()).unwrap();
+    assert!((32_000..=256_000).contains(&pcm.len()) && pcm.len() % 2 == 0);
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let mut prefs = inner.prefs.get();
+    prefs.qa_save_history = true;
+    prefs.llm_thinking_enabled = false;
+    prefs.working_languages = vec!["en".into()];
+    prefs.output_language_preference = OutputLanguagePreference::En;
+    inner.prefs.set(prefs).unwrap();
+    assert!(inner.history.list().unwrap().is_empty());
+    ensure_qa_service_setup().unwrap();
+    assert_eq!(CredentialsVault::get_active_llm(), "deepseek");
+    let asr = Arc::new(VolcengineStreamingASR::new(read_volc_credentials(), Vec::new()));
+    let owner = new_session_id();
+    {
+        let mut state = inner.qa_state.lock();
+        state.session_id = owner;
+        state.phase = QaPhase::Recording;
+        state.panel_visible = true;
+        state.selection = Some(crate::selection::SelectionContext {
+            text: "Arithmetic exercise. Use decimal digits.".into(),
+            source_app: Some("Explicit synthetic context; not captured selection".into()),
+        });
+    }
+    *inner.qa_asr.lock() = Some(SessionResource::new(owner, Arc::clone(&asr)));
+    let started = Instant::now();
+    let run = tokio::time::timeout(std::time::Duration::from_secs(90), async {
+        asr.open_session().await.map_err(|error| error.to_string())?;
+        for chunk in pcm.chunks(3200) {
+            crate::asr::AudioConsumer::consume_pcm_chunk(asr.as_ref(), chunk);
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        end_qa_session(inner).await
+    }).await;
+    asr.cancel();
+    assert!(run.is_ok(), "bounded existing-service QA probe timed out");
+    assert!(run.unwrap().is_ok(), "existing-service QA returned an error");
+    let rows = inner.history.list().unwrap();
+    assert_eq!(rows.len(), 1, "one successful question must produce one enabled history row");
+    let row = &rows[0];
+    let question = row.raw_transcript.to_lowercase().replace([' ', ',', '.', '?'], "");
+    assert!(["oneplusone", "1plus1", "1+1", "一加一"].iter().any(|text| question.contains(text)), "fixture question was not recognized: {}", row.raw_transcript);
+    assert_eq!(row.final_text.trim().trim_matches(['.', '。', '\n', ' ']), "2");
+    assert_eq!(row.error_code.as_deref(), Some("qaSession"));
+    let state = inner.qa_state.lock();
+    assert_eq!(state.phase, QaPhase::Idle);
+    assert_eq!(state.messages.len(), 2);
+    assert_eq!(state.messages[1].content, row.final_text);
+    assert!(state.messages[0].content.contains("Arithmetic exercise"));
+    assert!(inner.qa_asr.lock().is_none());
+    std::fs::write(root.join("qa-existing-services-result.json"), serde_json::to_vec_pretty(&serde_json::json!({
+        "passed": true, "scope": "Fixed synthetic PCM -> actual existing Volcengine streaming ASR -> production end_qa_session -> existing DeepSeek -> actual private history; no Recorder/selection capture/native UI/global key qualification",
+        "question": row.raw_transcript, "answer": row.final_text,
+        "historyCount": rows.len(), "messagesMatchSavedAnswer": true,
+        "syntheticContextIncluded": true, "backendPhase": "Idle",
+        "elapsedMs": started.elapsed().as_millis(), "fixturePcmBytes": pcm.len(),
+        "newServiceOrModel": false
+    })).unwrap()).unwrap();
+}
