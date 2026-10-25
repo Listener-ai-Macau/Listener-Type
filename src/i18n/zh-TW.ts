@@ -438,6 +438,8 @@ export const zhTW: typeof zhCN = {
     firstDictationFocus: "先點擊想輸入文字的位置。",
     firstDictationStart: "按 {{trigger}}，然後開始說話。",
     firstDictationFinish: "再按一次 {{trigger}} 結束，檢查輸入的文字。",
+    firstDictationDeviceStart: "按 Listener 上設為「錄音」的裝置鍵，再開始說話。預設是按下旋鈕。",
+    firstDictationDeviceFinish: "再按一次同一裝置鍵結束，檢查輸入的文字。電腦錄音快捷鍵用於麥克風輸入。",
     firstDictationSetup: "先設定語音辨識",
     firstDictationInput: "麥克風與輸入來源",
     firstDictationCancel: "按 Esc 可取消錄音。",

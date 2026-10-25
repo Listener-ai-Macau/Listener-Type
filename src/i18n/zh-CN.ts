@@ -436,6 +436,8 @@ export const zhCN = {
     firstDictationFocus: "先点击你想输入文字的位置。",
     firstDictationStart: "按 {{trigger}}，然后开始说话。",
     firstDictationFinish: "再按一次 {{trigger}} 结束，检查输入的文字。",
+    firstDictationDeviceStart: "按 Listener 上设置为“录音”的设备键，再开始说话。默认是按下旋钮。",
+    firstDictationDeviceFinish: "再按一次同一设备键结束，检查输入的文字。电脑录音快捷键用于麦克风输入。",
     firstDictationSetup: "先配置语音识别",
     firstDictationInput: "麦克风与输入来源",
     firstDictationCancel: "按 Esc 可取消录音。",

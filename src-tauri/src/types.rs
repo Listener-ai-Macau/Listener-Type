@@ -1352,6 +1352,9 @@ pub struct UserPreferences {
     pub switch_style_hotkey: ShortcutBinding,
     #[serde(default = "default_open_app_hotkey")]
     pub open_app_hotkey: ShortcutBinding,
+    /// Legacy computer-local compatibility data, not current Windows board state.
+    /// The selected-device UI and runtime use UID-bound OnboardKeys profiles.
+    /// Preserve old data; never synchronize it into a board or infer its current keys.
     #[serde(default)]
     pub device_custom_keys: DeviceCustomKeys,
     #[serde(default = "default_disabled_device_custom_keys")]

@@ -485,11 +485,14 @@ export interface UserPreferences {
   switchStyleHotkey: ShortcutBinding;
   /** 打开 Listener Type 主窗口的全局快捷键。 */
   openAppHotkey: ShortcutBinding;
-  /** 设备 KEY1-KEY4 与 EC11 的单击动作映射。固件 fallback 入口为 F13-F16 与 Shift+F13。 */
+  /** @deprecated Legacy computer-local mapping, not the selected board's configuration.
+   * Windows device UI and execution use UID-bound SelectedDeviceSettings.keys.profile.
+   * Do not infer onboard keys from getSettings() or write these fields to a board.
+   */
   deviceCustomKeys: DeviceCustomKeys;
-  /** 设备 KEY1-KEY4 的双击动作映射。固件 fallback 入口为 F17-F20。 */
+  /** @deprecated Legacy computer-local mapping; read the selected board's keys.profile instead. */
   deviceCustomKeyDoubleClicks: DeviceCustomKeys;
-  /** 设备 KEY1-KEY4 的长按动作映射。固件 fallback 入口为 F21-F24。 */
+  /** @deprecated Legacy computer-local mapping; read the selected board's keys.profile instead. */
   deviceCustomKeyLongPresses: DeviceCustomKeys;
   deviceCustomKeysDefaultMigrated: boolean;
   /** EC11 旋钮旋转动作。默认调电脑音量；可切换为屏幕亮度或禁用。 */

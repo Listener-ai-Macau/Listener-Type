@@ -396,6 +396,8 @@ export const ko: typeof zhCN = {
     firstDictationFocus: "글을 입력할 곳을 먼저 클릭하세요.",
     firstDictationStart: "{{trigger}} 키를 누른 뒤 말하세요.",
     firstDictationFinish: "{{trigger}} 키를 다시 눌러 마친 뒤 입력된 글을 확인하세요.",
+    firstDictationDeviceStart: "Listener에서 녹음으로 설정한 장치 키를 누른 뒤 말하세요. 기본 설정에서는 노브를 누릅니다.",
+    firstDictationDeviceFinish: "같은 장치 키를 다시 눌러 마친 뒤 입력된 글을 확인하세요. 컴퓨터 녹음 단축키는 마이크 입력용입니다.",
     firstDictationSetup: "먼저 음성 인식 설정",
     firstDictationInput: "마이크 및 입력 소스",
     firstDictationCancel: "Esc 키로 녹음을 취소합니다.",

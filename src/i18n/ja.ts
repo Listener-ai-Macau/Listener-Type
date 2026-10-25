@@ -396,6 +396,8 @@ export const ja: typeof zhCN = {
     firstDictationFocus: "文字を入力したい欄をクリックします。",
     firstDictationStart: "{{trigger}} を押してから話します。",
     firstDictationFinish: "もう一度 {{trigger}} を押して終了し、入力された文字を確認します。",
+    firstDictationDeviceStart: "Listener で録音に設定したデバイスキーを押してから話します。初期設定ではノブを押します。",
+    firstDictationDeviceFinish: "同じデバイスキーをもう一度押して終了し、入力された文字を確認します。パソコンの録音ショートカットはマイク入力用です。",
     firstDictationSetup: "先に音声認識を設定",
     firstDictationInput: "マイクと入力元",
     firstDictationCancel: "Esc で録音をキャンセルできます。",

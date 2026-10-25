@@ -439,6 +439,8 @@ export const en: typeof zhCN = {
     firstDictationFocus: "Click the text field where you want to write.",
     firstDictationStart: "Press {{trigger}}, then speak.",
     firstDictationFinish: "Press {{trigger}} again to finish, then review the text.",
+    firstDictationDeviceStart: "Press the Listener key configured for dictation, then speak. By default, press the knob.",
+    firstDictationDeviceFinish: "Press the same device key again to finish, then review the text. The computer recording shortcut is for microphone input.",
     firstDictationSetup: "Set up speech recognition first",
     firstDictationInput: "Microphone and input source",
     firstDictationCancel: "Esc cancels the recording.",

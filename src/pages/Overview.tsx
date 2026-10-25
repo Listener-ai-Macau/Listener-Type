@@ -314,8 +314,8 @@ export function Overview({ showFirstUseGuide = true, onDismissOverview, onOpenPr
         </div>
         <ol style={{ margin: '0 0 12px', paddingLeft: 20, fontSize: 12.5, lineHeight: 1.8, color: 'var(--ol-ink-2)' }}>
           <li>{t('overview.firstDictationFocus')}</li>
-          <li>{t('overview.firstDictationStart', { trigger: prefs ? formatComboLabel(prefs.dictationHotkey) : t('common.loading') })}</li>
-          <li>{t('overview.firstDictationFinish', { trigger: prefs ? formatComboLabel(prefs.dictationHotkey) : t('common.loading') })}</li>
+          <li>{!prefs ? t('common.loading') : t((prefs.dictationInputSource ?? 'embeddedBle') === 'embeddedBle' ? 'overview.firstDictationDeviceStart' : 'overview.firstDictationStart', { trigger: formatComboLabel(prefs.dictationHotkey) })}</li>
+          <li>{!prefs ? t('common.loading') : t((prefs.dictationInputSource ?? 'embeddedBle') === 'embeddedBle' ? 'overview.firstDictationDeviceFinish' : 'overview.firstDictationFinish', { trigger: formatComboLabel(prefs.dictationHotkey) })}</li>
         </ol>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           {!credsError && !creds.asrConfigured && onOpenProvidersSettings && (
