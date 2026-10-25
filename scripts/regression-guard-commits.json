@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-25T08:51:03.790030+08:00",
+  "updated_at": "2026-10-25T09:09:17.106718+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -7991,6 +7991,37 @@
         "Remote marketplace service/auth not configured",
         "Actual globals/physical and optional-model conditions retain their original scope"
       ]
+    },
+    {
+      "id": "audio_file_chooser_cancel_preserves_selected_recording",
+      "subject": "File chooser cancellation belongs to file input and must not discard the selected recording workspace",
+      "state": "exact179_actual_native_cancel_sample_preserved_escape_close_reopen_passed",
+      "protects": [
+        "Actual Windows file Cancel preserves the open workspace, exact selected sample text and usable chooser; real bubbling INPUT event observed",
+        "Actual private WebView Escape still closes the recording workspace",
+        "Ordinary tool can reopen after Escape with a fresh empty selection"
+      ],
+      "guards": [
+        "python scripts/check-audio-file-cancel-ui.py --url <isolated-vite-url> --report <output-json>"
+      ],
+      "pending_human_scope": [
+        "No live dictation, global shortcut, physical controls, translation quality or complete original22 acceptance is established by this file-dialog fix."
+      ],
+      "repo": "type",
+      "commit": "adabc2c89ec9301806b63cdfeab2692c2745d23c",
+      "commit_subject": "Preserve the recording workspace when a file chooser is cancelled",
+      "humanAccepted": false,
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build179\\audio-cancel-react.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native178-snapshot-20261025-085722\\audio-cancel-root-cause178.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native179-snapshot-20261025-090738\\file-picker-cancel-controls.json",
+        "work\\customer-onboarding-20261020\\isolated-native179-snapshot-20261025-090738\\audio-cancel-native179.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261025-build179\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261025-build179\\type179-installed.json"
+      ],
+      "machine_accepted_scope": [
+        "The actual178 file-cancel counterexample, repeated only on exact fixed179.\n\nOwn private Windows dialog buttons and private WebView input only. No ASR,\nglobal input, Owner focus/clipboard, device or model operation.\n"
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -8789,7 +8820,8 @@
         "saved_draft_copy_shared_idempotent_save_retains_original",
         "saved_message_variants_explicit_local_key_practice",
         "text_workspace_explicit_task_and_confirmed_source_hint",
-        "translation_workspace_result_visibility_and_direct_local_entry"
+        "translation_workspace_result_visibility_and_direct_local_entry",
+        "audio_file_chooser_cancel_preserves_selected_recording"
       ],
       "paths": {
         "type": [
@@ -8887,7 +8919,8 @@
           "src/i18n/savedDraftCopy.ts",
           "src/i18n/index.ts",
           "scripts/check-saved-message-reuse-ui.py",
-          "src/i18n/textWorkspace.ts"
+          "src/i18n/textWorkspace.ts",
+          "scripts/check-audio-file-cancel-ui.py"
         ]
       },
       "known_failures": [

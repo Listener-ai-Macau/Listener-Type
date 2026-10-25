@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-25T01:52:01.812434+08:00",
+  "updatedAt": "2026-10-25T09:09:17.106718+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 178,
-    "source": "98cdb6cc969401aac715a5f334ffd9281b5cf31b",
-    "sourceTag": "build-source/type178-20261025",
+    "build": 179,
+    "source": "adabc2c89ec9301806b63cdfeab2692c2745d23c",
+    "sourceTag": "build-source/type179-20261025",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "3b557756de051ee01b13804833fd4dc86f1ad60546d1d7e73849666a2bfac6ca",
+    "sha256": "2148767f124a202f313fdd60d0da2cf9ac9b45b86a66a6bbd8e9ab5eaa509e64",
     "sizeBytes": 299360256,
-    "exeSha256": "53f703d92f434b8cbffb1ac6d9ecf971d2a943d175f2fe27c46145bc2cc6829e",
+    "exeSha256": "d6df9eee5bc90117c8e4694891ea96a6fd57ffba8cce6deb435fef2068384888",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -479,7 +479,9 @@
     "diagnosticStreamWindowsTests178": 4,
     "diagnosticFirmwareActualEventBytes178": 6144,
     "diagnosticConcurrentNativeReplies178": 20,
-    "diagnosticOriginalStoresPreserved178": true
+    "diagnosticOriginalStoresPreserved178": true,
+    "audioFileChooserCancelPreservesSelectionActualNative": true,
+    "audioFileDialogOwnEscapeAndReopenActualNative": true
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -497,6 +499,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build178-20261025"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build179-20261025"
   }
 }

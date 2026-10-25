@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build178 / Firmware37
+# Listener v1.0.6-rc1 · Type build179 / Firmware37
 
 | Download | File |
 | --- | --- |
@@ -7,25 +7,23 @@
 
 ## In this app update
 
-Diagnostic exports run device/file work on a worker and retain exclusive ownership while the work is active, including when a caller leaves. Repeated export requests share one operation and feedback across About navigation. The firmware's existing OTA readiness notification is recognized separately from real diagnostic log chunks; it no longer gets parsed as20,292 events. Unknown or corrupt chunks still fail their original validation and readiness does not renew the receive deadline.
+Cancelling the Windows file chooser in **Tools → More tools → Transcribe recorded audio** keeps the recording workspace and its current selection open. Closing the workspace itself still works. The file-input cancellation was previously mistaken for a dialog close; exact native before/after evidence now covers this case. Previous diagnostic export privacy, responsiveness and firmware-log fixes remain included.
 
-The first177 candidate produced a valid ZIP but could not read firmware events. That failure is retained. The corrected installed178 received6,144 bytes of real firmware events with valid ZIP CRC;20 native status replies returned while export was pending. Audio readiness and all four existing state stores were preserved. The private test archive was deleted without playing, transcribing or publishing retained audio.177 worker/UI proofs and176 archive filtering tests are reused for their unchanged scopes; four new actual Windows receiver tests passed. The OS Save dialog and full About-to-save flow remain separately unverified.
-
-Original local logs, explicit raw-log export and declared retained debug-WAV policy are unchanged. Recording, recognition, providers, models and Firmware37 are unchanged. This is a diagnostic reliability fix, not a Bluetooth throughput or background-speech separation claim.
+This maintenance fix does not change live recognition, wake/ending, Bluetooth transport, firmware, cloud credentials or models. It does not upload audio when selecting or cancelling a file.
 
 ## Before using
 
-US$49 is the hardware price. Type is free and open source. Cloud recognition and optional cloud text services require preparation and separate usage charges; this release does not provide a ready-to-use official account or allowance. Optional Windows Chinese ↔ English local text translation needs a one-time component download and has no translation API fee; it does not configure speech recognition. USB flashing and Bluetooth OTA use the same firmware ZIP.
+US$49 is the hardware price. Type is free and open source. Recognition and optional text services require preparation and separate usage charges; this release does not provide a ready-to-use official cloud account or allowance. USB flashing and Bluetooth OTA use the same firmware ZIP. Optional local translation components are prepared separately; their general translation quality is not guaranteed by this file-picker fix.
 
-Strong background-speech separation, some real OS/global-key/physical paths and long-term qualification remain incomplete. Scoped software/native checks do not prove every customer-facing function or a real order.
+RC1 is a prerelease. Strong background-speech separation and some physical/global-key, optional-resource and long-term acceptance scopes remain incomplete. The scoped software checks do not establish complete hardware reliability, purchase intent or a real order.
 
 ## File identity
 
-- Type source: `98cdb6cc969401aac715a5f334ffd9281b5cf31b` · `build-source/type178-20261025`
-- MSI: 299360256 bytes · SHA256 `3b557756de051ee01b13804833fd4dc86f1ad60546d1d7e73849666a2bfac6ca`
+- Type source: `adabc2c89ec9301806b63cdfeab2692c2745d23c` · `build-source/type179-20261025`
+- MSI: 299360256 bytes · SHA256 `2148767f124a202f313fdd60d0da2cf9ac9b45b86a66a6bbd8e9ab5eaa509e64`
 - Firmware37 source: `87ea79ec3d6e34a95d09b73e2a5848207a919f1c` · runtime `9d7fbbe67ed0223d`
-- ZIP:1956799 bytes · SHA256 `fea25f0bf8f0d20edbb1e0ac326a5f026a0145915384372bde5f58d29b528b84`
+- ZIP: 1956799 bytes · SHA256 `fea25f0bf8f0d20edbb1e0ac326a5f026a0145915384372bde5f58d29b528b84`
 
 ## 中文说明
 
-修复诊断导出可靠性：文件／设备任务移出界面调度，重复请求与跨页共用一次操作，固件就绪消息不再误作日志头。实际安装版已收到固件事件，导出时后台状态仍响应。录音、提供商、模型与固件37不变。 177候选的固件读取失败已保留；178实际导出收到6144字节固件事件，ZIP校验通过，并行原生请求正常返回，原配置／历史／凭据保持。仅清除测试新副本，未播放或发布录音。系统保存窗口、部分全局／实体与长期范围继续保留未完成，不宣称整机全功能合格。
+修复“工具→更多工具→转写已有录音”取消系统文件选择框时把整个录音工作区一起关闭、丢失已选录音的问题。取消选文件会保留原选择；正常关闭工作区仍然有效。已用实际 Windows 文件框和同一原始失败条件核对；不改日常识别、唤醒／结束、蓝牙协议、固件、账号或模型。共享验收弹窗的点击输入修复属于本机工程工具，不是 MSI 新功能。固件继续复用37，无需因本次文件框修复重新刷固件。
