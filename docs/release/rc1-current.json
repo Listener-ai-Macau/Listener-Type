@@ -1,6 +1,6 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-25T17:06:31.135265+08:00",
+  "updatedAt": "2026-10-25T18:00:57.919114+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
@@ -504,7 +504,9 @@
     "qaLazyMainCreationQualifiedScope": "Exact188 private first Providers via ordinary QA link; no Owner or physical trigger qualification",
     "mainWindowColdCreationNativePass": true,
     "mainWindowExistingNativeHwndRestorePass": true,
-    "mainNavigationAsyncDeliverySourcePass": true
+    "mainNavigationAsyncDeliverySourcePass": true,
+    "actualNativeFilePickerToWiredFlashComplete": true,
+    "actualNativeWiredFlashQualificationScope": "ExactType188/Firmware37 one known COM16 board; actual OS picker, normal UI button/progress/result,4MD5/reset, retained core/keys, daily ready; no full RF or other-board inference"
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",

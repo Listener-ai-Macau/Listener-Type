@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-25T17:30:16.853541+08:00",
+  "updated_at": "2026-10-25T18:00:57.919114+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -8290,6 +8290,37 @@
       "pending_human_scope": [
         "Actual microphone/permission, external selection capture, native window rendering, physical/global keys and long-term/error conditions remain unqualified."
       ]
+    },
+    {
+      "id": "wired_firmware188_actual_ui_zip_to_verify_and_recovery",
+      "repo": "type",
+      "commit": "2cea7c327fdf995d204347f6950d87d077ad8f36",
+      "commit_subject": "Create deferred main windows outside UI callbacks and retain navigation until ready",
+      "subject": "Ordinary firmware ZIP picker and wired UI must reach builtin verified flash and preserve exact board settings",
+      "state": "exact188_publicFW37_actual_OS_picker_default_wired_COM16_UI_start_4MD5_reset_result_and_readback_passed",
+      "humanAccepted": false,
+      "protects": [
+        "Default wired mode, actual shared public ZIP and auto ESP32 COM16 choice must agree with visible enabled Start action",
+        "Native ROM write verifies all4segments before reset and UI completion; no customer ESP-IDF/Python/esptool dependency",
+        "Same-board NVS core settings and full key profile/revision survive flash; daily Type remains open and ready/subscribed afterward"
+      ],
+      "guards": [
+        "accept188_wired_ui_native.py prepare/flash on exact188 keyless private station and known USB UID; only final idle-checked ordinary button triggers flash",
+        "Existing wired firmware source guards and actual149/FW37 backend/persistence evidence remain valid; no unrelated repeat OTA"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261025-build188\\wired188-ui-acceptance.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native188-snapshot-20261025-174441\\wired188-ui-prepare.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native188-snapshot-20261025-174441\\wired188-ui-flash.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native188-snapshot-20261025-174441\\wired188-daily-recovery.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native188-snapshot-20261025-174441\\setup-result.json"
+      ],
+      "machine_accepted_scope": [
+        "Same public unchanged Firmware37 ZIP: actual OS Open chooser -> exact188 private ordinary UI default wired/autoselected COM16 -> visible Start flash -> builtin native write/4MD5 verifications -> explicit reset -> visible completion -> same board/settings/key revision readback -> daily ready/subscribed. One board, no full RF/throughput/global speech qualification."
+      ],
+      "pending_human_scope": [
+        "Other boards/crossPC, visual lights, real voice/global trigger and full RF/throughput remain outside this one-board USB UI validation."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-23T16:30:00.015187+08:00",
@@ -8839,7 +8870,8 @@
       "baseline_state": "installed52c2_source_backend_full_flash_pass_board_usb_only_power_unresolved",
       "accepted_scope": "Current COM17 actual product backend writes FW22 at921600 in16.641s, explicitly compares4 MD5 values and resets. Final MSI installed and hash-matched, main/helper restored, installed read-only package check passes. Candidate raw executable hash differs from final bundle metadata; source09d8558 same, final exact binary not reflashed due uncertain supply. User clarified no battery; brownout9/USB error observed after write, later power_on1/crash0/>100s uptime. ADC2.866V is not an actual battery reading. Not all-board validation, not proof hardware supply is fixed, not a uniquely established RAM-stub internal cause.",
       "guard_entries": [
-        "wired_native_s3_rom_default_and_explicit_segment_verification"
+        "wired_native_s3_rom_default_and_explicit_segment_verification",
+        "wired_firmware188_actual_ui_zip_to_verify_and_recovery"
       ],
       "paths": {
         "type": [
