@@ -102,7 +102,12 @@ export function AudioFileTrial({ onClose }: { onClose: () => void }) {
     catch { if (version === generation.current) setError(t('audioFile.copyFailed')); }
     finally { copyBusy.current = false; if (version === generation.current) setCopying(false); }
   };
-  return <><dialog ref={dialog} className="ol-style-trial" aria-labelledby="audio-file-title" onCancel={event => { event.preventDefault(); close(); }}>
+  return <><dialog ref={dialog} className="ol-style-trial" aria-labelledby="audio-file-title" onCancel={event => {
+    // A file chooser also emits a bubbling `cancel` when no file is selected.
+    // Only the dialog's own cancel action should discard this workspace.
+    if (event.target !== event.currentTarget) return;
+    event.preventDefault(); close();
+  }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
       <h2 id="audio-file-title" style={{ margin: 0, fontSize: 20 }}>{t('audioFile.title')}</h2>
       <Btn variant="ghost" disabled={copying || saving || loading} onClick={close}>{t('audioFile.close')}</Btn>
