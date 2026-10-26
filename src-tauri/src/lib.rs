@@ -3203,11 +3203,6 @@ fn wait_for_app_activation<R: Runtime>(app: &AppHandle<R>) {
 #[cfg(not(target_os = "macos"))]
 fn wait_for_app_activation<R: Runtime>(_app: &AppHandle<R>) {}
 
-/// Compact initial size in logical pixels, matching tauri.conf.json. The
-/// question/setup content scrolls independently of the fixed action controls.
-const QA_WINDOW_WIDTH: f64 = 300.0;
-const QA_WINDOW_HEIGHT: f64 = 176.0;
-
 /// Share the recording capsule's current location, including a user-moved
 /// capsule or a secondary monitor. Grow upward from the visible pill's bottom.
 fn position_qa_window<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> tauri::Result<()> {
@@ -3237,10 +3232,9 @@ fn position_qa_window<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> ta
             PhysicalRect { x, y, width: (bounds.width * scale).round() as u32,
                 height: (bounds.height * scale).round() as u32 }
         });
-    // Move the hidden window onto the target monitor before sizing in logical
-    // pixels, so a different monitor's DPI cannot determine the card size.
+    // Initial logical size comes from tauri.conf.json. Reopening follows the
+    // capsule, but must preserve a size the user chose while reading an answer.
     window.set_position(PhysicalPosition::new(anchor.x, anchor.y))?;
-    window.set_size(tauri::LogicalSize::new(QA_WINDOW_WIDTH, QA_WINDOW_HEIGHT))?;
     let question = window.outer_size()?;
     let (x, y) = anchored_question_origin(
         PhysicalRect { x: origin.x, y: origin.y, width: size.width, height: size.height },
