@@ -35,22 +35,33 @@ with sync_playwright() as pw:
    chooser=d.get_by_label('Choose a saved draft',exact=True);original_id=chooser.input_value()
    d.get_by_role('button',name='Edit a copy',exact=True).click()
    editor=d.get_by_role('textbox',name='Draft copy text',exact=True);expect(editor).to_have_value(edited)
+   copy_name=d.get_by_label('New draft name',exact=True);default_copy_name=copy_name.input_value();assert default_copy_name.startswith('Copy of ')
+   # Opening the editor alone does not create an unsaved edit. A name-only
+   # change does, even while the body is still the exact saved original.
+   d.get_by_role('button',name='Back to saved drafts',exact=True).click();expect(editor).to_have_count(0)
+   d.get_by_role('button',name='Edit a copy',exact=True).click();copy_name.fill(' ');expect(d.get_by_role('button',name='Save as new draft',exact=True)).to_be_disabled();expect(d.get_by_role('alert')).to_contain_text('1–80')
+   desired_copy_name='Reviewed reply — 15–17 😀';copy_name.fill(desired_copy_name)
+   d.get_by_role('button',name='Close',exact=True).click();expect(d.get_by_role('alert')).to_contain_text('unsaved changes');d.get_by_role('button',name='Cancel',exact=True).click();expect(copy_name).to_have_value(desired_copy_name);expect(editor).to_have_value(edited)
+   checks.append('copy editor starts with a bounded copy name, accepts a chosen name before save, rejects blank names and protects name-only edits on close')
    revision=edited+'\nA new reusable version.';editor.fill(revision)
    expect(chooser).to_be_disabled()
    d.get_by_role('button',name='Back to saved drafts',exact=True).click();expect(d.get_by_role('alert')).to_contain_text('unsaved changes');d.get_by_role('button',name='Cancel',exact=True).click();expect(editor).to_have_value(revision)
    d.get_by_role('button',name='Close',exact=True).click();expect(d.get_by_role('alert')).to_contain_text('unsaved changes');d.get_by_role('button',name='Cancel',exact=True).click();expect(editor).to_have_value(revision)
    checks.append('edit-copy owns a snapshot; selection cannot switch it and cancelling either leave/discard path retains unsaved text')
    page.evaluate('window.__delaySave=false;window.__firstUncertain=true')
-   d.get_by_role('button',name='Save as new draft',exact=True).click();expect(d.get_by_role('alert')).to_contain_text('Could not save');expect(editor).to_have_value(revision)
-   page.evaluate('window.__delaySave=true');d.get_by_role('button',name='Save as new draft',exact=True).click();expect(editor).to_be_disabled();expect(d.get_by_role('button',name='Close',exact=True)).to_be_disabled();expect(d.get_by_role('button',name='Back to saved drafts',exact=True)).to_be_disabled();d.press('Escape');expect(d).to_be_visible();page.evaluate('window.__finishSave()')
+   d.get_by_role('button',name='Save as new draft',exact=True).click();expect(d.get_by_role('alert')).to_contain_text('Could not save');expect(editor).to_have_value(revision);expect(copy_name).to_have_value(desired_copy_name)
+   page.evaluate('window.__delaySave=true');d.get_by_role('button',name='Save as new draft',exact=True).click();expect(editor).to_be_disabled();expect(copy_name).to_be_disabled();expect(d.get_by_role('button',name='Close',exact=True)).to_be_disabled();expect(d.get_by_role('button',name='Back to saved drafts',exact=True)).to_be_disabled();d.press('Escape');expect(d).to_be_visible();page.evaluate('window.__finishSave()')
    expect(d.get_by_role('button',name='New draft saved',exact=True)).to_be_disabled()
    saves=[x for x in page.evaluate('window.__draftCalls') if x['cmd']=='save_text_draft'];assert len(saves)==4 and saves[2]['args']['id']==saves[3]['args']['id'] and saves[2]['args']['id']!=original_id
-   assert saves[2]['args']['original']==original and saves[2]['args']['text']==revision
+   assert saves[2]['args']['original']==original and saves[2]['args']['text']==revision and saves[2]['args']['name']==desired_copy_name
    checks.append('copy uncertain-write retry shares one request id and locks mutation/close until acknowledgement, creating one new record with the retained source')
    editor.fill(revision+' Unsaved change.');d.get_by_role('button',name='Back to saved drafts',exact=True).click();expect(d.get_by_role('alert')).to_contain_text('unsaved changes');d.get_by_role('button',name='Cancel',exact=True).click();editor.fill(revision)
    expect(d.get_by_role('button',name='New draft saved',exact=True)).to_be_disabled()
+   copy_name.fill(desired_copy_name+' later');d.get_by_role('button',name='Back to saved drafts',exact=True).click();expect(d.get_by_role('alert')).to_contain_text('unsaved changes');d.get_by_role('button',name='Cancel',exact=True).click();copy_name.fill(desired_copy_name)
+   expect(d.get_by_role('button',name='New draft saved',exact=True)).to_be_disabled()
    d.get_by_role('button',name='Back to saved drafts',exact=True).click();expect(chooser.locator('option')).to_have_count(2);copy_id=chooser.input_value();assert copy_id!=original_id
    expect(d.get_by_role('textbox',name='Saved text',exact=True)).to_have_value(revision)
+   expect(d.get_by_label('Draft name',exact=True)).to_have_value(desired_copy_name);expect(chooser.locator('option:checked')).to_contain_text(desired_copy_name)
    chooser.select_option(original_id);expect(d.get_by_role('textbox',name='Saved text',exact=True)).to_have_value(edited);expect(d.locator('pre')).to_have_text(original)
    checks.append('new copy is selected after save; original result and attached source remain exact and separately selectable')
    d.get_by_role('button',name='Edit a copy',exact=True).click();editor.fill('Discard this unsaved copy.');d.get_by_role('button',name='Back to saved drafts',exact=True).click();d.get_by_role('button',name='Discard changes',exact=True).click();expect(d.get_by_role('textbox',name='Saved text',exact=True)).to_have_value(edited);expect(chooser.locator('option')).to_have_count(2)

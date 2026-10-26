@@ -16,7 +16,7 @@ export function SavedTextDraftsDialog({onClose,initialDraftId,onUnavailable}:{on
   const [items,setItems]=useState<SavedTextDraft[]>([]),[selectedId,setSelected]=useState(requestedId??'');
   const [missingRequested,setMissingRequested]=useState(false);
   const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[loadError,setLoadError]=useState(false),[error,setError]=useState(''),[copied,setCopied]=useState(''),[confirm,setConfirm]=useState(false);
-  const [editing,setEditing]=useState<SavedTextDraft|null>(null),[editText,setEditText]=useState(''),[editSaved,setEditSaved]=useState<string|null>(null);
+  const [editing,setEditing]=useState<SavedTextDraft|null>(null),[editText,setEditText]=useState(''),[editName,setEditName]=useState(''),[editBaseline,setEditBaseline]=useState('');
   const [leaveTarget,setLeaveTarget]=useState<'dialog'|'editor'|null>(null);
   const [keyPhrase,setKeyPhrase]=useState<string|null>(null);
   const [nameEdit,setNameEdit]=useState(''),[nameError,setNameError]=useState(''),[namedId,setNamedId]=useState('');
@@ -54,8 +54,8 @@ export function SavedTextDraftsDialog({onClose,initialDraftId,onUnavailable}:{on
       }
     }finally{running.current=false;if(alive.current)setBusy(false);}
   };
-  const finishLeave=(target:'dialog'|'editor')=>{setLeaveTarget(null);if(target==='dialog')onClose();else{setEditing(null);setEditText('');setEditSaved(null);}};
-  const requestLeave=(target:'dialog'|'editor')=>{if(running.current||busy)return;if(nameDirty||(editing&&editText!==editing.text&&editText!==editSaved))setLeaveTarget(target);else finishLeave(target);};
+  const finishLeave=(target:'dialog'|'editor')=>{setLeaveTarget(null);if(target==='dialog')onClose();else{setEditing(null);setEditText('');setEditName('');setEditBaseline('');}};
+  const requestLeave=(target:'dialog'|'editor')=>{if(running.current||busy)return;if(nameDirty||(editing&&JSON.stringify([editName.trim(),editText])!==editBaseline))setLeaveTarget(target);else finishLeave(target);};
   const close=()=>requestLeave('dialog');
   return <><dialog ref={dialog} className="ol-device-layout-dialog ol-thinscroll" aria-labelledby="saved-text-drafts-title" onCancel={e=>{e.preventDefault();close();}}>
     <div className="ol-device-layout-heading"><h2 id="saved-text-drafts-title">{t('textDraft.title')}</h2><Btn size="sm" variant="ghost" disabled={busy} onClick={close}>{t('common.close')}</Btn></div>
@@ -66,9 +66,9 @@ export function SavedTextDraftsDialog({onClose,initialDraftId,onUnavailable}:{on
         {missingRequested&&<option value="" disabled>{t('textDraft.choose')}</option>}
         {choices.map(d=><option key={d.id} value={d.id}>{d.label}</option>)}
       </select></label>
-      {editing?<SavedTextDraftCopyEditor record={editing} text={editText} disabled={!!leaveTarget}
-        onTextChange={setEditText} onBusy={setBusy}
-        onCreated={record=>{setItems(current=>[record,...current.filter(d=>d.id!==record.id)]);setSelected(record.id);setEditSaved(record.text);}}
+      {editing?<SavedTextDraftCopyEditor record={editing} name={editName} text={editText} disabled={!!leaveTarget}
+        onNameChange={setEditName} onTextChange={setEditText} onBusy={setBusy}
+        onCreated={record=>{setItems(current=>[record,...current.filter(d=>d.id!==record.id)]);setSelected(record.id);setEditBaseline(JSON.stringify([record.name,record.text]));}}
         onBack={()=>requestLeave('editor')}/>:selected&&<section aria-label={t('textDraft.selected')}>
         <div style={{marginTop:14}} data-saved-draft-name>
           <label>{t('textDraft.nameLabel')}<input type="text" aria-label={t('textDraft.nameLabel')} value={nameEdit} maxLength={80}
@@ -86,7 +86,7 @@ export function SavedTextDraftsDialog({onClose,initialDraftId,onUnavailable}:{on
         <textarea readOnly aria-label={t('textDraft.selected')} value={selected.text} rows={9} style={{width:'100%',lineHeight:1.6,resize:'vertical',marginTop:14}}/>
         <details style={{margin:'14px 0'}}><summary>{t('textDraft.original')}</summary><pre className="ol-saved-phrase-text">{selected.original}</pre></details>
         <div style={{display:'flex',gap:10,flexWrap:'wrap'}}><Btn size="sm" disabled={busy} onClick={()=>void copy()}>{t(busy?'textDraft.working':copied===selected.id?'textDraft.copied':'textDraft.copy')}</Btn>
-          <Btn size="sm" variant="ghost" disabled={busy||nameDirty} onClick={()=>{setEditing({...selected});setEditText(selected.text);setEditSaved(null);setConfirm(false);setCopied('');setError('');}}>{t('textDraft.editCopy')}</Btn>
+          <Btn size="sm" variant="ghost" disabled={busy||nameDirty} onClick={()=>{const name=Array.from(t('textDraft.copyName',{name:selected.name})).slice(0,80).join('').trim();setEditing({...selected});setEditText(selected.text);setEditName(name);setEditBaseline(JSON.stringify([name,selected.text]));setConfirm(false);setCopied('');setError('');}}>{t('textDraft.editCopy')}</Btn>
           <Btn size="sm" variant="ghost" disabled={busy||nameDirty||!selected.text.trim()||selected.text.length>2000} onClick={()=>setKeyPhrase(selected.text)}>{t('keyPhrase.open')}</Btn>
           <Btn size="sm" variant="ghost" disabled={busy||nameDirty} onClick={()=>setConfirm(true)}>{t('textDraft.delete')}</Btn></div>
         {selected.text.length>2000&&<p className="ol-device-layout-hint">{t('keyPhrase.tooLong')}</p>}
