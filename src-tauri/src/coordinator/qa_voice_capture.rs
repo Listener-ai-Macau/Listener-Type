@@ -92,7 +92,9 @@ pub(super) fn handoff_answer(inner: &Arc<Inner>, owner: SessionId, question: Str
 
 pub(super) async fn record_edge(inner: &Arc<Inner>) -> Result<(), String> {
     let (phase, owner) = {
-        let qa = inner.qa_state.lock(); (qa.phase, qa.capture_owner)
+        let qa = inner.qa_state.lock();
+        if !qa.panel_visible { return Err("qa_panel_closed".into()); }
+        (qa.phase, qa.capture_owner)
     };
     match (phase, owner) {
         (QaPhase::Recording, Some(owner)) => {

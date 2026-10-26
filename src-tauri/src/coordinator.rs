@@ -1905,17 +1905,19 @@ impl Coordinator {
     }
 
     pub async fn qa_window_record(&self) -> Result<(), String> {
-        if self.inner.qa_state.lock().input_source == qa::QaInputSource::Listener {
+        if self.inner.embedded_ble_ota_active.load(Ordering::SeqCst) {
+            return Err("qa_ota_busy".into());
+        }
+        let source = {
+            let qa = self.inner.qa_state.lock();
+            if !qa.panel_visible { return Err("qa_panel_closed".into()); }
+            qa.input_source
+        };
+        if source == qa::QaInputSource::Listener {
             return qa_voice_capture::record_edge(&self.inner).await;
         }
         if self.inner.state.lock().phase != SessionPhase::Idle {
             return Err("qa_dictation_busy".into());
-        }
-        if self.inner.embedded_ble_ota_active.load(Ordering::SeqCst) {
-            return Err("qa_ota_busy".into());
-        }
-        if !self.inner.qa_state.lock().panel_visible {
-            return Err("qa_panel_closed".into());
         }
         qa::handle_qa_option_edge(&self.inner).await;
         Ok(())
