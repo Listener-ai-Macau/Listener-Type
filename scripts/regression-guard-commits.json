@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-26T12:04:45.239674+08:00",
+  "updated_at": "2026-10-26T13:08:10.439994+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -8495,6 +8495,45 @@
         "External selected context and actual global-trigger combinations, long-term/noisy microphone behavior remain separate.",
         "Actual196 calendar answer was wrong; current time context is not proof of arbitrary model answer correctness."
       ]
+    },
+    {
+      "id": "saved_draft_explicit_names_keep_snapshot_and_expected_name_ownership",
+      "subject": "Explicit customer names distinguish saved drafts without changing snapshot content or overwriting a later name",
+      "state": "198_actual_native_legacy_names_reopen_fresh_read_missing_target_and_affected_UI_storage_passed",
+      "protects": [
+        "The existing schema1 remains readable; only explicit name changes, never id/text/original/createdAt/order. Existing save UUID/payload retry is not converted into a rename.",
+        "Uncertain name replies retry idempotently; stale expected name rejects overwrite, missing target never substitutes another draft. Pending/dirty/error input and explicit discard remain owned.",
+        "Labels show the customer name first with bounded original head/tail preview. New translation default names derive local/cloud/manual-edit labels from the owned result, not guessed old-record origins.",
+        "Cloud settings summary names target/service; no nonexistent source selector request, extra cloud call, model or daily device/capture change."
+      ],
+      "guards": [
+        "4 actual storage cases retain original save/corruption/full-library guards plus rename/idempotence/conflict/missing cases",
+        "Affected actual React naming/edit-copy/failure/deletion/route/late-result checks and TypeScript",
+        "Exact198 native legacy10 fixture two names/unchanged contents/reopen/deleted target; fresh-process byte-identical retained-file read"
+      ],
+      "pending_human_scope": [
+        "New default route labels are not a permanent provenance audit: the customer can replace a generated name.",
+        "Natural198 usefulness, actual physical/voice/global/external editor and real buying remain separate;197 full two-stage original feedback retained."
+      ],
+      "repo": "type",
+      "commit": "90922364a272ff2ae97f65ba13d6773b32156f0b",
+      "commit_subject": "Name saved drafts safely and distinguish translation routes",
+      "humanAccepted": false,
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261026-build198\\source-audit.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261026-build198\\drafts198-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261026-build198\\drafts198-route-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\drafts198-rust-storage.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\drafts198-typescript.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native198-snapshot-20261026-130238\\drafts198-cold-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\drafts198-legacy-provenance.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native198-snapshot-20261026-130131\\drafts198-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261026-build198\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261026-build198\\type198-installed.json"
+      ],
+      "machine_accepted_scope": [
+        "Explicit saved-draft naming and translation-route clarity. Actual198 private native UI changed two names in ten merged prior197 AI-customer v1 drafts, retained id/body/original/date/order, reopened and rejected a deliberately deleted target. A fresh198 process read the exact retained file bytes in an isolated copy. No Owner data, cloud, speech, physical, real-order or translation-semantic qualification."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-26T09:57:34.047029+08:00",
@@ -9971,6 +10010,26 @@
         "194 owner confirmed manual End and Ask; automatic endpoint had approved text waiting for an editor receipt despite Question forbidding editor output.195 repairs the shared pending reader; actual automatic behavior still pending.",
         "196 preview and automatic capture ending succeeded; the LLM answered Sunday for 2026-10-27 Tuesday because QA had no current date context. The recording source is not reverted for a separate answer error."
       ]
+    },
+    {
+      "id": "saved-draft-identity",
+      "accepted_scope": "Explicit saved-draft naming and translation-route clarity. Actual198 private native UI changed two names in ten merged prior197 AI-customer v1 drafts, retained id/body/original/date/order, reopened and rejected a deliberately deleted target. A fresh198 process read the exact retained file bytes in an isolated copy. No Owner data, cloud, speech, physical, real-order or translation-semantic qualification.",
+      "baseline_state": "198_actual_native_legacy_names_reopen_fresh_read_missing_target_and_affected_UI_storage_passed",
+      "guard_entries": [
+        "saved_draft_explicit_names_keep_snapshot_and_expected_name_ownership"
+      ],
+      "paths": {
+        "type": [
+          "src-tauri/src/saved_text_drafts.rs",
+          "src-tauri/src/commands/saved_text_drafts.rs",
+          "src/lib/ipc.ts",
+          "src/components/SavedTextDraftsDialog.tsx",
+          "src/components/StyleTextTrial.tsx",
+          "src/i18n/savedDraftCopy.ts",
+          "scripts/check-saved-text-drafts-ui.py",
+          "scripts/check-local-translation-ui.py"
+        ]
+      }
     }
   ]
 }

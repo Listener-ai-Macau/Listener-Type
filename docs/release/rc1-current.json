@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-26T12:04:45.239674+08:00",
+  "updatedAt": "2026-10-26T13:08:10.439994+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 197,
-    "source": "18de2f6ba3492a62799597f3db9a6b041e402f74",
-    "sourceTag": "build-source/type197-20261026",
+    "build": 198,
+    "source": "90922364a272ff2ae97f65ba13d6773b32156f0b",
+    "sourceTag": "build-source/type198-20261026",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "d12b12e482bbcd4ac0577982ff8ba2eafe27f406072d7c06f0540e310cc29912",
-    "sizeBytes": 299466752,
-    "exeSha256": "a8b22e979b8d1fd9e7a914f0bc05f25c40dde66d3c88ac2358122e2136d6258a",
+    "sha256": "ed6f34b134b385b154f74403befae40231d480e10668e68df930f15e46488899",
+    "sizeBytes": 299470848,
+    "exeSha256": "d39c59fae6fa20abecacdd36ecffcbf08b15e4c9109d89cb4e5ba78ccfa86db5",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -511,13 +511,16 @@
     "navigationScope": "Exact189 private native sidebar/guide only; no recording/Bluetooth changes",
     "toolDisclosureQualified": true,
     "voiceQuestionExpectationFiveLocalesQualified": true,
-    "scope": "Coherent question capture/preview/finish release; actual196 and controlled197 evidence distinguished; not all22 acceptance.",
+    "scope": "Draft naming/route batch only.197 capture and older firmware/settings scopes reused without requalification.",
     "qaStreamingDisplayControlledNativeQualified": true,
     "readyMadeStyleLibraryNativeQualified": true,
     "listenerQuestionPreviewAndAutoStopActual196": true,
     "actual196Source": "f60756875bc21e688ab04eecef1f79abdeef58ed",
     "actual196QuestionReceipt": "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261026-build196\\human-question196-reviewed.json",
-    "questionVoice197NativeScope": "Controlled matching native card/preview ownership and controls; actual Listener trace remains scoped196"
+    "questionVoice197NativeScope": "Controlled matching native card/preview ownership and controls; actual Listener trace remains scoped196",
+    "savedDraft198NativeLegacyNamePersistence": true,
+    "savedDraft198FreshProcessReadsRetainedBytes": true,
+    "savedDraft198MissingTargetNotSubstituted": true
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -535,6 +538,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build197-20261026"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build198-20261026"
   }
 }
