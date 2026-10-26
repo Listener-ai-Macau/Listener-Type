@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-26T14:33:58.159247+08:00",
+  "updated_at": "2026-10-26T19:55:03.144688+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -8577,6 +8577,41 @@
       "machine_accepted_scope": [
         "199 shared wake-admission repair: actual previous NonMatch bypass reproduced; compatible-owner fusion and retry table preserved for both actions, source-bound saved ordinary-speech negative checked through real cached helper/streaming and terminal paths, helper contention bounded. Exact MSI private startup/metadata IPC only; current new live miswakes and physical/global/22-feature scopes remain unqualified."
       ]
+    },
+    {
+      "id": "reviewed_text_continuation_and_named_copy_preserve_sources",
+      "subject": "Explicit next-step input and named revised copies preserve their exact reviewed/source identities",
+      "state": "200_affected_headless_and_native_storage_passed_customer200_not_yet_used",
+      "protects": [
+        "No automatic paid request/save/copy on result handoff; over-limit output is not truncated.",
+        "Prior result/input are labelled as session-only comparison, never a current result from another input.",
+        "Revised copy name and body bind one save identity; original retained.",
+        "Unsaved confirmation actions are revealed/focused in short windows."
+      ],
+      "guards": [
+        "python scripts/check-translation-text-trial-ui.py",
+        "python scripts/check-saved-text-drafts-ui.py --edit-copy --naming",
+        "python scripts/check-style-trial-comparison-ui.py"
+      ],
+      "pending_human_scope": [
+        "200 natural customer outcome and physical/global original22 gaps remain."
+      ],
+      "repo": "type",
+      "commit": "2b65f4cecf4ffaa5549c3ce801145312fc422c09",
+      "commit_subject": "Continue reviewed text between translation and refinement without clipboard handoffs",
+      "humanAccepted": false,
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\continuation200-typescript.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\continuation200-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\drafts200-batch-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\comparison200-ui.json",
+        "work\\customer-onboarding-20261020\\isolated-native200-snapshot-20261026-193648\\text200-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261026-build200\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261026-build200\\type200-installed.json"
+      ],
+      "machine_accepted_scope": [
+        "200 consolidated source-only copy-name checkpoint plus explicit result-to-translation/refinement handoff, labelled session comparison, visible unsaved confirmation. TypeScript and affected headless tests passed; exact native raw/edited handoff plus named copy/save/reopen on real private storage passed. Controlled fixtures are not translation quality; physical/global/original22 gaps remain."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-26T09:57:34.047029+08:00",
@@ -9609,7 +9644,8 @@
         "customer112_result_first_actions_and_safe_technical_label",
         "customer113_recorded_transcript_explicit_local_drafts",
         "customer114_acknowledged_saved_version_guidance",
-        "customer115_recorded_transcript_to_independent_text_workspace"
+        "customer115_recorded_transcript_to_independent_text_workspace",
+        "reviewed_text_continuation_and_named_copy_preserve_sources"
       ],
       "paths": {
         "type": [
@@ -9646,7 +9682,10 @@
           "src/lib/stylePackPresentation.ts",
           "src/lib/stylePackPresentation.test.ts",
           "scripts/check-result-reading-ui.py",
-          "scripts/check-audio-text-workspace-ui.py"
+          "scripts/check-audio-text-workspace-ui.py",
+          "src/components/SavedTextDraftCopyEditor.tsx",
+          "src/i18n/textWorkspace.ts",
+          "src/i18n/savedDraftCopy.ts"
         ]
       },
       "known_failures": [
