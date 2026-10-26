@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-26T13:08:10.439994+08:00",
+  "updated_at": "2026-10-26T14:33:58.159247+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -8534,6 +8534,49 @@
       "machine_accepted_scope": [
         "Explicit saved-draft naming and translation-route clarity. Actual198 private native UI changed two names in ten merged prior197 AI-customer v1 drafts, retained id/body/original/date/order, reopened and rejected a deliberately deleted target. A fresh198 process read the exact retained file bytes in an isolated copy. No Owner data, cloud, speech, physical, real-order or translation-semantic qualification."
       ]
+    },
+    {
+      "id": "wake_non_owner_veto_and_hidden_candidate_survive_shared_admission",
+      "subject": "Complete-keyword errors cannot override a non-owner verdict or display an unaccepted recording candidate",
+      "state": "199_source_policy_and_retained_failure_passed_current_live_miswakes_not_yet_qualified",
+      "protects": [
+        "Complete intent and identity are separate: non-owner remains Pending live for bounded existing retry, Reject terminal; KeywordModel/LocalTranscript cannot force Accept. Open unenrolled behavior remains explicit.",
+        "Existing source-bound compatible-owner recovery and configured floors remain; both dictation and question traverse the common seam. No hard global threshold increase.",
+        "Only accepted dictation may display the early recording capsule; question does not borrow recording preview.",
+        "Primary acoustic comparison spends the existing budget behind real helper contention rather than skipping immediately. Ordinary exploratory confirmation remains nonqueueing.",
+        "At most64 process-local decision metadata receipts, no transcripts/audio/profile or historical log reading, exposed by read-only IPC."
+      ],
+      "guards": [
+        "Actual old native predicate reproduced before source change",
+        "Native Rust common gate69 plus source-bound primary9/helper9; old false wake through real cached helper under contention and streaming/terminal methods",
+        "Exact matching MSI startup/read-only metadata API; no claim of live false-wake elimination"
+      ],
+      "pending_human_scope": [
+        "Exact triggering waveform and admission of the two newly reported live events were not captured.",
+        "Single-microphone model errors and owner-compatible recovery can still admit similar foreign speech; no perfect separation guarantee.",
+        "Native startup is not physical wake, global keyboard, arbitrary editor or overall sale qualification."
+      ],
+      "repo": "type",
+      "commit": "57d2f4fc3d87de42d9dda8a204d5201aaede7355",
+      "commit_subject": "Keep foreign voice veto and hidden wake candidates through final admission",
+      "humanAccepted": false,
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261026-build199\\source-audit.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\wake199-before-owner-bypass.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\accept131-rust-20261026-141118-258ba6\\shadow.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\wake199-kernel-tests.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\wake199-primary-tests.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\wake199-helper-tests.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\wake199-retained-busy.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\wake199-retained-production.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\wake199-preview-guard.log",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native199-snapshot-20261026-143224\\wake199-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261026-build199\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261026-build199\\type199-installed.json"
+      ],
+      "machine_accepted_scope": [
+        "199 shared wake-admission repair: actual previous NonMatch bypass reproduced; compatible-owner fusion and retry table preserved for both actions, source-bound saved ordinary-speech negative checked through real cached helper/streaming and terminal paths, helper contention bounded. Exact MSI private startup/metadata IPC only; current new live miswakes and physical/global/22-feature scopes remain unqualified."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-26T09:57:34.047029+08:00",
@@ -8713,12 +8756,20 @@
       "id": "false-wake",
       "baseline_state": "exact_failure_not_human_accepted",
       "accepted_scope": "Individual saved ordinary-speech negatives do not establish absence of false wakes for all speakers or current hardware input.",
-      "guard_entries": [],
+      "guard_entries": [
+        "wake_non_owner_veto_and_hidden_candidate_survive_shared_admission"
+      ],
       "paths": {
         "type": [
           "src-tauri/src/coordinator/dictation_wake_keyword_check.rs",
           "src-tauri/src/coordinator/dictation_wake_owner_gate.rs",
-          "src-tauri/src/coordinator/dictation_wake_verification_source.rs"
+          "src-tauri/src/coordinator/dictation_wake_verification_source.rs",
+          "src-tauri/src/speech_decision_kernel.rs",
+          "src-tauri/src/coordinator/dictation.rs",
+          "src-tauri/src/coordinator/dictation_embedded_stream.rs",
+          "src-tauri/src/asr/local/wake_helper.rs",
+          "src-tauri/src/wake_voice_commands.rs",
+          "src-tauri/src/wake_admission_diagnostics.rs"
         ],
         "firmware": [
           "ports/esp32/audio_capture",

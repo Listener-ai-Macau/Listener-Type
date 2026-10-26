@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-26T13:08:10.439994+08:00",
+  "updatedAt": "2026-10-26T14:33:58.159247+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 198,
-    "source": "90922364a272ff2ae97f65ba13d6773b32156f0b",
-    "sourceTag": "build-source/type198-20261026",
+    "build": 199,
+    "source": "57d2f4fc3d87de42d9dda8a204d5201aaede7355",
+    "sourceTag": "build-source/type199-20261026",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "ed6f34b134b385b154f74403befae40231d480e10668e68df930f15e46488899",
+    "sha256": "efcb96c5c4bc95809898f1a5270bbefb0659a4a008a59159189d3e2912320426",
     "sizeBytes": 299470848,
-    "exeSha256": "d39c59fae6fa20abecacdd36ecffcbf08b15e4c9109d89cb4e5ba78ccfa86db5",
+    "exeSha256": "6bd5c9dddf53d48bb64162e58542d245dd808b06b2e93df9e13245de6dd133bb",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -511,7 +511,7 @@
     "navigationScope": "Exact189 private native sidebar/guide only; no recording/Bluetooth changes",
     "toolDisclosureQualified": true,
     "voiceQuestionExpectationFiveLocalesQualified": true,
-    "scope": "Draft naming/route batch only.197 capture and older firmware/settings scopes reused without requalification.",
+    "scope": "199 common gate and preview/diagnostic IPC batch. Exact new live miswake and remaining original22 conditions are still open.",
     "qaStreamingDisplayControlledNativeQualified": true,
     "readyMadeStyleLibraryNativeQualified": true,
     "listenerQuestionPreviewAndAutoStopActual196": true,
@@ -520,7 +520,10 @@
     "questionVoice197NativeScope": "Controlled matching native card/preview ownership and controls; actual Listener trace remains scoped196",
     "savedDraft198NativeLegacyNamePersistence": true,
     "savedDraft198FreshProcessReadsRetainedBytes": true,
-    "savedDraft198MissingTargetNotSubstituted": true
+    "savedDraft198MissingTargetNotSubstituted": true,
+    "wake199NonOwnerFinalBypassRemoved": true,
+    "wake199CompatibleOwnerRecoveryRetained": true,
+    "wake199SavedNegativeHelperContentionChecked": true
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -538,6 +541,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build198-20261026"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build199-20261026"
   }
 }
