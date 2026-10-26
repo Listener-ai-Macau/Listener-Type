@@ -30,13 +30,13 @@ with sync_playwright() as pw:
    route.fulfill(response=response,body=text.replace(old,'if (!isTauri) {\n    return window.__translationFixture(cmd,args,mock);\n  }',1))
   page.route(re.compile(r'/src/lib/ipc\.ts(?:\?.*)?$'),fixture);page.goto(a.url,wait_until='networkidle')
   def open_trial():
-   page.get_by_role('button',name='Try typed text',exact=True).click();expect(page.locator('#style-trial-input')).to_be_visible()
+   page.get_by_role('button',name='Try typed text',exact=True).click();expect(page.locator('.ol-style-trial-input')).to_be_visible()
   def close_trial():page.locator('dialog[open]').get_by_role('button',name='Close',exact=True).first.click()
   def request_count():return page.evaluate("window.__translationCalls.filter(x=>x.cmd==='try_translation_text').length")
-  open_trial();source='明天下午三点开会，请带上产品样品。';page.locator('#style-trial-input').fill(source)
+  open_trial();source='明天下午三点开会，请带上产品样品。';page.locator('.ol-style-trial-input').fill(source)
   page.get_by_role('combobox',name='What would you like to do?',exact=True).select_option('translate')
   page.get_by_role('combobox',name='Translate output to',exact=True).select_option('English');page.get_by_role('combobox',name='Translation method',exact=True).select_option('cloud')
-  expect(page.locator('#style-trial-input')).to_have_value(source);assert request_count()==0
+  expect(page.locator('.ol-style-trial-input')).to_have_value(source);assert request_count()==0
   checks.append('Selecting English retains draft and does not call a service')
   expect(page.locator('[data-style-trial-service-notice]')).to_be_visible()
   page.get_by_role('button',name='Translate',exact=True).click();page.wait_for_function('window.__pendingTranslation.length===1')
@@ -53,14 +53,14 @@ with sync_playwright() as pw:
   checks.append('Closed workspace cannot accept a delayed translation result into its replacement')
   page.get_by_role('combobox',name='What would you like to do?',exact=True).select_option('translate')
   page.get_by_role('combobox',name='Translate output to',exact=True).select_option('English');page.get_by_role('combobox',name='Translation method',exact=True).select_option('cloud');page.evaluate('window.__authFailure=true');page.get_by_role('button',name='Translate',exact=True).click()
-  expect(page.locator('dialog[open] [role=alert]')).to_contain_text('rejected its credentials');expect(page.locator('#style-trial-input')).to_have_value(source);expect(page.locator('.ol-style-trial-result-editor')).to_have_count(0)
+  expect(page.locator('dialog[open] [role=alert]')).to_contain_text('rejected its credentials');expect(page.locator('.ol-style-trial-input')).to_have_value(source);expect(page.locator('.ol-style-trial-result-editor')).to_have_count(0)
   checks.append('401 is visible and keeps the source; no fake successful raw translation')
   close_trial();page.evaluate('window.__authFailure=false');open_trial()
   original='Original source — 条件😀\nKeep the condition.';reviewed='Reviewed source — 条件😀\nKeep the condition.'
-  page.locator('#style-trial-input').fill(original);page.get_by_role('button',name='Try this text',exact=True).click()
+  page.locator('.ol-style-trial-input').fill(original);page.get_by_role('button',name='Try this text',exact=True).click()
   page.get_by_label('Result text',exact=True).fill(reviewed)
   before=page.evaluate('window.__translationCalls.length');page.get_by_role('button',name='Translate this result…',exact=True).click()
-  expect(page.locator('#style-trial-input')).to_have_value(reviewed)
+  expect(page.locator('.ol-style-trial-input')).to_have_value(reviewed)
   previous=page.locator('[data-text-previous-step]');expect(previous.locator('pre').first).to_have_text(reviewed)
   previous.locator('summary').click();expect(previous.locator('pre').nth(1)).to_have_text(original)
   new_calls=page.evaluate('window.__translationCalls')[before:]
@@ -72,7 +72,7 @@ with sync_playwright() as pw:
   out=page.get_by_label('Result text',exact=True);out.fill('x'*4001)
   next_step=page.get_by_role('button',name='Refine this translation…',exact=True);expect(next_step).to_be_disabled();expect(out).to_have_value('x'*4001)
   edited='Reviewed English — 条件😀\nDo not add a promise.';out.fill(edited);before=page.evaluate('window.__translationCalls.length');next_step.click()
-  expect(page.get_by_role('combobox',name='What would you like to do?',exact=True)).to_have_value('text');expect(page.locator('#style-trial-input')).to_have_value(edited)
+  expect(page.get_by_role('combobox',name='What would you like to do?',exact=True)).to_have_value('text');expect(page.locator('.ol-style-trial-input')).to_have_value(edited)
   expect(previous.locator('pre').first).to_have_text(edited);previous.locator('summary').click();expect(previous.locator('pre').nth(1)).to_have_text(reviewed)
   assert not any(x['cmd'].startswith('try_') or x['cmd']=='save_text_draft' for x in page.evaluate('window.__translationCalls')[before:])
   page.get_by_role('button',name='Try this text',exact=True).click();expect(page.get_by_label('Result text',exact=True)).to_have_value(edited)

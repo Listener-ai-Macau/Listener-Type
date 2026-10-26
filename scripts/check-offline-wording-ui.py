@@ -38,7 +38,7 @@ with sync_playwright() as pw:
   expect(page.locator('.ol-overview-text-entry')).to_contain_text('one-time component download, no API key or translation fee')
   checks.append({'name':'Overview explains local translation availability, preparation and fee boundary before entry','passed':True})
   page.get_by_role('button',name='Try typed text',exact=True).click()
-  page.locator('#style-trial-input').fill(source)
+  page.locator('.ol-style-trial-input').fill(source)
   page.get_by_role('combobox',name='What would you like to do?',exact=True).select_option('translate')
   page.get_by_role('combobox',name='Translate output to',exact=True).select_option('English')
   page.get_by_role('combobox',name='Original language',exact=True).select_option('zh')
@@ -70,7 +70,7 @@ with sync_playwright() as pw:
     checks.append({'name':'Original and complete current result stay available above independently scrolling wording choices at desktop, narrow and phone-width views','passed':True})
    panel.get_by_role('button',name='Use this wording',exact=True).first.click()
    expect(output).to_have_value(revised)
-   expect(page.locator('#style-trial-input')).to_have_value(source)
+   expect(page.locator('.ol-style-trial-input')).to_have_value(source)
    if a.check_context:expect(panel.locator('[data-wording-current]')).to_have_text(revised)
    if a.check_boundaries:
     expect(panel.locator('[data-wording-preview]').first).to_have_text(machine.replace('Can I move','Would I be able to move'))
@@ -92,7 +92,7 @@ with sync_playwright() as pw:
     if can_undo:
      undo.click();expect(output).to_have_value(revised)
      if a.check_context:expect(panel.locator('[data-wording-current]')).to_have_text(revised)
-     expect(page.locator('#style-trial-input')).to_have_value(source)
+     expect(page.locator('.ol-style-trial-input')).to_have_value(source)
      expect(page.locator('[data-style-trial-retention]')).to_contain_text('Saved only in this browser session')
      checks.append({'name':'Undo restores only the immediately preceding workspace text and its existing saved acknowledgement, without changing the original or saved record','passed':True})
      panel.get_by_role('button',name='Use this wording',exact=True).last.click()
@@ -135,7 +135,7 @@ with sync_playwright() as pw:
    # Change only this isolated fixture's UI locale. Reload would run the
    # original English init script again and invalidate the controller premise.
    page.evaluate("async()=>{const {default:i18n}=await import('/src/i18n/index.ts');await i18n.changeLanguage('zh-CN')}")
-   expect(page.locator('#style-trial-title')).to_have_text('翻译成英语')
+   expect(page.locator('[data-style-trial-title]')).to_have_text('翻译成英语')
    checks.append({'name':'Chinese translation heading localizes the target without changing its stored/native language value','passed':True})
  finally:b.close()
 r={'at':datetime.datetime.now().astimezone().isoformat(),'scope':__doc__,'passed':all(x['passed'] for x in checks),'checks':checks,'originalMachineText':machine,'expectedExplicitEdit':revised}

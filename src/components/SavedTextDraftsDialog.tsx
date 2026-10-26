@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { copyExplicitText, deleteSavedTextDraft, isTauri, listSavedTextDrafts, renameSavedTextDraft, type SavedTextDraft } from '../lib/ipc';
 import { detectOS } from './WindowChrome';
@@ -7,9 +7,12 @@ import './DeviceLayoutsDialog.css';
 import { SavedTextDraftCopyEditor } from './SavedTextDraftCopyEditor';
 import { DeviceLayoutsDialog } from './DeviceLayoutsDialog';
 import { writingDeviceKeyProfile } from '../lib/deviceKeyLayouts';
+import { QuickStyleTextTrial } from './QuickStyleTextTrial';
 
 export function SavedTextDraftsDialog({onClose,initialDraftId,onUnavailable}:{onClose:()=>void;initialDraftId?:string;onUnavailable?:(id:string)=>void}) {
   const {t,i18n}=useTranslation();const dialog=useRef<HTMLDialogElement>(null),alive=useRef(true),running=useRef(false);
+  const titleId=useId();
+  const [workspace,setWorkspace]=useState<{name:string;text:string}|null>(null);
   // Keep the identity requested when this dialog opened, even if its owner
   // clears its saved receipt after learning that the record is unavailable.
   const requestedId=useRef(initialDraftId).current;
@@ -40,7 +43,23 @@ export function SavedTextDraftsDialog({onClose,initialDraftId,onUnavailable}:{on
     return `${draft.name} · ${preview} · ${time}`;
   };
   const choices=useMemo(()=>items.map(d=>({id:d.id,label:draftLabel(d)})),[items,i18n.resolvedLanguage,i18n.language]);
-  const refresh=async()=>{setLoading(true);setLoadError(false);try{const value=await listSavedTextDrafts();if(alive.current){const missing=!!requestedId&&!value.some(d=>d.id===requestedId);setItems(value);setMissingRequested(missing);setSelected(current=>value.some(d=>d.id===current)?current:missing?'':value[0]?.id??'');if(missing)onUnavailable?.(requestedId!);}}catch{if(alive.current)setLoadError(true);}finally{if(alive.current)setLoading(false);}};
+  const refresh=async()=>{
+    setLoading(true);setLoadError(false);
+    try{
+      const value=await listSavedTextDrafts();
+      if(alive.current){
+        const missing=!!requestedId&&!value.some(d=>d.id===requestedId);
+        const nextId=value.some(d=>d.id===selectedId)?selectedId:missing?'':value[0]?.id??'';
+        setItems(value);setMissingRequested(missing);setSelected(nextId);
+        // Returning from a child workspace can include an explicit rename in
+        // its saved list. Refresh that clean name, but retain a pending local
+        // edit during the existing conflict/retry flow.
+        if(!nameDirty)setNameEdit(value.find(d=>d.id===nextId)?.name??'');
+        if(missing)onUnavailable?.(requestedId!);
+      }
+    }catch{if(alive.current)setLoadError(true);}
+    finally{if(alive.current)setLoading(false);}
+  };
   useEffect(()=>{alive.current=true;dialog.current?.showModal();void refresh();return()=>{alive.current=false;dialog.current?.close();};},[]);
   const copy=async()=>{if(!selected||running.current)return;const value=selected;running.current=true;setBusy(true);setError('');setCopied('');try{await copyExplicitText(value.text,detectOS()==='win');if(alive.current)setCopied(value.id);}catch{if(alive.current)setError(t('textDraft.copyFailed'));}finally{running.current=false;if(alive.current)setBusy(false);}};
   const remove=async()=>{if(!selected||running.current)return;const id=selected.id;running.current=true;setBusy(true);setError('');try{await deleteSavedTextDraft(id);if(alive.current){setItems(current=>current.filter(d=>d.id!==id));setSelected(items.find(d=>d.id!==id)?.id??'');setConfirm(false);setCopied('');onUnavailable?.(id);}}catch{if(alive.current)setError(t('textDraft.deleteFailed'));}finally{running.current=false;if(alive.current)setBusy(false);}};
@@ -63,8 +82,8 @@ export function SavedTextDraftsDialog({onClose,initialDraftId,onUnavailable}:{on
   const finishLeave=(target:'dialog'|'editor')=>{setLeaveTarget(null);if(target==='dialog')onClose();else{setEditing(null);setEditText('');setEditName('');setEditBaseline('');}};
   const requestLeave=(target:'dialog'|'editor')=>{if(running.current||busy)return;if(nameDirty||(editing&&JSON.stringify([editName.trim(),editText])!==editBaseline))setLeaveTarget(target);else finishLeave(target);};
   const close=()=>requestLeave('dialog');
-  return <><dialog ref={dialog} className="ol-device-layout-dialog ol-thinscroll" aria-labelledby="saved-text-drafts-title" onCancel={e=>{e.preventDefault();close();}}>
-    <div className="ol-device-layout-heading"><h2 id="saved-text-drafts-title">{t('textDraft.title')}</h2><Btn size="sm" variant="ghost" disabled={busy} onClick={close}>{t('common.close')}</Btn></div>
+  return <><dialog ref={dialog} className="ol-device-layout-dialog ol-thinscroll" aria-labelledby={titleId} onCancel={e=>{e.preventDefault();close();}}>
+    <div className="ol-device-layout-heading"><h2 id={titleId}>{t('textDraft.title')}</h2><Btn size="sm" variant="ghost" disabled={busy} onClick={close}>{t('common.close')}</Btn></div>
     <p className="ol-device-layout-hint">{t(isTauri?'textWorkspace.draftsIntro':'textDraft.browser')}</p>
     {missingRequested&&<p role="status">{t('textDraft.missingSelected')}</p>}
     {loading?<p role="status">{t('common.loading')}</p>:loadError?<p role="alert">{t('textDraft.loadFailed')} <Btn size="sm" onClick={()=>void refresh()}>{t('common.retry')}</Btn></p>:!items.length?<p>{t('textDraft.empty')}</p>:<>
@@ -92,10 +111,13 @@ export function SavedTextDraftsDialog({onClose,initialDraftId,onUnavailable}:{on
         <textarea readOnly aria-label={t('textDraft.selected')} value={selected.text} rows={9} style={{width:'100%',lineHeight:1.6,resize:'vertical',marginTop:14}}/>
         <details style={{margin:'14px 0'}}><summary>{t('textDraft.original')}</summary><pre className="ol-saved-phrase-text">{selected.original}</pre></details>
         <div style={{display:'flex',gap:10,flexWrap:'wrap'}}><Btn size="sm" disabled={busy} onClick={()=>void copy()}>{t(busy?'textDraft.working':copied===selected.id?'textDraft.copied':'textDraft.copy')}</Btn>
+          <Btn size="sm" variant="ghost" disabled={busy||nameDirty||!!leaveTarget||!selected.text.trim()||selected.text.length>4000}
+            onClick={()=>{setWorkspace({name:selected.name,text:selected.text});setConfirm(false);}}>{t('textWorkspace.continueSaved')}</Btn>
           <Btn size="sm" variant="ghost" disabled={busy||nameDirty} onClick={()=>{const name=Array.from(t('textDraft.copyName',{name:selected.name})).slice(0,80).join('').trim();setEditing({...selected});setEditText(selected.text);setEditName(name);setEditBaseline(JSON.stringify([name,selected.text]));setConfirm(false);setCopied('');setError('');}}>{t('textDraft.editCopy')}</Btn>
           <Btn size="sm" variant="ghost" disabled={busy||nameDirty||!selected.text.trim()||selected.text.length>2000} onClick={()=>setKeyPhrase(selected.text)}>{t('keyPhrase.open')}</Btn>
           <Btn size="sm" variant="ghost" disabled={busy||nameDirty} onClick={()=>setConfirm(true)}>{t('textDraft.delete')}</Btn></div>
         {selected.text.length>2000&&<p className="ol-device-layout-hint">{t('keyPhrase.tooLong')}</p>}
+        {selected.text.length>4000&&<p className="ol-device-layout-hint">{t('textWorkspace.savedDraftTooLong')}</p>}
         {copied===selected.id&&<p role="status">{t('textDraft.paste')}</p>}
         {confirm&&<div role="alert"><p>{t('textDraft.confirm')}</p><Btn size="sm" variant="ghost" disabled={busy} onClick={()=>setConfirm(false)}>{t('common.cancel')}</Btn> <Btn size="sm" disabled={busy} onClick={()=>void remove()}>{t('textDraft.delete')}</Btn></div>}
       </section>}
@@ -107,5 +129,8 @@ export function SavedTextDraftsDialog({onClose,initialDraftId,onUnavailable}:{on
     {error&&<p role="alert">{error}</p>}
     <details className="ol-style-trial-details"><summary>{t('textWorkspace.draftsDetails')}</summary><p className="ol-device-layout-hint">{t('textDraft.intro')}</p></details>
   </dialog>{keyPhrase!==null&&<DeviceLayoutsDialog rememberSelection initialProfile={writingDeviceKeyProfile()}
-    incomingText={keyPhrase} phraseOrigin="savedDraft" onLeaveForPage={onClose} onClose={()=>setKeyPhrase(null)}/>}</>;
+    incomingText={keyPhrase} phraseOrigin="savedDraft" onLeaveForPage={onClose} onClose={()=>setKeyPhrase(null)}/>}
+    {workspace&&<QuickStyleTextTrial inputOriginName={workspace.name} draft={workspace.text}
+      onDraftChange={text=>setWorkspace(current=>current?{...current,text}:null)}
+      onClose={()=>{setWorkspace(null);void refresh();}}/>}</>;
 }

@@ -57,7 +57,7 @@ with sync_playwright() as pw:
   page.get_by_role('button',name='Try typed text',exact=True).click();trial=page.locator('dialog.ol-style-trial')
   expect(trial.get_by_label('Your text',exact=True)).to_be_enabled()
   expect(trial.locator('.ol-style-trial-availability')).to_have_count(0)
-  gap=trial.evaluate("e=>e.querySelector('label[for=style-trial-input]').getBoundingClientRect().top-e.querySelector('[data-style-trial-purpose]').getBoundingClientRect().bottom")
+  gap=trial.evaluate("e=>e.querySelector('[data-style-trial-input-label]').getBoundingClientRect().top-e.querySelector('[data-style-trial-purpose]').getBoundingClientRect().bottom")
   assert 0<=gap<45,gap
   expect(trial.locator('[data-style-trial-service-notice]')).to_contain_text('may incur charges')
   help=trial.locator('details').filter(has_text='How this trial uses your text')
@@ -66,12 +66,12 @@ with sync_playwright() as pw:
   text='Reviewed text — 条件😀\nKeep Thursday at three.'
   trial.get_by_label('Your text',exact=True).fill(text);trial.get_by_role('button',name='Try this text',exact=True).click()
   expect(trial.get_by_label('Result text',exact=True)).to_have_value(text)
-  boxes=trial.evaluate("e=>Object.fromEntries(['#style-trial-input','.ol-style-trial-result-editor'].map(s=>[s,Math.round(e.querySelector(s).getBoundingClientRect().height)]))")
-  assert abs(boxes['#style-trial-input']-boxes['.ol-style-trial-result-editor'])<=2,boxes
+  boxes=trial.evaluate("e=>Object.fromEntries(['.ol-style-trial-input','.ol-style-trial-result-editor'].map(s=>[s,Math.round(e.querySelector(s).getBoundingClientRect().height)]))")
+  assert abs(boxes['.ol-style-trial-input']-boxes['.ol-style-trial-result-editor'])<=2,boxes
   for label in ['Copy result','Save draft']:
    box=trial.get_by_role('button',name=label,exact=True).bounding_box();assert box and box['y']>=0 and box['y']+box['height']<=800,box
   trial.screenshot(path=str(a.report.with_name(a.report.stem+'-text-result.png')))
-  tops=trial.evaluate("e=>[e.querySelector('#style-trial-input'),e.querySelector('.ol-style-trial-result-editor')].map(x=>x.getBoundingClientRect().top)")
+  tops=trial.evaluate("e=>[e.querySelector('.ol-style-trial-input'),e.querySelector('.ol-style-trial-result-editor')].map(x=>x.getBoundingClientRect().top)")
   assert abs(tops[0]-tops[1])<3,tops
   help.locator('summary').click();expect(help).to_contain_text('Make shorter uses your text service');help.locator('summary').click()
   report['checks'].append({'editorTopAlignment':tops,'longInstructionsCollapsedButReachable':True})

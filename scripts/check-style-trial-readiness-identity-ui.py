@@ -42,7 +42,7 @@ window.__calls=[]; window.__pending=[]; window.__transitions=[];
 window.__fixture=(cmd,args,mock)=>{
   window.__calls.push(cmd);
   if(cmd!=='get_style_text_trial_readiness') return mock();
-  const dialog=document.querySelector('dialog[aria-labelledby="style-trial-title"]');
+  const dialog=document.querySelector('dialog.ol-style-trial');
   if(dialog)window.__transitions.push({requested:args.stylePackId,
     selected:dialog.querySelector('select')?.value,
     notice:dialog.querySelector('[data-style-trial-service-notice]')?.textContent,
@@ -67,7 +67,7 @@ window.__fixture=(cmd,args,mock)=>{
             page.route(re.compile(r'/src/components/StyleTextTrial\.tsx(?:\?.*)?$'), original)
         page.goto(a.url, wait_until='networkidle')
         page.get_by_role('button', name='Try typed text', exact=True).click()
-        dialog = page.locator('dialog[aria-labelledby="style-trial-title"]')
+        dialog = page.locator('dialog.ol-style-trial')
         draft = dialog.get_by_label('Your text', exact=True)
         run = dialog.get_by_role('button', name='Try this text', exact=True)
         draft.fill('A local draft must not imply that a different style is local.')

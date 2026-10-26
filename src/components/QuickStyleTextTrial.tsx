@@ -9,11 +9,12 @@ import { StyleTextTrial } from './StyleTextTrial';
 import { translationTrialPack } from '../lib/translationTrial';
 
 /** A text workspace, not a style activation or a shortcut to pack management. */
-export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTranslationTarget = '' }: {
+export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTranslationTarget = '', inputOriginName }: {
   draft: string;
   onDraftChange: (text: string) => void;
   onClose: () => void;
   initialTranslationTarget?: string;
+  inputOriginName?: string;
 }) {
   const { t } = useTranslation();
   const [packs, setPacks] = useState<StylePack[]>([]);
@@ -91,7 +92,7 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTran
       error: addFailed === 'list' ? t('style.everydayList.failed') : '', onChoose: () => void chooseEverydayList(),
     } : undefined}
     prepareShorter={translationTarget ? undefined : prepareConcise}
-    onClose={onClose} /> :
+    inputOriginName={inputOriginName} onClose={onClose} /> :
     <TrialLoading failed={failed} onRetry={() => setAttempt(value => value + 1)} onClose={onClose} title={t('overview.tryTypedText')} />}
   </>;
 }

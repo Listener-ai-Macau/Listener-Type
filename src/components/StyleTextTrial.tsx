@@ -1,5 +1,5 @@
 import { SaveTextDraft } from './SaveTextDraft';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { canInsertStyleTrialResult, cancelStyleTrialInsert, copyStyleTrialResult, getStyleTextTrialReadiness, insertStyleTrialResult, isTauri, tryStylePackText, tryTranslationText, tryLocalTranslationText } from '../lib/ipc';
 import { detectOS } from './WindowChrome';
@@ -16,7 +16,7 @@ import { LocalTranslationSetup } from './LocalTranslationSetup';
 import { canSuggestChineseSource, localTranslationErrorKey, localTranslationKey, translationLanguageLabel } from '../lib/localTranslation';
 import type { TranslationEngine, LocalTranslationReadiness } from '../lib/localTranslation';
 
-export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, prepareShorter, translationTarget, onTranslationTargetChange, initialTranslationEngine, initialTranslationSource, draft, onDraftChange, onClose }: {
+export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, prepareShorter, translationTarget, onTranslationTargetChange, initialTranslationEngine, initialTranslationSource, inputOriginName, draft, onDraftChange, onClose }: {
   pack: StylePack;
   packs?: StylePack[];
   onSelectPack?: (id: string) => void;
@@ -26,11 +26,14 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
   onTranslationTargetChange?: (language: string) => void;
   initialTranslationEngine?: TranslationEngine;
   initialTranslationSource?: string;
+  inputOriginName?: string;
   draft: string;
   onDraftChange: (text: string) => void;
   onClose: () => void;
 }) {
   const { t, i18n } = useTranslation();
+  const workspaceId = useId();
+  const [draftNameEdit, setDraftNameEdit] = useState<string | null>(null);
   const [translationEngine, setTranslationEngine] = useState<TranslationEngine>(initialTranslationEngine ?? 'local');
   const [translationSource, setTranslationSource] = useState(initialTranslationSource ?? '');
   const [optionsOpen, setOptionsOpen] = useState(true);
@@ -102,9 +105,12 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
   const [deliveryMessage, setDeliveryMessage] = useState('');
   const delivering = deliveryStarted !== null;
   const resultOutput = editedOutput ?? result?.outputText ?? '';
-  const savedDraftName = translationTarget && result
+  const generatedDraftName = translationTarget && result
     ? `${presentation.name} · ${t(result.usedTextService ? 'textDraft.routeCloud' : 'textDraft.routeLocal')}${editedOutput !== null ? ` · ${t('textDraft.routeEdited')}` : ''}`
     : presentation.name;
+  const draftName = draftNameEdit ?? generatedDraftName;
+  const savedDraftName = draftName.trim();
+  const draftNameInvalid = !savedDraftName || Array.from(savedDraftName).length > 80;
   const savedCurrentDraft = savedDraftSignature === JSON.stringify([savedDraftName, draft, resultOutput]);
   const canProcess = offline ? offlineReady : !!readiness?.available && (!readiness.requiresTextService || readiness.textServiceConfigured);
 
@@ -306,15 +312,16 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
     <><dialog
       ref={dialog}
       className={`ol-style-trial ol-thinscroll${result ? ' ol-style-trial-has-result' : ''}`}
-      aria-labelledby="style-trial-title"
-      aria-describedby="style-trial-description"
+      aria-labelledby={`${workspaceId}-title`}
+      aria-describedby={`${workspaceId}-description`}
       onCancel={event => { event.preventDefault(); if (!draftSaving) onClose(); }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
-        <h2 id="style-trial-title" style={{ margin: 0, fontSize: 21 }}>{translationTarget ? t('offlineTranslation.title', { language: translationLanguageLabel(translationTarget, i18n.resolvedLanguage ?? i18n.language) }) : onTranslationTargetChange ? t('textWorkspace.title') : t('style.trial.title', { name: presentation.name })}</h2>
+        <h2 id={`${workspaceId}-title`} data-style-trial-title style={{ margin: 0, fontSize: 21 }}>{translationTarget ? t('offlineTranslation.title', { language: translationLanguageLabel(translationTarget, i18n.resolvedLanguage ?? i18n.language) }) : onTranslationTargetChange ? t('textWorkspace.title') : t('style.trial.title', { name: presentation.name })}</h2>
         <Btn size="sm" variant="ghost" disabled={draftSaving} onClick={() => { if (!draftSaving) onClose(); }}>{t('common.close')}</Btn>
       </div>
-      <p id="style-trial-description" className="ol-style-trial-hint" data-style-trial-service-notice>{t(offline ? 'offlineTranslation.localNotice' : readiness?.requiresTextService === false ? prepareShorter ? 'textWorkspace.localWithShorterNotice' : 'textWorkspace.localNotice' : 'textWorkspace.cloudNotice')}</p>
+      <p id={`${workspaceId}-description`} className="ol-style-trial-hint" data-style-trial-service-notice>{t(offline ? 'offlineTranslation.localNotice' : readiness?.requiresTextService === false ? prepareShorter ? 'textWorkspace.localWithShorterNotice' : 'textWorkspace.localNotice' : 'textWorkspace.cloudNotice')}</p>
+      {inputOriginName && <p role="note" className="ol-style-trial-hint" data-saved-draft-origin>{t('textWorkspace.savedDraftInput', { name: inputOriginName })}</p>}
       <details className="ol-style-trial-options-panel" data-text-options-panel open={optionsOpen}
         onToggle={event => setOptionsOpen(event.currentTarget.open)}>
         <summary>{translationTarget ? t(offline ? 'textWorkspace.translationOptions' : 'textDraft.cloudTranslationOptions', {
@@ -373,11 +380,11 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
       </div>}
       <div className="ol-style-trial-workspace">
       <div className="ol-style-trial-draft">
-      <label htmlFor="style-trial-input" style={{ display: 'block', fontWeight: 600, marginBottom: 8 }}>
+      <label htmlFor={`${workspaceId}-input`} data-style-trial-input-label style={{ display: 'block', fontWeight: 600, marginBottom: 8 }}>
         {t('style.trial.input')}
       </label>
       <textarea
-        id="style-trial-input"
+        id={`${workspaceId}-input`}
         className="ol-style-trial-input ol-thinscroll"
         value={draft}
         maxLength={4000}
@@ -424,11 +431,17 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
               const value = event.target.value;
               updateEditedOutput(value);
             }} />
+          <label className="ol-style-trial-draft-name">{t('textDraft.nameLabel')}
+            <input type="text" aria-label={t('textDraft.nameLabel')} value={draftName} maxLength={80}
+              disabled={copying || delivering || draftSaving}
+              onChange={event => setDraftNameEdit(event.target.value)} />
+          </label>
+          {draftNameInvalid && <p role="alert" className="ol-style-trial-hint">{t('textDraft.nameInvalid')}</p>}
           <div className="ol-style-trial-primary-actions">
             <Btn size="sm" variant="blue" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => void copyResult()}>
               {t(copying ? 'style.trial.copying' : copiedResult === result ? 'style.trial.copied' : 'style.trial.copyResult')}
             </Btn>
-            <SaveTextDraft compact name={savedDraftName} original={draft} text={resultOutput} disabled={copying || delivering} onBusy={setDraftSaving}
+            <SaveTextDraft compact name={savedDraftName} original={draft} text={resultOutput} disabled={copying || delivering || draftNameInvalid} onBusy={setDraftSaving}
               onUnsaved={() => setSavedDraftSignature('')}
               onSaved={text => setSavedDraftSignature(JSON.stringify([savedDraftName, draft, text]))} />
             {onTranslationTargetChange && <Btn size="sm" variant="ghost"

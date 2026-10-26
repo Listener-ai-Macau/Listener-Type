@@ -78,7 +78,7 @@ with sync_playwright() as pw:
         expect(quick.get_by_role('combobox')).to_be_disabled()
         expect(quick.get_by_role('button',name='Try this text',exact=True)).to_be_disabled()
         page.evaluate('window.__addResolve()')
-        expect(quick.locator('#style-trial-title')).to_have_text('Try Everyday list with your text')
+        expect(quick.locator('[data-style-trial-title]')).to_have_text('Try Everyday list with your text')
         expect(quick.get_by_label('Your text',exact=True)).to_have_value('Keep my draft while choosing a style')
         created=[x for x in page.evaluate('window.__trialLog') if x['cmd']=='create_style_pack_from_template'][-1]['args']['template']
         import hashlib
@@ -86,7 +86,7 @@ with sync_playwright() as pw:
         check('Adding a style does not process text or change recording defaults',not any(x['cmd'] in ['try_style_pack_text','set_active_style_pack','save_style_pack'] for x in page.evaluate('window.__trialLog')))
         quick.get_by_role('combobox').select_option('builtin.structured')
         quick.get_by_role('button',name='Choose saved Everyday list',exact=True).click()
-        expect(quick.locator('#style-trial-title')).to_have_text('Try Everyday list with your text')
+        expect(quick.locator('[data-style-trial-title]')).to_have_text('Try Everyday list with your text')
         check('Choosing the saved optional style reuses it rather than adding a duplicate',len([x for x in page.evaluate('window.__trialLog') if x['cmd']=='create_style_pack_from_template'])==2)
         quick.get_by_role('button',name='Close',exact=True).click()
         page.get_by_role('button',name='Try typed text',exact=True).click()
