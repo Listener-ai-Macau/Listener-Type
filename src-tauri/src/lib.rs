@@ -1052,6 +1052,7 @@ pub fn run() {
             commands::list_saved_text_drafts,
             commands::save_text_draft,
             commands::delete_saved_text_draft,
+            commands::rename_saved_text_draft,
             commands::insert_style_trial_result,
             commands::cancel_style_trial_insert,
             commands::get_style_text_trial_readiness,

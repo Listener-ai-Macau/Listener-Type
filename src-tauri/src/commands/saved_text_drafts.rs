@@ -13,3 +13,9 @@ pub fn delete_saved_text_draft(window: Window, id: String) -> Result<(), String>
     ensure_main_window(&window)?;
     crate::saved_text_drafts::delete(&crate::persistence::saved_text_drafts_path().map_err(|_| "saved_draft_write")?, &id)
 }
+
+#[tauri::command]
+pub fn rename_saved_text_draft(window: Window, id: String, expected_name: String, name: String) -> Result<crate::saved_text_drafts::SavedTextDraft, String> {
+    ensure_main_window(&window)?;
+    crate::saved_text_drafts::rename(&crate::persistence::saved_text_drafts_path().map_err(|_| "saved_draft_write")?, &id, &expected_name, &name)
+}

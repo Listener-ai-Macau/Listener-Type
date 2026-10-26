@@ -80,6 +80,8 @@ From **Overview → Try typed text**, try a saved style with your own non-sensit
 
 Style and translation failures preserve a usable original where possible. Vocabulary helps recognition but cannot guarantee an exact result. Remote style-market features are unconfigured by default and are separate from local style packs.
 
+Open **History → Saved drafts** to find text you explicitly saved. Change **Draft name**, then click **Save name** or press Enter to distinguish similar versions. Renaming keeps the text, attached original, record identity and saved time unchanged. New translation drafts start with labels for local/cloud processing and manual edits; existing names are retained. **Edit a copy** saves revised text as another draft without overwriting the original. Select and delete drafts you no longer need explicitly.
+
 ## Voice questions and selection questions
 
 With Listener connected and both speech and answer services configured, say the Chinese command **“开始提问”** followed by your question. The question card appears at the recording capsule position and previews the words being recognized. After you stop speaking, it finishes capture and requests an answer; **Finish and ask** is also available if capture continues. The existing **“开始录音”** command still starts dictation. Questions and answers are not automatically inserted into another app or the clipboard; use Copy when needed. The card defaults to 360×240, is resizable and keeps its adjusted size when reopened.

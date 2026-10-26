@@ -1429,6 +1429,17 @@ export function saveTextDraft(id: string, name: string, original: string, text: 
 export function deleteSavedTextDraft(id: string): Promise<void> {
   return invokeOrMock('delete_saved_text_draft', {id}, () => {mockTextDrafts = mockTextDrafts.filter(d=>d.id!==id);});
 }
+export function renameSavedTextDraft(id: string, expectedName: string, name: string): Promise<SavedTextDraft> {
+  return invokeOrMock('rename_saved_text_draft', { id, expectedName, name }, () => {
+    name = name.trim();
+    if (!name || Array.from(name).length > 80) throw Error('saved_draft_invalid_name');
+    const draft = mockTextDrafts.find(d => d.id === id);
+    if (!draft) throw Error('saved_draft_missing');
+    if (draft.name !== name && draft.name !== expectedName) throw Error('saved_draft_name_changed');
+    draft.name = name;
+    return structuredClone(draft);
+  });
+}
 let mockDeviceLayouts: DeviceLayout[] = [];
 export const nativeDeviceLayoutsAvailable = isTauri;
 export function listLocalDeviceLayouts(): Promise<DeviceLayout[]> {

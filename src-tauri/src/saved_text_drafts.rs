@@ -1,4 +1,5 @@
-//! Explicit, immutable text drafts. Separate from speech History and audio retention.
+//! Explicit text snapshots with independently editable names. Content stays immutable.
+//! Separate from speech History and audio retention; keep the original v1 file format.
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path, sync::{Mutex, OnceLock}};
 const LIMIT: usize = 50;
@@ -58,6 +59,20 @@ pub fn delete(path: &Path, id: &str) -> Result<(), String> {
     let mut lib = read(path)?;
     lib.drafts.retain(|d| d.id != id); write(path, &lib)
 }
+pub fn rename(path: &Path, id: &str, expected_name: &str, name: &str) -> Result<SavedTextDraft, String> {
+    let _lock = ACCESS.get_or_init(|| Mutex::new(())).lock().map_err(|_| "saved_draft_busy")?;
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 80 { return Err("saved_draft_invalid_name".into()); }
+    let mut lib = read(path)?;
+    let draft = lib.drafts.iter_mut().find(|d| d.id == id).ok_or("saved_draft_missing")?;
+    // An uncertain reply may be retried. Never overwrite a different later name.
+    if draft.name == name { return Ok(draft.clone()); }
+    if draft.name != expected_name { return Err("saved_draft_name_changed".into()); }
+    draft.name = name.to_owned();
+    let updated = draft.clone();
+    write(path, &lib)?;
+    Ok(updated)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -76,5 +91,31 @@ mod tests {
         assert!(save(&p,"bad-id".into(),"A".into(),"".into(),"Keep".into()).is_err());assert!(save(&p,uuid::Uuid::new_v4().to_string(),"A".into(),"".into(),"x".repeat(100_001)).is_err());
         for _ in 0..LIMIT { save(&p,uuid::Uuid::new_v4().to_string(),"A".into(),"".into(),"Keep".into()).unwrap(); }
         assert_eq!(save(&p,uuid::Uuid::new_v4().to_string(),"A".into(),"".into(),"Extra".into()).unwrap_err(),"saved_draft_limit");assert_eq!(list(&p).unwrap().len(),LIMIT);fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn explicit_names_preserve_snapshot_identity_and_uncertain_retries() {
+        let root=std::env::temp_dir().join(format!("listener-draft-names-{}",uuid::Uuid::new_v4()));fs::create_dir_all(&root).unwrap();let p=root.join("drafts.json");
+        let a=save(&p,uuid::Uuid::new_v4().to_string(),"Translate English".into(),"原文条件".into(),"Same opening, local draft".into()).unwrap();
+        let b=save(&p,uuid::Uuid::new_v4().to_string(),a.name.clone(),a.original.clone(),"Same opening, reviewed draft".into()).unwrap();
+        let named=rename(&p,&a.id,&a.name,"会议改期－待审核").unwrap();
+        assert_eq!(named,SavedTextDraft {name:"会议改期－待审核".into(),..a.clone()});
+        assert_eq!(rename(&p,&a.id,&a.name,&named.name).unwrap(),named);
+        assert_eq!(list(&p).unwrap(),vec![b,named.clone()]);
+        // The unchanged v1 schema is still readable; saves cannot become renames.
+        let file:Library=serde_json::from_slice(&fs::read(&p).unwrap()).unwrap();assert_eq!(file.schema,1);
+        assert_eq!(save(&p,a.id.clone(),a.name.clone(),a.original.clone(),a.text.clone()).unwrap_err(),"saved_draft_changed");
+        assert_eq!(save(&p,named.id.clone(),named.name.clone(),named.original.clone(),named.text.clone()).unwrap(),named);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn conflicting_or_missing_name_edits_do_not_mutate_the_library() {
+        let root=std::env::temp_dir().join(format!("listener-draft-name-conflict-{}",uuid::Uuid::new_v4()));fs::create_dir_all(&root).unwrap();let p=root.join("drafts.json");
+        let a=save(&p,uuid::Uuid::new_v4().to_string(),"Original label".into(),"Keep original".into(),"Keep body".into()).unwrap();
+        rename(&p,&a.id,&a.name,"Reviewed").unwrap();let bytes=fs::read(&p).unwrap();
+        assert_eq!(rename(&p,&a.id,&a.name,"Stale change").unwrap_err(),"saved_draft_name_changed");
+        assert_eq!(rename(&p,&uuid::Uuid::new_v4().to_string(),"","New").unwrap_err(),"saved_draft_missing");
+        assert_eq!(rename(&p,&a.id,"Reviewed","  ").unwrap_err(),"saved_draft_invalid_name");
+        assert_eq!(rename(&p,&a.id,"Reviewed",&"字".repeat(81)).unwrap_err(),"saved_draft_invalid_name");
+        assert_eq!(fs::read(&p).unwrap(),bytes);fs::remove_dir_all(root).unwrap();
     }
 }

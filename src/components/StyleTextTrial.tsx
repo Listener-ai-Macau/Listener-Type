@@ -101,7 +101,10 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
   const [deliveryMessage, setDeliveryMessage] = useState('');
   const delivering = deliveryStarted !== null;
   const resultOutput = editedOutput ?? result?.outputText ?? '';
-  const savedCurrentDraft = savedDraftSignature === JSON.stringify([presentation.name, draft, resultOutput]);
+  const savedDraftName = translationTarget && result
+    ? `${presentation.name} · ${t(result.usedTextService ? 'textDraft.routeCloud' : 'textDraft.routeLocal')}${editedOutput !== null ? ` · ${t('textDraft.routeEdited')}` : ''}`
+    : presentation.name;
+  const savedCurrentDraft = savedDraftSignature === JSON.stringify([savedDraftName, draft, resultOutput]);
   const canProcess = offline ? offlineReady : !!readiness?.available && (!readiness.requiresTextService || readiness.textServiceConfigured);
 
   useEffect(() => {
@@ -298,7 +301,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
       <p id="style-trial-description" className="ol-style-trial-hint" data-style-trial-service-notice>{t(offline ? 'offlineTranslation.localNotice' : readiness?.requiresTextService === false ? prepareShorter ? 'textWorkspace.localWithShorterNotice' : 'textWorkspace.localNotice' : 'textWorkspace.cloudNotice')}</p>
       <details className="ol-style-trial-options-panel" data-text-options-panel open={optionsOpen}
         onToggle={event => setOptionsOpen(event.currentTarget.open)}>
-        <summary>{translationTarget ? t('textWorkspace.translationOptions', {
+        <summary>{translationTarget ? t(offline ? 'textWorkspace.translationOptions' : 'textDraft.cloudTranslationOptions', {
           source: translationSource ? translationLanguageLabel(translationSource, i18n.resolvedLanguage ?? i18n.language) : t('offlineTranslation.chooseSource'),
           target: translationLanguageLabel(translationTarget, i18n.resolvedLanguage ?? i18n.language),
           engine: t(offline ? 'offlineTranslation.local' : 'offlineTranslation.cloud'),
@@ -409,9 +412,9 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
             <Btn size="sm" variant="blue" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => void copyResult()}>
               {t(copying ? 'style.trial.copying' : copiedResult === result ? 'style.trial.copied' : 'style.trial.copyResult')}
             </Btn>
-            <SaveTextDraft compact name={presentation.name} original={draft} text={resultOutput} disabled={copying || delivering} onBusy={setDraftSaving}
+            <SaveTextDraft compact name={savedDraftName} original={draft} text={resultOutput} disabled={copying || delivering} onBusy={setDraftSaving}
               onUnsaved={() => setSavedDraftSignature('')}
-              onSaved={text => setSavedDraftSignature(JSON.stringify([presentation.name, draft, text]))} />
+              onSaved={text => setSavedDraftSignature(JSON.stringify([savedDraftName, draft, text]))} />
             {(!offline || translationTarget === 'English') && <PoliteEditSuggestions key={`${generation.current}:${result?.packId ?? ''}`} text={resultOutput} originalText={draft} localOnly={offline} cloudConfigured={!offline && readiness?.textServiceConfigured === true}
               disabled={copying || delivering || draftSaving} onApply={updateEditedOutput} />}
           </div>
