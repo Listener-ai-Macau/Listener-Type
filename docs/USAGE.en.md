@@ -80,11 +80,15 @@ From **Overview → Try typed text**, try a saved style with your own non-sensit
 
 Style and translation failures preserve a usable original where possible. Vocabulary helps recognition but cannot guarantee an exact result. Remote style-market features are unconfigured by default and are separate from local style packs.
 
-## Selection questions
+## Voice questions and selection questions
 
-Select text in another application and press Ctrl+Shift+; to open Ask. Check that the intended selection has been captured, then use the recording key to ask and to stop. Configure the required services first. Closing the window clears this conversation.
+With Listener connected and both speech and answer services configured, say the Chinese command **“开始提问”** followed by your question. The question card appears at the recording capsule position and previews the words being recognized. After you stop speaking, it finishes capture and requests an answer; **Finish and ask** is also available if capture continues. The existing **“开始录音”** command still starts dictation. Questions and answers are not automatically inserted into another app or the clipboard; use Copy when needed. The card defaults to 360×240, is resizable and keeps its adjusted size when reopened.
 
-Selected text is sent to the configured text provider. Long selections are bounded; review the captured passage before asking. Selection questions have a separate history preference.
+The button route remains available through **Tools → Selection questions**: open the card, click **Start asking**, speak into the computer microphone, then click **Finish and ask**. This route keeps the computer microphone source without changing the everyday Listener input setting.
+
+To ask about selected text, select it in another application and press Ctrl+Shift+; to open Ask. Check that the intended selection has been captured before asking. Selected text is sent to the configured text provider; long selections are bounded. The card supports follow-up questions. Closing it clears this conversation. Question history has a separate preference.
+
+Speech recognition and answers use your configured services and their usage charges. Each answer request includes one current local timestamp as context; review important facts. Saved configuration alone does not establish network access, valid credentials or available quota.
 
 ## Shortcuts and preferences
 
