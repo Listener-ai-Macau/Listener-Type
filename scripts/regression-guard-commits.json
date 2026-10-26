@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-26T19:55:03.144688+08:00",
+  "updated_at": "2026-10-26T22:10:45.538118+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -8612,6 +8612,39 @@
       "machine_accepted_scope": [
         "200 consolidated source-only copy-name checkpoint plus explicit result-to-translation/refinement handoff, labelled session comparison, visible unsaved confirmation. TypeScript and affected headless tests passed; exact native raw/edited handoff plus named copy/save/reopen on real private storage passed. Controlled fixtures are not translation quality; physical/global/original22 gaps remain."
       ]
+    },
+    {
+      "id": "saved_draft_workspace_entry_and_first_save_name_keep_source",
+      "subject": "Explicit saved-draft workspace continuation and named first saves preserve source and original records",
+      "state": "201_affected_headless_and_exact_native_storage_passed_no_new_human_or_customer_qualification",
+      "protects": [
+        "Opening saved text makes no automatic service/copy/save and does not mutate the selected record.",
+        "First-save chosen name and exact input/edited result bind the existing immutable save/retry identity.",
+        "Over-limit saved text cannot be silently truncated; nested dialog/input IDs are distinct.",
+        "Returning refreshes saved list and clean names, while existing pending rename conflict edits are retained."
+      ],
+      "guards": [
+        "python scripts/check-saved-text-drafts-ui.py --edit-copy --naming",
+        "python scripts/check-translation-text-trial-ui.py"
+      ],
+      "pending_human_scope": [
+        "No new201 natural customer or physical/global/original22 qualification; prior200 return-use scopes retained."
+      ],
+      "repo": "type",
+      "commit": "a30fe3cd67768b54ea09378837e36e03bc1924a9",
+      "commit_subject": "Continue saved drafts in text workspace and name first saves",
+      "humanAccepted": false,
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\drafts-next-typescript.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\drafts-next-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\continuation-next-ui.json",
+        "work\\customer-onboarding-20261020\\isolated-native201-snapshot-20261026-213642\\text201-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261026-build201\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261026-build201\\type201-installed.json"
+      ],
+      "machine_accepted_scope": [
+        "201 consolidated saved-draft continuation and first-save naming. Affected19 saved-draft and8 existing result-handoff headless checks, TypeScript, exact native ordinary UI/real private disk save/reopen/source retention passed. No201 natural customer, voice, external paste, physical/global or whole22 claim."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-26T09:57:34.047029+08:00",
@@ -9645,7 +9678,8 @@
         "customer113_recorded_transcript_explicit_local_drafts",
         "customer114_acknowledged_saved_version_guidance",
         "customer115_recorded_transcript_to_independent_text_workspace",
-        "reviewed_text_continuation_and_named_copy_preserve_sources"
+        "reviewed_text_continuation_and_named_copy_preserve_sources",
+        "saved_draft_workspace_entry_and_first_save_name_keep_source"
       ],
       "paths": {
         "type": [
