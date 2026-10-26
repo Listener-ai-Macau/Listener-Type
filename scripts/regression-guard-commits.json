@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-26T11:23:40.606977+08:00",
+  "updated_at": "2026-10-26T12:04:45.239674+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -8444,27 +8444,23 @@
     },
     {
       "id": "question_voice_route_shared_card_and_bounded_speech_recovery",
-      "subject": "Independent question wake and capsule-anchored answer card; question automatic endpoint waits for recognition rather than impossible editor receipt, with one bounded retained-audio recovery",
-      "state": "196_actual_question_preview_and_automatic_source_stop_passed_calendar_answer_failed_separate_context_fix_in_progress",
+      "subject": "Listener voice questions preview recognized words and automatically finish without editor delivery ownership",
+      "state": "actual196_listener_preview_source_autoStop_observed_exact197_native_release_scope",
       "repo": "type",
       "commit": "f60756875bc21e688ab04eecef1f79abdeef58ed",
       "commit_subject": "Preview live questions and preserve enrolled identity across question commands",
       "humanAccepted": false,
       "protects": [
-        "Keep configured dictation wake and enrolled owner profile; distinct strict question keyword reuses the existing KWS runtime",
-        "Bind question action before ASR/editor consumers; no question or answer automatic editor/clipboard delivery",
-        "Use medium360x240 card at the same capsule bottom anchor; preserve user resize and streamed-answer reading position",
-        "Use one existing-provider retained-audio recovery for question speech transport errors; preserve scoped cancellation and no duplicate question/answer",
-        "All three Question endpoint readers wait for unfinished recognition, never for an editor receipt; Dictation keeps existing receipt protection",
-        "Question capture previews are reversible and UUID-bound; late/stale partials cannot enter another question.",
-        "The new question command text cannot replace the enrolled identity profile used by native-word and pending-source verification."
+        "Question and Dictation action is fixed before capture; questions never wait for an editor receipt or auto-insert answers",
+        "Command phrase and enrolled identity phrase are separate; existing enrollment remains usable for question commands",
+        "Owned reversible question preview is retained through recognition finishing and replaced once; stale/late sessions cannot overwrite it",
+        "Transient question ASR transport failure has one retained-audio recovery with existing credentials; cancel/generation guards remain",
+        "One current local timestamp in the common answer prompt; no model semantic correctness guarantee"
       ],
       "guards": [
-        "Pure action/editor permission/stale-owner state checks",
-        "Existing-model KWS mechanical dictation/question/ordinary speech fixtures",
-        "Question actual existing ASR/LLM private backend path and explicit injected2500ms writer-timeout recognition replay",
-        "Exact matching native card anchor, fixed controls, close late record rejection and visible streamed reading",
-        "Shared endpoint-clock action/recognition matrix and existing Dictation receipt regressions22passed"
+        "Actual196 target_speaker_inactive_3000ms stop_feedback after owned realtime question previews; calendar answer failure remains in original record",
+        "Original194 writer-timeout fault replay,195 endpoint contracts and196 identity/lifecycle checks retained",
+        "Exact197 matching native capsule anchor/owned preview/loading/stale-owner/close/resize controlled check"
       ],
       "machine_evidence": [
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261026-build194\\source-audit.json",
@@ -8481,14 +8477,23 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261026-build195\\type195-installed.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261026-build196\\human-question196-reviewed.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261026-build196\\qa-actual-observer-result.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native196-snapshot-20261026-103952\\qa196-native.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native196-snapshot-20261026-103952\\qa196-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261026-build197\\source-audit.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\qa196-identity-boundary-tests.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\qa196-lifecycle-checks.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\qa194-writer-fault-replay.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\qa197-time-only-and-guidance-typescript.log",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native197-snapshot-20261026-120241\\qa197-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261026-build197\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261026-build197\\type197-installed.json"
       ],
       "machine_accepted_scope": [
-        "Actual196 Listener voice question produced reversible partial question text and first stop_feedback=target_speaker_inactive_3000ms, then native answer. This trace qualifies preview/automatic capture ending. Its calendar answer was incorrect and remains a separate answer-context defect; not all QA facts, environments or original22 scopes qualified."
+        "Actual196 Listener voice question produced reversible partial question text and first stop_feedback=target_speaker_inactive_3000ms, then native answer. This trace qualifies preview/automatic capture ending. Its calendar answer was incorrect and remains a separate answer-context defect; not all QA facts, environments or original22 scopes qualified.",
+        "Coherent public191→197 Listener voice question command, owned preview/automatic endpoint and bounded ASR recovery. Actual196 Owner question preview/source STOP proof retained at f6075687; exact197 controlled private native layout/preview ownership/close proof is separate. No blanket external-selection/global/physical/semantic answer qualification."
       ],
       "pending_human_scope": [
-        "Calendar semantic defect is tested separately at the actual service after context repair, not implied by automatic capture success.",
-        "Original22 other unresolved scopes retained."
+        "External selected context and actual global-trigger combinations, long-term/noisy microphone behavior remain separate.",
+        "Actual196 calendar answer was wrong; current time context is not proof of arbitrary model answer correctness."
       ]
     }
   ],
@@ -9948,7 +9953,17 @@
           "src/pages/QaPanel.tsx",
           "src-tauri/src/asr/volcengine.rs",
           "src-tauri/src/coordinator/dictation_wake_polish.rs",
-          "src-tauri/src/wake_phrase.rs"
+          "src-tauri/src/wake_phrase.rs",
+          "src/voice_command.rs",
+          "src/wake_voice_commands.rs",
+          "src/wake_phrase.rs",
+          "src/coordinator/qa_voice_capture.rs",
+          "src/coordinator/qa_asr_finalization.rs",
+          "src/coordinator/dictation_endpoint_clock.rs",
+          "src/coordinator/dictation_wake_polish.rs",
+          "src/asr/volcengine.rs",
+          "src/qa_calendar_context.rs",
+          "src/polish.rs"
         ]
       },
       "known_failures": [
