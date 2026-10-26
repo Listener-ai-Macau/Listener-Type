@@ -3717,16 +3717,9 @@ impl EmbeddedStreamingDictation {
                                                     task_origin_bytes,
                                                 );
                                             candidate.retain_complete_local_wake_intent(&result);
-                                            if qualify_candidate_wake_intent(
-                                                phrase_signal,
-                                                kws_hit.as_ref().map(|found| found.phrase_evidence_for(&phrase))
-                                                    .unwrap_or(crate::speech_decision_kernel::KeywordPhraseEvidence::Unobserved),
-                                                candidate.complete_local_wake_intent,
-                                                candidate.current_candidate_range(),
-                                                false,
-                                            ) != denzic_voice_activation_v1_core::PhraseSignal::None {
-                                                show_early_wake_recording_capsule(inner, candidate);
-                                            }
+                                            // Local phrase proof alone is not a
+                                            // visible recording. The common owner
+                                            // gate below must accept first.
                                         }
                                         Some(crate::wake_phrase::Match {
                                             audio_end_seconds: kws_hit
@@ -4146,6 +4139,7 @@ impl EmbeddedStreamingDictation {
             && phrase_signal == denzic_voice_activation_v1_core::PhraseSignal::KeywordModel {
             persist_verified_wake_phrase_calibration(phrase.clone()).await;
         }
+        show_early_wake_recording_capsule(inner, candidate, arbitration);
 
         let ensure_request_id = next_accepted_wake_capture_request_id();
         let previous_segment_id = embedded_session_id;

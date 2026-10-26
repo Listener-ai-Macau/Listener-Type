@@ -2209,11 +2209,13 @@ fn reject_hidden_automatic_candidate(
     true
 }
 
-/// Show Recording capsule after local ExactStart. Do not pop it on a bare KWS
-/// hit: enrolled voiceprint can still reject, which flashed the capsule then
-/// dismissed it (live 2026-09-10 9895). Product Accept still creates the
-/// coordinator session.
-fn show_early_wake_recording_capsule(inner: &Arc<Inner>, candidate: &mut BufferedSpeakerCandidate) {
+/// Show a dictation preview only after complete intent and common owner
+/// admission, before device handoff. Phrase-only previews could flash even for
+/// a later rejected speaker. The accepted session still owns product lifetime.
+fn show_early_wake_recording_capsule(inner: &Arc<Inner>, candidate: &mut BufferedSpeakerCandidate,
+    arbitration: crate::speech_decision_kernel::WakeArbitration) {
+    if arbitration.decision != denzic_voice_activation_v1_core::GateDecision::Accept
+        || candidate.voice_action != crate::voice_command::VoiceAction::Dictation { return; }
     if candidate.early_capsule_session_id.is_some() {
         return;
     }
@@ -2237,7 +2239,7 @@ fn show_early_wake_recording_capsule(inner: &Arc<Inner>, candidate: &mut Buffere
     );
     candidate.early_capsule_session_id = Some(session_id);
     log::info!(
-        "[wake-phrase] early recording capsule shown session_id={session_id} (local full-phrase confirmed)"
+        "[wake-phrase] early recording capsule shown session_id={session_id} (complete intent and owner gate accepted)"
     );
 }
 

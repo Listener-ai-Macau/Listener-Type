@@ -504,6 +504,9 @@ fn arbitrate_candidate_wake(
         owner_gate.access,
         terminal,
     );
+    crate::wake_admission_diagnostics::record_gate(candidate.candidate_id, candidate.voice_action,
+        qualified_intent, arbitration, verification.as_ref().ok().map(|value| value.score),
+        owner_gate.recovered_by_local_phrase, terminal, candidate.started_at.elapsed().as_millis() as u64);
     (owner_gate, arbitration, qualified_intent)
 }
 

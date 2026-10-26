@@ -94,6 +94,7 @@ async fn finish_primary_keyword_check(candidate: &mut BufferedSpeakerCandidate, 
     let outcome = check.task.await;
     let mut conflict = false;
     let mut compute_ms = 0;
+    let mut comparison_outcome = "completed_without_conflict";
     match outcome {
         Ok(result) => {
             if let Some((local, source, origin)) = result.local {
@@ -103,12 +104,21 @@ async fn finish_primary_keyword_check(candidate: &mut BufferedSpeakerCandidate, 
             }
             conflict = result.conflict.is_some_and(|proof|
                 (proof.keyword_end_seconds * 32_000.0).round() as u64 == (expected_end * 32_000.0).round() as u64);
+            if conflict { comparison_outcome = "conflicting_phrase"; }
             if let Some(error) = result.error {
+                comparison_outcome = if crate::asr::local::wake_helper::is_busy_error(&error) {
+                    "busy_budget_exhausted"
+                } else { "comparison_unavailable" };
                 log::info!("[wake-phrase] primary comparison unavailable candidate_id={} reason={}; keyword retained", check.candidate_id, error);
             }
         }
-        Err(error) => log::info!("[wake-phrase] primary comparison task failed candidate_id={} reason={}; keyword retained", check.candidate_id, error),
+        Err(error) => {
+            comparison_outcome = "task_failed";
+            log::info!("[wake-phrase] primary comparison task failed candidate_id={} reason={}; keyword retained", check.candidate_id, error);
+        }
     }
+    crate::wake_admission_diagnostics::record_comparison(candidate.candidate_id, candidate.voice_action,
+        comparison_outcome, check.started_at.elapsed().as_millis() as u64);
     log::info!("[wake-phrase] primary check completed candidate_id={} source={:?} conflict={} elapsed_ms={} local_ms={} pcm_retained=true",
         check.candidate_id, check.range, conflict, check.started_at.elapsed().as_millis(), compute_ms);
     if conflict {

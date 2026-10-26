@@ -89,19 +89,19 @@ pub(crate) fn arbitrate_wake(
     owner_access: OwnerAccessEvidence,
     terminal: bool,
 ) -> WakeArbitration {
-    let mut decision = decide_gate(GateInput {
+    let decision = decide_gate(GateInput {
         phrase_signal,
         owner_match: owner_access.gate_pass(),
         terminal,
     });
-    // Product bias: keep wake over false-wake. A first voiceprint miss
-    // must not throw away ExactStart/PresentLater/KeywordModel.
-    if matches!(decision, GateDecision::Reject | GateDecision::Pending)
-        && !matches!(phrase_signal, PhraseSignal::None)
-        && matches!(owner_access, OwnerAccessEvidence::EnrolledNonMatch)
-    {
-        decision = GateDecision::Accept;
-    }
+    // Owner-compatible quiet/noisy recovery is assessed by the source-bound
+    // owner gate before this seam. Do not erase its remaining NonMatch here:
+    // a keyword false positive must not turn a foreign speaker into an accept.
+    // Retain Pending during capture so a later usable owner window can recover;
+    // terminal NonMatch rejects. Unenrolled operation is unchanged.
+    let decision = if !terminal && owner_access == OwnerAccessEvidence::EnrolledNonMatch {
+        GateDecision::Pending
+    } else { decision };
     // VoiceActivation only means the device detected speech. Owner identity
     // cannot replace activation intent, even when that transport segment ends.
     // Phrase/phonetic recovery runs before this boundary and supplies a real
@@ -1541,7 +1541,7 @@ pub(crate) const fn live_repeated_owner_near_phrase_can_verify(
 /// 本人近音窗 0.04-0.30，媒体/旁人窗 0.01-0.11，两分布重叠，owner 门分不开。
 /// 此路径把「近音持续确认」本身当唤醒意图：distance≤2 证据在滚动窗口
 /// 累计满 RESCUE_CONFIRMATIONS 即放行，即使声纹 non-match——与冻结的
-/// EnrolledNonMatch+phrase→Accept 开放策略同族（转写命中同样不查声纹），
+/// 当时 EnrolledNonMatch+phrase→Accept 开放策略同族（该强制放行已于2026-10-26移除），
 /// 把同等待遇扩展给「持续近音」。误触面：旁人需跨 ≥4 个滚动窗持续发出
 /// distance≤2 近音；自然语音落 3+（2026-09-20 0/43 复盘：34/43 正确
 /// 拒识全在远处）。2026-09-23 15:37 实战首开即误报（剧集音频同窗滚动重听
@@ -1709,7 +1709,6 @@ mod tests {
                 super::OwnerAccessEvidence::OpenUnenrolled,
                 super::OwnerAccessEvidence::OpenInactiveProfile,
                 super::OwnerAccessEvidence::EnrolledMatch,
-                super::OwnerAccessEvidence::EnrolledNonMatch,
             ] {
                 for terminal in [false, true] {
                     let decision = super::arbitrate_wake(signal, owner, terminal);
@@ -2180,23 +2179,17 @@ mod tests {
     }
 
     #[test]
-    fn phrase_hit_accepts_even_when_first_voiceprint_misses() {
-        let result = arbitrate_wake(
-            PhraseSignal::LocalTranscript,
-            OwnerAccessEvidence::EnrolledNonMatch,
-            false,
-        );
-        assert_eq!(result.decision, GateDecision::Accept);
-        assert!(!result.owner_access.enrolled_owner_verified());
-        assert_eq!(
-            arbitrate_wake(
-                PhraseSignal::None,
-                OwnerAccessEvidence::EnrolledNonMatch,
-                true,
-            )
-            .decision,
-            GateDecision::Reject
-        );
+    fn phrase_hit_cannot_override_foreign_owner_but_live_capture_can_retry() {
+        for signal in [PhraseSignal::None, PhraseSignal::LocalTranscript, PhraseSignal::KeywordModel] {
+            let pending = arbitrate_wake(signal, OwnerAccessEvidence::EnrolledNonMatch, false);
+            assert_eq!(pending.decision, GateDecision::Pending);
+            assert!(!pending.owner_access.enrolled_owner_verified());
+            assert_eq!(arbitrate_wake(signal, OwnerAccessEvidence::EnrolledNonMatch, true).decision,
+                GateDecision::Reject);
+        }
+        // An actual later owner-compatible result still uses the same gate.
+        assert_eq!(arbitrate_wake(PhraseSignal::KeywordModel, OwnerAccessEvidence::EnrolledMatch, false).decision,
+            GateDecision::Accept);
     }
 
     #[test]

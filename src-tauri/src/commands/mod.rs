@@ -2463,6 +2463,11 @@ fn get_dictation_runtime_snapshot_request_error(request_id: u32) -> Option<Strin
 }
 
 #[tauri::command]
+pub fn get_wake_admission_diagnostics() -> crate::wake_admission_diagnostics::Snapshot {
+    crate::wake_admission_diagnostics::snapshot()
+}
+
+#[tauri::command]
 pub fn get_dictation_runtime_snapshot(
     coord: CoordinatorState<'_>,
     request_id: u32,

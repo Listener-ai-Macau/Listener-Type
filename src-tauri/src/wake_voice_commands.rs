@@ -14,6 +14,37 @@ pub(crate) struct CommandKeywordMatch {
 mod tests {
     use super::*;
     #[test]
+    #[ignore = "explicit saved/synthetic WAV manifest and verified existing KWS cache only; no microphone/cloud/editor"]
+    fn saved_commands_shadow_primary_and_dual_decoders() {
+        use sha2::{Digest, Sha256};
+        let manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(
+            std::env::var("LISTENER_COMMAND_SHADOW_MANIFEST").unwrap()).unwrap()).unwrap();
+        let mut rows = Vec::new();
+        for clip in manifest["clips"].as_array().unwrap() {
+            let wav = std::fs::read(clip["wav"].as_str().unwrap()).unwrap();
+            let pcm = denzic_audio_v1_core::read_wav_pcm16le(&wav).unwrap();
+            for batch in [1600, 6400] {
+                let mut primary = VoiceCommandDetector::new("开始录音", None).unwrap();
+                let mut dual = VoiceCommandDetector::new("开始录音", Some("开始提问")).unwrap();
+                assert!(dual.question_unavailable.is_none(), "{:?}", dual.question_unavailable);
+                for chunk in pcm.chunks(batch) {
+                    primary.accept_pcm(chunk).unwrap(); dual.accept_pcm(chunk).unwrap();
+                }
+                primary.finish().unwrap(); dual.finish().unwrap();
+                let encode = |detector: &VoiceCommandDetector| detector.selected.as_ref().map(|found|
+                    serde_json::json!({"action":format!("{:?}",found.action),
+                        "label":found.keyword.matched_keyword,"end":found.keyword.audio_end_seconds}));
+                let row = serde_json::json!({"id":clip["id"],"batch":batch,
+                    "pcmSha256":format!("{:x}",Sha256::digest(&pcm)),
+                    "primary":encode(&primary),"dual":encode(&dual)});
+                println!("command_shadow {row}"); rows.push(row);
+            }
+        }
+        std::fs::write(std::env::var("LISTENER_COMMAND_SHADOW_OUTPUT").unwrap(),
+            serde_json::to_vec_pretty(&serde_json::json!({"rows":rows,
+                "scope":"Decoder evidence only, not actual phrase/identity admission or current-event reproduction"})).unwrap()).unwrap();
+    }
+    #[test]
     #[ignore = "requires explicitly generated local speech WAVs and the existing KWS cache"]
     fn existing_model_separates_record_question_and_ordinary_speech() {
         let root = std::path::PathBuf::from(std::env::var("LISTENER_COMMAND_WAV_ROOT").unwrap());

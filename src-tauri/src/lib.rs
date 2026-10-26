@@ -52,6 +52,7 @@ mod qa_hotkey;
 mod qa_overlay_layout;
 mod voice_command;
 mod wake_voice_commands;
+mod wake_admission_diagnostics;
 mod recorder;
 mod selection;
 mod shortcut_binding;
@@ -1013,6 +1014,7 @@ pub fn run() {
             commands::recover_embedded_ble_device,
             commands::get_embedded_ble_runtime_status,
             commands::get_dictation_runtime_snapshot,
+            commands::get_wake_admission_diagnostics,
             commands::get_device_settings,
             commands::list_settings_devices,
             commands::get_selected_device_settings,

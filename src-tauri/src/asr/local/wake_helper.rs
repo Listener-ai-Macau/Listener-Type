@@ -240,11 +240,24 @@ mod imp {
     }
 
     impl WakeHelperClient {
+        fn keyword_comparison_slot(&self, timeout: Duration)
+            -> Result<parking_lot::MutexGuard<'_, Option<HelperProcess>>, String> {
+            // A superseded local-confirmation handle can be dropped while its
+            // blocking inference still owns this IPC lane. The complete-keyword
+            // check runs off the capture actor and already has a fixed budget:
+            // spend that budget waiting for the real lane, rather than turning
+            // transient contention into "comparison unavailable" and admitting
+            // a keyword without its acoustic-conflict check. Ordinary exploratory
+            // confirmations remain non-queueing.
+            self.process.try_lock_for(timeout)
+                .ok_or_else(|| super::WAKE_HELPER_BUSY_ERROR_CODE.to_string())
+        }
+
         fn compare_keyword(&self, pcm: &[u8], phrase: &str, claimed_end_seconds: f32,
             timeout: Duration) -> Result<Option<crate::wake_phrase::AcousticKeywordConflict>, String> {
             use sha2::{Digest, Sha256};
-            let mut slot = self.process.try_lock()
-                .ok_or_else(|| super::WAKE_HELPER_BUSY_ERROR_CODE.to_string())?;
+            let started = std::time::Instant::now();
+            let mut slot = self.keyword_comparison_slot(timeout)?;
             let wav = TempWavFile::create_without_context_padding(pcm)
                 .map_err(|err| format!("prepare keyword comparison WAV: {err:#}"))?;
             let request_id = Uuid::new_v4().to_string();
@@ -256,7 +269,8 @@ mod imp {
                 *slot = None;
                 return Err(error);
             }
-            let response = match process.receive(timeout) {
+            // Waiting must not add a second timeout to the original budget.
+            let response = match process.receive(timeout.saturating_sub(started.elapsed())) {
                 Ok(response) => response,
                 Err(err) => { *slot = None; return Err(err); }
             };
@@ -814,6 +828,54 @@ mod imp {
                 .confirm(&[0, 0], "开始录音", Duration::from_millis(1))
                 .expect_err("a second confirmation must not queue");
             assert!(super::super::is_busy_error(&error));
+        }
+
+        #[test]
+        fn complete_keyword_check_waits_for_superseded_work_but_keeps_one_budget() {
+            let client = WakeHelperClient::default();
+            let active = client.process.lock();
+            assert!(client.process.try_lock().is_none(),
+                "the old immediate-lock path would skip the comparison here");
+            let (started, waiting) = std::sync::mpsc::channel();
+            std::thread::scope(|scope| {
+                let waiter = scope.spawn(|| {
+                    started.send(()).unwrap();
+                    let slot = client.keyword_comparison_slot(Duration::from_secs(1)).unwrap();
+                    assert!(slot.is_none());
+                });
+                waiting.recv().unwrap();
+                // Model an already-running request whose former candidate no
+                // longer retains the join handle. Its real IPC work owns the
+                // slot until completion; a new keyword must not skip precision.
+                std::thread::sleep(Duration::from_millis(20));
+                drop(active);
+                waiter.join().unwrap();
+            });
+            let _active = client.process.lock();
+            let began = std::time::Instant::now();
+            let error = match client.keyword_comparison_slot(Duration::from_millis(15)) {
+                Ok(_) => panic!("an outstanding request must retain its lane"),
+                Err(error) => error,
+            };
+            assert!(super::super::is_busy_error(&error));
+            assert!(began.elapsed() < Duration::from_secs(1));
+        }
+
+        #[test]
+        #[ignore = "explicit retained false-command PCM and verified existing native assets, no microphone/cloud/editor"]
+        fn saved_false_command_still_gets_checked_when_previous_work_owns_helper() {
+            let wav = std::fs::read(std::env::var("LISTENER_WAKE_DIAG_CLIP").unwrap()).unwrap();
+            let pcm = denzic_audio_v1_core::read_wav_pcm16le(&wav).unwrap();
+            let client = WakeHelperClient::default();
+            client.preload().unwrap();
+            let active = client.process.lock();
+            std::thread::scope(|scope| {
+                let check = scope.spawn(|| client.compare_keyword(&pcm, "开始录音", 1.76, Duration::from_secs(4)));
+                std::thread::sleep(Duration::from_millis(30));
+                drop(active);
+                assert!(check.join().unwrap().unwrap().is_some(),
+                    "transient contention must not skip the known affirmative conflict");
+            });
         }
 
         #[test]

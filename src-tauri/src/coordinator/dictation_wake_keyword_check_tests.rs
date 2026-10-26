@@ -42,6 +42,46 @@ fn primary() -> crate::wake_phrase::Match {
         audio_end_seconds: Some(1.76), matched_keyword: Some("开始录音".into()),
         origin: crate::wake_phrase::KeywordEvidenceOrigin::PrimaryDetector }
 }
+
+#[test]
+fn both_voice_actions_keep_owner_recovery_without_accepting_foreign_phrase_hits() {
+    use crate::voice_command::VoiceAction;
+    use denzic_voice_activation_v1_core::{GateDecision, PhraseSignal};
+    for action in [VoiceAction::Dictation, VoiceAction::Question] {
+        for (claimed, score, expected_owner) in [
+            (PhraseSignal::KeywordModel, 0.11, false),
+            (PhraseSignal::LocalTranscript, 0.11, false),
+            (PhraseSignal::KeywordModel, 0.330_721, true),
+            (PhraseSignal::LocalTranscript, 0.264, true),
+            (PhraseSignal::LocalTranscript, 0.402_310, true),
+        ] {
+            for terminal in [false, true] {
+                let mut c = candidate(vec![0; 67200]);
+                c.voice_action = action;
+                c.command_phrase = if action == VoiceAction::Question { "开始提问" } else { "开始录音" }.into();
+                let phrase = c.command_phrase.clone();
+                let mut found = primary();
+                found.matched_keyword = Some(phrase.clone());
+                if claimed == PhraseSignal::LocalTranscript {
+                    found.matched_keyword = None;
+                    c.complete_local_wake_intent = Some(CompleteLocalWakeIntent {
+                        range: c.current_candidate_range().unwrap(),
+                    });
+                }
+                let verification = Ok(crate::speaker_verification::VerificationResult {
+                    matched: false, owner_matched: false, score,
+                    policy: crate::speaker_verification::VerificationPolicy::Enrolled,
+                });
+                let (owner, decision, _) = arbitrate_candidate_wake(&mut c, claimed, Some(&found),
+                    &phrase, &verification, false, terminal, 2100);
+                assert_eq!(owner.access.enrolled_owner_verified(), expected_owner);
+                assert_eq!(decision.decision, if expected_owner { GateDecision::Accept }
+                    else if terminal { GateDecision::Reject } else { GateDecision::Pending },
+                    "action={action:?} signal={claimed:?} score={score} terminal={terminal}");
+            }
+        }
+    }
+}
 fn pending_check(c: &BufferedSpeakerCandidate, task: tauri::async_runtime::JoinHandle<PrimaryKeywordCheckResult>) -> PrimaryKeywordCheck {
     PrimaryKeywordCheck { candidate_id: c.candidate_id,
         range: c.current_candidate_range().unwrap(), pcm_sha256: wake_pcm_digest(&c.pcm),

@@ -11705,6 +11705,8 @@ fn target_speaker_endpoint_candidate_capsule_cannot_create_or_close_product_sess
     assert!(!body.contains("begin_session_state("));
     assert!(!body.contains("state.phase ="));
     assert!(body.contains("uuid::Uuid::new_v4()"));
+    assert!(body.contains("arbitration.decision != denzic_voice_activation_v1_core::GateDecision::Accept"));
+    assert!(body.contains("candidate.voice_action != crate::voice_command::VoiceAction::Dictation"));
 }
 
 #[test]
@@ -15143,7 +15145,7 @@ fn hidden_candidate_marked_active_before_detector_init() {
     let dictation = include_str!("dictation.rs");
     assert!(
         stream_all.contains("show_early_wake_recording_capsule")
-            && dictation.contains("local full-phrase confirmed")
+            && dictation.contains("complete intent and owner gate accepted")
             && stream_all.contains("PendingSecondaryDecision::AwaitSecondary")
             && !stream_all.contains("stage2 timeout fail-open KeywordModel")
             && stream_all.contains("stage2 timeout held after explicit Absent")
