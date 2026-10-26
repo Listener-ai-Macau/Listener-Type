@@ -30,6 +30,7 @@ const QA_ERROR_TRANSLATIONS = new Map([
   ['qa_action_failed', 'qa.actionFailed'],
   ['qa_close_failed', 'qa.closeFailed'],
   ['qa_unknown_error', 'qa.error'],
+  ['qa_speech_recovery_failed', 'qa.speechRecoveryFailed'],
 ]);
 
 export function QaPanel() {
@@ -45,6 +46,7 @@ export function QaPanel() {
   const [requestedActions, setRequestedActions] = useState(new Set<'start' | 'stop'>());
   /** 流式 LLM 答案：answer_delta 累积、answer 事件来时清空（最终内容已落到 messages）。 */
   const [streamingAnswer, setStreamingAnswer] = useState<string>('');
+  const [recoveringSpeech, setRecoveringSpeech] = useState(false);
   /** 录音电平：0..1。后端每帧 33ms 通过 qa:level emit。详见 issue #162。 */
   const [level, setLevel] = useState<number>(0);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -69,6 +71,7 @@ export function QaPanel() {
         const { listen } = await import('@tauri-apps/api/event');
         const stateHandle = await listen<QaStatePayload>('qa:state', event => {
           const payload = event.payload;
+          if (payload.kind !== 'answer_delta') setRecoveringSpeech(payload.kind === 'loading' && !!payload.recovering_speech);
           if (payload.input_source) setInputSource(payload.input_source);
           if (payload.messages) {
             setMessages(payload.messages);
@@ -288,7 +291,7 @@ export function QaPanel() {
         <button data-qa-record-control onMouseDown={event => event.preventDefault()} onClick={() => void onRecord()}
           disabled={status === 'thinking' || (status !== 'recording' && !preparation.ready) || requestedActions.has(status === 'recording' ? 'stop' : 'start')}
           style={{ border: 0, borderRadius: 8, padding: '6px 10px', background: 'var(--ol-blue)', color: 'white', font: 'inherit', fontSize: 13, opacity: status !== 'recording' && !preparation.ready ? .45 : 1, cursor: status === 'thinking' ? 'wait' : status !== 'recording' && !preparation.ready ? 'not-allowed' : 'pointer' }}>
-          {t(status === 'recording' ? 'qa.submitButton' : status === 'thinking' ? 'qa.thinking' : 'qa.startButton')}
+          {t(status === 'recording' ? 'qa.submitButton' : status === 'thinking' ? recoveringSpeech ? 'qa.recoveringSpeech' : 'qa.thinking' : 'qa.startButton')}
         </button>
       </div>
     </div>

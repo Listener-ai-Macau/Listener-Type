@@ -160,6 +160,8 @@ export const zhCN = {
     startButton: "开始提问",
     submitButton: "结束并提问",
     listenerSource: "Listener 麦克风 · 说“开始提问”",
+    recoveringSpeech: "正在恢复识别…",
+    speechRecoveryFailed: "识别连接中断，恢复未成功。请稍后重试。",
     microphoneSource: "使用电脑麦克风；识别与回答使用已配置的云服务。",
     simpleHowto: "这是语音提问，使用电脑麦克风，暂不支持键入问题。打开窗口，点击“开始提问”，说完再点“结束并提问”。也可先在其它软件选中文字，让回答参考该内容。",
     shortcutHint: "也可用 {{recordHotkey}} 开始或结束提问",

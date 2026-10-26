@@ -69,6 +69,7 @@ mod dictation;
 pub(crate) fn run_recorded_content_probe() -> i32 { dictation::run_recorded_content_probe() }
 mod qa;
 mod qa_voice_capture;
+mod qa_asr_finalization;
 mod qa_question_context;
 mod recording_gate;
 mod resources;
@@ -4416,28 +4417,13 @@ async fn end_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
         }
     };
 
-    if let Err(e) = asr.send_last_frame().await {
-        log::error!("[coord] QA: send last frame failed: {e}");
-    }
-    // 添加全局超时保护：防止 await_final_result() 永远挂起
-    let timeout_duration = std::time::Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS);
-    let raw = match tokio::time::timeout(timeout_duration, asr.await_final_result()).await {
-        Ok(Ok(r)) => r,
-        Ok(Err(e)) => {
-            log::error!("[coord] QA: await final failed: {e}");
-            finish_qa_with_error(inner, session_id, format!("识别失败: {e}"));
-            return Err(e.to_string());
-        }
-        Err(_) => {
-            // 全局超时：最后的防线
-            log::error!(
-                "[coord] QA: 全局超时 {} 秒 - 强制恢复",
-                COORDINATOR_GLOBAL_TIMEOUT_SECS
-            );
-            // 清理 ASR session，避免资源泄漏
-            asr.cancel();
-            finish_qa_with_error(inner, session_id, "识别超时".to_string());
-            return Err("global timeout".to_string());
+    let raw = match qa_asr_finalization::finish_question_speech(&asr,
+        || !qa_processing_matches(inner, session_id),
+        || qa_asr_finalization::show_recovery(inner, session_id)).await {
+        Ok(raw) => raw,
+        Err(error) => {
+            finish_qa_with_error(inner, session_id, error.clone());
+            return Err(error);
         }
     };
 

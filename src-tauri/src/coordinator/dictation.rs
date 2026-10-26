@@ -3120,16 +3120,9 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
 
     if inner.state.lock().voice_action == crate::voice_command::VoiceAction::Question {
         let result = match asr {
-            ActiveAsr::Volcengine(asr) => {
-                match asr.send_last_frame().await {
-                    Ok(()) => match tokio::time::timeout(
-                        Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS), asr.await_final_result()).await {
-                        Ok(result) => result.map_err(|err| err.to_string()),
-                        Err(_) => { asr.cancel(); Err("识别超时".into()) },
-                    },
-                    Err(err) => { asr.cancel(); Err(err.to_string()) },
-                }
-            }
+            ActiveAsr::Volcengine(asr) => super::qa_asr_finalization::finish_question_speech(&asr,
+                || !super::qa_processing_matches(inner, current_session_id),
+                || super::qa_asr_finalization::show_recovery(inner, current_session_id)).await,
             _ => Err("qa_speech_setup_required".into()),
         };
         let result = result.map(|mut raw| {
