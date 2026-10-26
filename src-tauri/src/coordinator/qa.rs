@@ -86,6 +86,7 @@ pub(super) struct QaSessionState {
     pub(super) input_source: QaInputSource,
     pub(super) capture_owner: Option<SessionId>,
     pub(super) capture_visible: bool,
+    pub(super) capture_preview: String,
     pub(super) phase: QaPhase,
     pub(super) cancelled: bool,
     pub(super) selection: Option<SelectionContext>,
@@ -111,6 +112,7 @@ impl Default for QaSessionState {
             input_source: QaInputSource::ComputerMicrophone,
             capture_owner: None,
             capture_visible: false,
+            capture_preview: String::new(),
             phase: QaPhase::Idle,
             cancelled: false,
             selection: None,
@@ -186,6 +188,7 @@ pub(super) fn open_qa_panel(inner: &Arc<Inner>) {
         state.session_id = new_session_id();
         state.input_source = QaInputSource::ComputerMicrophone;
         state.capture_owner = None;
+        state.capture_preview.clear();
         state.panel_visible = true;
         state.phase = QaPhase::Idle;
         state.cancelled = false;
@@ -229,6 +232,7 @@ pub(super) fn close_qa_panel(inner: &Arc<Inner>) {
         state.session_id = new_session_id();
         state.panel_visible = false;
         state.capture_owner = None;
+        state.capture_preview.clear();
         state.pinned = false;
         state.messages.clear();
         state.last_answered_selection = None;

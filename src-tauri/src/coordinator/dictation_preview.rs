@@ -1619,6 +1619,7 @@ fn emit_embedded_audio_partial_preview_if_active(
     session_id: SessionId,
     preview: String,
 ) -> bool {
+    super::qa_voice_capture::present_transcript(inner, session_id, &preview);
     apply_and_publish_dictation_event(
         inner,
         DictationEvent::AsrPartial {
@@ -1710,7 +1711,7 @@ fn embedded_audio_streaming_session_accepts_pcm(inner: &Arc<Inner>, session_id: 
 
 pub(super) fn request_embedded_audio_stop_feedback(
     inner: &Arc<Inner>,
-    _reason: &'static str,
+    reason: &'static str,
 ) -> bool {
     let session_id = {
         let state = inner.state.lock();
@@ -1719,6 +1720,7 @@ pub(super) fn request_embedded_audio_stop_feedback(
         }
         state.session_id
     };
+    super::qa_voice_capture::present_endpoint_evidence(inner,session_id,"stop_feedback",serde_json::json!({"reason":reason}));
     latch_embedded_audio_stop_feedback(inner, session_id);
     emit_embedded_audio_transcribing_if_active(
         inner,

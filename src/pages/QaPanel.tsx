@@ -47,6 +47,8 @@ export function QaPanel() {
   /** 流式 LLM 答案：answer_delta 累积、answer 事件来时清空（最终内容已落到 messages）。 */
   const [streamingAnswer, setStreamingAnswer] = useState<string>('');
   const [recoveringSpeech, setRecoveringSpeech] = useState(false);
+  const [capturePreview, setCapturePreview] = useState('');
+  const previewOwner = useRef<string | null>(null);
   /** 录音电平：0..1。后端每帧 33ms 通过 qa:level emit。详见 issue #162。 */
   const [level, setLevel] = useState<number>(0);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -65,12 +67,20 @@ export function QaPanel() {
     let unlistenDismiss: (() => void) | undefined;
     let unlistenLevel: (() => void) | undefined;
     let unlistenPrefs: (() => void) | undefined;
+    let unlistenTranscript: (() => void) | undefined;
     let cancelled = false;
     (async () => {
       try {
         const { listen } = await import('@tauri-apps/api/event');
         const stateHandle = await listen<QaStatePayload>('qa:state', event => {
           const payload = event.payload;
+          if (payload.kind === 'recording') {
+            previewOwner.current = payload.session_id ?? null;
+            setCapturePreview('');
+          } else if (payload.kind !== 'answer_delta') {
+            previewOwner.current = null;
+            if (payload.kind !== 'loading') setCapturePreview('');
+          }
           if (payload.kind !== 'answer_delta') setRecoveringSpeech(payload.kind === 'loading' && !!payload.recovering_speech);
           if (payload.input_source) setInputSource(payload.input_source);
           if (payload.messages) {
@@ -148,6 +158,11 @@ export function QaPanel() {
         const levelHandle = await listen<{ level: number }>('qa:level', event => {
           setLevel(event.payload.level ?? 0);
         });
+        const transcriptHandle = await listen<{ session_id: string; text: string }>('qa:transcript', event => {
+          if (previewOwner.current && event.payload.session_id === previewOwner.current) {
+            setCapturePreview(event.payload.text);
+          }
+        });
         // prefs:changed — 后端在 set_settings 后广播。issue #205：QA 浮窗在独立
         // webview，没有 HotkeySettingsContext；如果用户在主窗口改了录音键，
         // 浮窗里的 "{recordHotkey}" 文案必须立刻跟上，否则会一直停在旧值。
@@ -159,11 +174,13 @@ export function QaPanel() {
           dismissHandle();
           levelHandle();
           prefsHandle();
+          transcriptHandle();
         } else {
           unlistenState = stateHandle;
           unlistenDismiss = dismissHandle;
           unlistenLevel = levelHandle;
           unlistenPrefs = prefsHandle;
+          unlistenTranscript = transcriptHandle;
         }
       } catch (error) {
         console.error('[QaPanel] listener setup failed', error);
@@ -175,6 +192,7 @@ export function QaPanel() {
       unlistenDismiss?.();
       unlistenLevel?.();
       unlistenPrefs?.();
+      unlistenTranscript?.();
     };
   }, []);
 
@@ -245,7 +263,7 @@ export function QaPanel() {
     const el = scrollRef.current;
     if (!el || !followAnswerTail.current) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages, status, streamingAnswer]);
+  }, [messages, status, streamingAnswer, capturePreview]);
 
   return (
     <div style={shellStyle}>
@@ -261,6 +279,7 @@ export function QaPanel() {
         {messages.length === 0 && status === 'recording' && (
           <RecordingHeader
             preview={selectionPreview}
+            automatic={inputSource === 'listener'}
             t={t}
             level={level}
             recordHotkey={recordHotkeyLabel}
@@ -270,11 +289,18 @@ export function QaPanel() {
         {status === 'recording' && messages.length > 0 && (
           <TurnIndicator
             kind="recording"
+            automatic={inputSource === 'listener'}
             t={t}
             preview={selectionPreview}
             level={level}
             recordHotkey={recordHotkeyLabel}
           />
+        )}
+        {inputSource === 'listener' && (status === 'recording' || (status === 'thinking' && !!capturePreview)) && (
+          <div data-qa-capture-preview role="status" aria-live="polite" style={{ margin: '8px 0', padding: '9px 11px', borderRadius: 10, background: 'var(--ol-raised, rgba(128,128,128,.08))', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: 13, lineHeight: 1.6, color: 'var(--ol-ink)' }}>
+            <div style={{ fontSize: 11, marginBottom: 3, color: 'var(--ol-ink-3)' }}>{t('qa.questionPreview')}</div>
+            <div>{capturePreview || t('qa.waitingForQuestion')}</div>
+          </div>
         )}
         {streamingAnswer && (
           <StreamingAssistantBubble markdown={streamingAnswer} />
@@ -395,11 +421,13 @@ function EmptyHint({
 
 function RecordingHeader({
   preview,
+  automatic = false,
   t,
   level,
   recordHotkey,
 }: {
   preview: string;
+  automatic?: boolean;
   t: ReturnType<typeof useTranslation>['t'];
   level: number;
   recordHotkey: string;
@@ -417,7 +445,7 @@ function RecordingHeader({
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--ol-ink-2)' }}>
         <span style={recordingDotStyle} />
-        {t('qa.recordingHint', { recordHotkey })}
+        {t(automatic ? 'qa.listenerRecordingHint' : 'qa.recordingHint', { recordHotkey })}
       </div>
       <LevelBar level={level} />
     </div>
@@ -542,12 +570,14 @@ function splitFirstTurnUser(content: string): { selection: string; question: str
 
 function TurnIndicator({
   kind,
+  automatic = false,
   preview,
   t,
   level,
   recordHotkey,
 }: {
   kind: 'recording' | 'thinking';
+  automatic?: boolean;
   preview?: string;
   t: ReturnType<typeof useTranslation>['t'];
   level?: number;
@@ -567,7 +597,7 @@ function TurnIndicator({
         )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--ol-ink-2)' }}>
           <span style={recordingDotStyle} />
-          {t('qa.recordingHint', { recordHotkey: recordHotkey ?? '' })}
+          {t(automatic ? 'qa.listenerRecordingHint' : 'qa.recordingHint', { recordHotkey: recordHotkey ?? '' })}
         </div>
         <LevelBar level={level ?? 0} />
       </div>

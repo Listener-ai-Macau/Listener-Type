@@ -17,6 +17,7 @@ pub(super) fn begin_card(inner: &Arc<Inner>, owner: SessionId) {
         qa.session_id = owner;
         qa.capture_owner = Some(owner);
         qa.capture_visible = false;
+        qa.capture_preview.clear();
         qa.input_source = qa::QaInputSource::Listener;
         qa.selection = None;
         qa.front_app = front_app;
@@ -29,6 +30,29 @@ pub(super) fn begin_card(inner: &Arc<Inner>, owner: SessionId) {
         let _ = app.emit_to("qa", "qa:state", serde_json::json!({
             "kind":"recording", "input_source":"listener", "session_id":owner.to_string(), "messages":messages,
         }));
+    }
+}
+
+/// The ordinary admitted preview reaches this route before it is published.
+/// It is reversible UI only: no editor permission, question submission or
+/// endpoint authority is created by showing it.
+pub(super) fn present_transcript(inner: &Arc<Inner>, owner: SessionId, text: &str) {
+    let mut qa = inner.qa_state.lock();
+    if qa.capture_owner != Some(owner) || qa.session_id != owner || !qa.panel_visible
+        || qa.phase != QaPhase::Recording || qa.cancelled || qa.capture_preview == text {
+        return;
+    }
+    qa.capture_preview = text.to_owned();
+    if let Some(app) = inner.app.lock().clone() {
+        let _ = app.emit_to("qa", "qa:transcript", serde_json::json!({"session_id":owner.to_string(),"text":text}));
+    }
+}
+
+pub(super) fn present_endpoint_evidence(inner: &Arc<Inner>, owner: SessionId, kind: &str, detail: serde_json::Value) {
+    let qa=inner.qa_state.lock();
+    if qa.capture_owner != Some(owner) || qa.session_id != owner || !qa.panel_visible { return; }
+    if let Some(app)=inner.app.lock().clone() {
+        let _=app.emit_to("qa","qa:endpoint",serde_json::json!({"session_id":owner.to_string(),"kind":kind,"detail":detail}));
     }
 }
 
@@ -116,6 +140,21 @@ pub(super) async fn record_edge(inner: &Arc<Inner>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn question_preview_is_reversible_and_bound_to_live_recording() {
+        let c=Coordinator::new();let live=new_session_id();let old=new_session_id();
+        begin_card(&c.inner,live);
+        present_transcript(&c.inner,old,"stale question");
+        assert!(c.inner.qa_state.lock().capture_preview.is_empty());
+        present_transcript(&c.inner,live,"recognized question");
+        assert_eq!(c.inner.qa_state.lock().capture_preview,"recognized question");
+        { c.inner.qa_state.lock().phase=QaPhase::Processing; }
+        present_transcript(&c.inner,live,"late partial");
+        assert_eq!(c.inner.qa_state.lock().capture_preview,"recognized question");
+        let next=new_session_id();begin_card(&c.inner,next);
+        assert!(c.inner.qa_state.lock().capture_preview.is_empty());
+        assert!(c.inner.qa_state.lock().messages.is_empty());
+    }
     #[test]
     fn question_card_rejects_stale_capture_error_and_visibility() {
         let coordinator = Coordinator::new();

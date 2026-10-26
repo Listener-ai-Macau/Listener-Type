@@ -2624,6 +2624,13 @@ fn start_settled_target_endpoint_watchdog(
             if status_changed || last_status_logged_at.elapsed() >= Duration::from_secs(1) {
                 last_status_logged_at = now;
                 last_status_signature = Some(status_signature);
+                super::qa_voice_capture::present_endpoint_evidence(&inner,session_id,"endpoint_status",serde_json::json!({
+                    "tick":tick_count,"bodyStarted":endpoint_policy.body_started,"stopProposed":status_signature.stop_proposed,
+                    "lastHoldReason":latest_hold_reason,"armedAgeMs":armed_age_ms,"pausedAgeMs":paused_age_ms,
+                    "audioMs":latest_audio_ms,"providerAudioMs":provider_audio_ms,
+                    "localSpeechEndMs":local_speech_end_ms,"ownerSpeechEndMs":qualified_owner_end_ms,
+                    "ownerAnalysisPending":asr.owner_analysis_pending_for_endpoint(),
+                }));
                 log::info!(
                     "[asr] endpoint watchdog status session_id={session_id} tick={tick_count} phase={current_phase:?} body_started={} preview_present={} latest_update_present={} armed_age_ms={armed_age_ms:?} paused_age_ms={paused_age_ms:?} latest_update_age_ms={latest_update_age_ms:?} generation={} stop_proposed={} lifecycle={lifecycle:?} hold_reason={latest_hold_reason:?} local_audio_ms={:?} provider_audio_ms={:?} local_speech_end_ms={:?} qualified_owner_end_ms={:?} owner_analysis_pending={}",
                     endpoint_policy.body_started,

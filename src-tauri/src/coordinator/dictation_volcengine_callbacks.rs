@@ -7,6 +7,8 @@ fn set_volcengine_preview_callbacks(
     let stop_completed = Arc::new(AtomicBool::new(false));
     let stop_state = Arc::new(Mutex::new(EndpointStopDispatchState::default()));
     let endpoint_clock = Arc::new(Mutex::new(SettledTargetEndpointClock::default()));
+    #[cfg(test)]
+    tests::track_question_endpoint_clock(&endpoint_clock);
     log::info!(
         "[asr] endpoint callbacks installed session_id={session_id} asr_instance=0x{:x}",
         Arc::as_ptr(asr) as usize,

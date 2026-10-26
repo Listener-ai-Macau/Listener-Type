@@ -92,6 +92,80 @@ async fn question_capture_existing_services_without_editor_delivery() {
         "captureReleasedBeforeAnswer":true,"elapsedStopToAnswerMs":started.elapsed().as_millis(),
     })).unwrap()).unwrap();
 }
+
+// Only the explicit disposable-profile speech test arms this probe. Production
+// builds have no registry, capture data or changed stop/callback behavior.
+#[derive(Default)]
+struct QuestionEndpointProbe {
+    clock: Option<std::sync::Weak<super::Mutex<super::SettledTargetEndpointClock>>>,
+    proposals: Vec<serde_json::Value>,
+}
+static QUESTION_ENDPOINT_PROBE: std::sync::OnceLock<super::Mutex<Option<QuestionEndpointProbe>>> = std::sync::OnceLock::new();
+pub(super) fn track_question_endpoint_clock(clock: &std::sync::Arc<super::Mutex<super::SettledTargetEndpointClock>>) {
+    if let Some(slot) = QUESTION_ENDPOINT_PROBE.get() {
+        if let Some(probe) = slot.lock().as_mut() {
+            probe.clock = Some(std::sync::Arc::downgrade(clock));
+        }
+    }
+}
+pub(super) fn track_question_endpoint_proposal(policy: super::TargetSpeakerEndpointPolicy) {
+    if let Some(slot) = QUESTION_ENDPOINT_PROBE.get() {
+        if let Some(probe) = slot.lock().as_mut() {
+            if probe.proposals.len() < 32 {
+                probe.proposals.push(serde_json::json!({"bodyStarted":policy.body_started,"reason":policy.stop_reason}));
+            }
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "Requires explicit disposable-profile existing ASR speech/silence endpoint acceptance"]
+async fn question_speech_then_silence_reaches_production_endpoint_without_editor() {
+    assert_eq!(std::env::var("LISTENER_TYPE_QA_EXISTING_SERVICES_OPT_IN").as_deref(), Ok("1"));
+    let root = std::path::PathBuf::from(std::env::var("LISTENER_TYPE_DATA_DIR").unwrap());
+    assert!(root.to_string_lossy().contains("accept131-rust-"));
+    let pcm = std::fs::read(std::env::var("LISTENER_TYPE_QA_FIXED_PCM").unwrap()).unwrap();
+    assert!((32_000..=256_000).contains(&pcm.len()) && pcm.len() % 2 == 0);
+    *QUESTION_ENDPOINT_PROBE.get_or_init(|| super::Mutex::new(None)).lock() = Some(QuestionEndpointProbe::default());
+    let coordinator = Coordinator::new(); let inner = &coordinator.inner;
+    let mut prefs = inner.prefs.get(); prefs.owner_activity_only=false; prefs.qa_save_history=false;
+    inner.prefs.set(prefs).unwrap();
+    let mut session = super::begin_embedded_audio_dictation_session_for_action(inner, crate::voice_command::VoiceAction::Question).await.unwrap().unwrap();
+    let owner = session.session_id;
+    super::arm_accepted_automatic_wake_text_guard(inner, owner, "开始提问".into(), 0, true);
+    assert!(super::activate_embedded_audio_dictation_session(inner,owner,0.0));
+    let asr = super::clone_volcengine_asr_for_session(inner,owner).unwrap();
+    let clock = QUESTION_ENDPOINT_PROBE.get().unwrap().lock().as_ref().unwrap().clock.as_ref().unwrap().upgrade().unwrap();
+    let started=Instant::now(); let mut snapshots=Vec::new();
+    let silence=vec![0_u8;32_000*12];
+    for chunk in pcm.chunks(3200).chain(silence.chunks(3200)) {
+        session.consume_streaming_pcm(inner,chunk,None).expect("normal embedded PCM pipeline");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let raw=asr.endpoint_update_snapshot();
+        let pending=super::pause_early_pending_body_delivery(inner,owner,&asr);
+        let vad=asr.local_speech_activity_snapshot();
+        let c=clock.lock();
+        snapshots.push(serde_json::json!({"atMs":started.elapsed().as_millis(),"bodyStarted":super::automatic_wake_body_started(inner,owner),
+            "preview":super::current_embedded_audio_partial_preview(inner),"audioMs":raw.audio_duration_ms,
+            "pendingRecognition":pending.as_ref().map(|p|p.recognition_pending),"pendingChars":pending.as_ref().map(|p|p.key.chars().count()),
+            "armedMs":c.armed_at.map(|t|t.elapsed().as_millis()),"paused":c.paused_armed_at.is_some(),
+            "hold":c.last_reported_due_hold_diagnostic.map(|(_,r)|r),"personalClock":c.personal_presence_endpoint.is_some(),
+            "localVad":format!("{:?}",vad.state),"localVadEndMs":vad.last_detected_speech_end_ms,"localAnalyzedMs":vad.analyzed_through_ms,
+            "latest":c.latest_update.as_ref().map(|u|format!("{u:?}"))}));
+        drop(c);
+        if !QUESTION_ENDPOINT_PROBE.get().unwrap().lock().as_ref().unwrap().proposals.is_empty() { break; }
+    }
+    let proposals=QUESTION_ENDPOINT_PROBE.get().unwrap().lock().as_ref().unwrap().proposals.clone();
+    let passed=proposals.iter().any(|p|p["bodyStarted"]==true);
+    std::fs::write(root.join("qa-existing-services-result.json"),serde_json::to_vec_pretty(&serde_json::json!({
+        "passed":passed,"scope":"Synthetic complete command/question PCM then real-paced digital silence through normal embedded normalization/VAD, actual existing ASR and production partial callbacks/watchdog/endpoint. No enrolled person, RF, physical STOP or LLM qualification.",
+        "proposals":proposals,"snapshots":snapshots,"manualStopUsed":false,"editorDeliveryAllowed":crate::coordinator_state::editor_delivery_allowed(&inner.state.lock(),owner),
+    })).unwrap()).unwrap();
+    asr.cancel(); inner.shutdown.store(true,super::Ordering::SeqCst);
+    *QUESTION_ENDPOINT_PROBE.get().unwrap().lock()=None;
+    assert!(passed,"Actual production endpoint did not propose a body STOP; inspect the retained per-stage receipt");
+}
+
 use crate::coordinator::{PolishPrefetch, PolishPrefetchBuf};
 
 #[tokio::test]

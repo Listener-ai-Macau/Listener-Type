@@ -305,6 +305,8 @@ fn handle_target_speaker_endpoint_stop(
     }
     let endpoint_timeout_ms = endpoint_policy.endpoint_timeout_ms;
     let stop_reason = endpoint_policy.stop_reason;
+    #[cfg(test)]
+    tests::track_question_endpoint_proposal(endpoint_policy);
     let provider_stall_confirmed =
         provider_progress_stalled(inner, session_id, &update, Instant::now());
     // The endpoint clock is the sole evidence authority. Provider callbacks

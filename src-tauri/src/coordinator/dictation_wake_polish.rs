@@ -841,7 +841,7 @@ impl EmbeddedAudioDictationSession {
         if let Some(asr) = self.volcengine_asr.as_ref() {
             // Body delivery removes the accepted leading activation. Keep
             // that same source coordinate even when identity tracking is off.
-            asr.note_accepted_wake_phrase(&wake_phrase);
+            asr.note_accepted_wake_for_profile(&wake_phrase, &profile_phrase);
             if asr.owner_activity_only() {
                 let verified_wake = enrolled_owner_matched.then(|| {
                     let wake_end = ((wake_end_seconds.max(0.0) * 32_000.0) as usize)

@@ -6260,6 +6260,8 @@ pub struct VolcengineStreamingASR {
     owner_activity_only: bool,
     owner_content_recovery_locale: String,
     personal_vad: ParkingMutex<Option<crate::personal_vad::PersonalVadStream>>,
+    // Command spelling and enrollment identity have independent lifetimes.
+    wake_identity_profile_phrase: ParkingMutex<Option<String>>,
     #[cfg(target_os = "windows")]
     native_source_identity: Arc<ParkingMutex<super::volcengine_native_identity::NativeSourceIdentity>>,
     #[cfg(target_os = "windows")]
@@ -6676,6 +6678,7 @@ impl VolcengineStreamingASR {
             owner_activity_only: false,
             owner_content_recovery_locale: String::new(),
             personal_vad: ParkingMutex::new(None),
+            wake_identity_profile_phrase: ParkingMutex::new(None),
             #[cfg(target_os = "windows")]
             native_source_identity: Arc::new(ParkingMutex::new(Default::default())),
             #[cfg(target_os = "windows")]
@@ -6773,11 +6776,11 @@ impl VolcengineStreamingASR {
         if parsed.message_type != Some(MessageType::FullServerResponse) { return; }
         let Ok(json) = serde_json::from_slice::<Value>(&parsed.payload) else { return; };
         let Some(raw_result) = normalized_result(&json) else { return; };
-        let (phrase, result) = {
+        let Some(phrase) = self.identity_profile_phrase() else { return; };
+        let result = {
             let state = self.state.lock();
-            let Some(phrase) = state.wake_speaker_phrase.clone() else { return; };
-            (phrase, super::volcengine_transcript::reconcile_missing_row_renderings(
-                raw_result, state.latest_visual_provider_result.as_ref()).into_owned())
+            super::volcengine_transcript::reconcile_missing_row_renderings(
+                raw_result, state.latest_visual_provider_result.as_ref()).into_owned()
         };
         if !super::volcengine_speaker_ledger::aligned_rows(&result).is_some_and(|rows| rows.iter().any(|row| row.definite)) { return; }
         let (local, raw) = {
@@ -8913,6 +8916,16 @@ impl VolcengineStreamingASR {
 
     /// Accepted control-prefix coordinates are shared by every transcript
     /// mode. This metadata grants neither enrollment nor speaker identity.
+    pub(crate) fn note_accepted_wake_for_profile(&self, command: &str, profile: &str) {
+        self.note_accepted_wake_phrase(command);
+        *self.wake_identity_profile_phrase.lock() = Some(profile.to_owned());
+    }
+
+    fn identity_profile_phrase(&self) -> Option<String> {
+        self.wake_identity_profile_phrase.lock().clone()
+            .or_else(|| self.state.lock().wake_speaker_phrase.clone())
+    }
+
     pub(crate) fn note_accepted_wake_phrase(&self, phrase: &str) {
         self.state.lock().wake_speaker_phrase = Some(phrase.to_string());
     }
@@ -10291,7 +10304,7 @@ impl VolcengineStreamingASR {
             stream.raw_activity_timeline()
         };
         if !super::volcengine_native_identity::detector_observed_without_owner(&raw, start, end) { return false; }
-        let phrase = self.state.lock().wake_speaker_phrase.clone().unwrap_or_default();
+        let Some(phrase) = self.identity_profile_phrase() else { return false; };
         let Ok(Some(profile)) = crate::speaker_verification::native_word_profile_for_phrase(&phrase) else { return false; };
         // Reuse complete strong-grade worker evidence at these exact source
         // coordinates. It is not the word tracker's coarse Other timeline.
@@ -12816,6 +12829,20 @@ fn hotword_context(entries: &[DictionaryHotword]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn independent_question_command_keeps_the_enrolled_identity_through_tracking() {
+        let asr=VolcengineStreamingASR::new(VolcengineCredentials{app_id:String::new(),access_token:String::new(),resource_id:String::new()},Vec::new());
+        asr.note_accepted_wake_for_profile("开始提问","开始录音");
+        assert_eq!(asr.state.lock().wake_speaker_phrase.as_deref(),Some("开始提问"));
+        assert_eq!(asr.identity_profile_phrase().as_deref(),Some("开始录音"));
+        asr.note_verified_local_speaker_tracking_started("开始提问");
+        assert_eq!(asr.state.lock().wake_speaker_phrase.as_deref(),Some("开始提问"));
+        assert_eq!(asr.identity_profile_phrase().as_deref(),Some("开始录音"));
+        let legacy=VolcengineStreamingASR::new(VolcengineCredentials{app_id:String::new(),access_token:String::new(),resource_id:String::new()},Vec::new());
+        legacy.note_accepted_wake_phrase("开始录音");
+        assert_eq!(legacy.identity_profile_phrase().as_deref(),Some("开始录音"));
+    }
+
     #[test]
     fn revisable_editor_requires_current_owner_permission_and_capture_lifecycle() {
         let asr = uplink_stall_test_asr();
