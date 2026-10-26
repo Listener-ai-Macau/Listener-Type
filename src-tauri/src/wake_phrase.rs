@@ -1175,6 +1175,24 @@ mod platform {
             Self::new_with_config(phrase, score, threshold, false)
         }
 
+        /// A second command owns only its decoder stream. The ONNX runtime and
+        /// model weights are shared with the existing detector, not loaded again.
+        pub(crate) fn fork_strict_for_phrase(&self, phrase: &str) -> Result<Self, String> {
+            let configured_phrase = super::normalize_configured_phrase(phrase)?;
+            let (score, threshold) = configured_keyword_values(&configured_phrase);
+            let keywords = CString::new(keyword_tokens(&configured_phrase, score, threshold, false)?)
+                .map_err(|_| "invalid question wake keywords")?;
+            let stream = unsafe {
+                (self.runtime.create_stream_with_keywords)(self.runtime.spotter, keywords.as_ptr())
+            };
+            if stream.is_null() {
+                return Err("create shared question keyword stream failed".into());
+            }
+            Ok(Self { runtime: Arc::clone(&self.runtime), stream,
+                normalizer: StreamingNormalizer::default(), found: None,
+                finished: false, configured_phrase, complete: None })
+        }
+
         pub fn accept_pcm(&mut self, pcm: &[u8]) -> Result<Option<Match>, String> {
             if self.finished {
                 return Err("唤醒词流已经结束".into());
@@ -2600,6 +2618,10 @@ pub struct StreamingDetector;
 #[cfg(not(target_os = "windows"))]
 impl StreamingDetector {
     pub fn new(_phrase: &str) -> Result<Self, String> {
+        Err("当前平台暂不支持本地唤醒词".into())
+    }
+
+    pub(crate) fn fork_strict_for_phrase(&self, _phrase: &str) -> Result<Self, String> {
         Err("当前平台暂不支持本地唤醒词".into())
     }
 

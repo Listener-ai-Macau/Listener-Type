@@ -307,6 +307,7 @@ struct LocalSessionSpeakerTracker {
     rolling_pcm: Vec<u8>,
     next_classification_audio_ms: u64,
     wake_phrase: String,
+    profile_phrase: String,
     enrolled_owner_matched: bool,
     evidence_sink: Option<std::sync::Weak<crate::asr::VolcengineStreamingASR>>,
     classification_inflight: Arc<std::sync::atomic::AtomicBool>,
@@ -341,9 +342,19 @@ impl LocalSessionSpeakerTracker {
         enrolled_owner_matched: bool,
         asr: Option<Arc<crate::asr::VolcengineStreamingASR>>,
     ) -> Self {
+        let profile_phrase = wake_phrase.clone();
+        Self::from_wake_for_profile(pcm, wake_end_seconds, wake_phrase,
+            enrolled_owner_matched, asr, profile_phrase)
+    }
+
+    fn from_wake_for_profile(
+        pcm: Vec<u8>, wake_end_seconds: f32, wake_phrase: String,
+        enrolled_owner_matched: bool, asr: Option<Arc<crate::asr::VolcengineStreamingASR>>,
+        profile_phrase: String,
+    ) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         let evidence_sink = asr.as_ref().map(Arc::downgrade);
-        let wake_phrase_for_profile = wake_phrase.clone();
+        let wake_phrase_for_profile = profile_phrase.clone();
         tauri::async_runtime::spawn_blocking(move || {
             let result = crate::speaker_verification::session_profile_from_wake(
                 &pcm,
@@ -367,6 +378,7 @@ impl LocalSessionSpeakerTracker {
             rolling_pcm: Vec::with_capacity(LOCAL_SPEAKER_HISTORY_BYTES),
             next_classification_audio_ms: LOCAL_SPEAKER_CLASSIFY_MIN_MS as u64,
             wake_phrase,
+            profile_phrase,
             enrolled_owner_matched,
             evidence_sink,
             classification_inflight: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -424,7 +436,7 @@ impl LocalSessionSpeakerTracker {
         if !confident_owner {
             return;
         }
-        let phrase = self.wake_phrase.clone();
+        let phrase = self.profile_phrase.clone();
         let embedding = observation.embedding().to_vec();
         tauri::async_runtime::spawn_blocking(move || {
             let _ = crate::speaker_verification::adapt_owner_session_bank(&phrase, &embedding);
@@ -817,6 +829,15 @@ impl EmbeddedAudioDictationSession {
         wake_phrase: String,
         enrolled_owner_matched: bool,
     ) {
+        let profile_phrase = wake_phrase.clone();
+        self.start_local_speaker_tracking_for_profile(wake_pcm, wake_end_seconds,
+            wake_phrase, enrolled_owner_matched, profile_phrase);
+    }
+
+    fn start_local_speaker_tracking_for_profile(
+        &mut self, wake_pcm: Vec<u8>, wake_end_seconds: f32, wake_phrase: String,
+        enrolled_owner_matched: bool, profile_phrase: String,
+    ) {
         if let Some(asr) = self.volcengine_asr.as_ref() {
             // Body delivery removes the accepted leading activation. Keep
             // that same source coordinate even when identity tracking is off.
@@ -831,7 +852,7 @@ impl EmbeddedAudioDictationSession {
                 // of this command's identity result. Open KWS admission must
                 // not disable that detector. Only a verified wake may supply
                 // the fallback for a legacy profile without its own bank.
-                asr.start_personal_vad(verified_wake, &wake_phrase);
+                asr.start_personal_vad(verified_wake, &profile_phrase);
                 self.local_speaker_tracker = None;
                 return;
             }
@@ -854,12 +875,9 @@ impl EmbeddedAudioDictationSession {
                 wake_end_seconds,
             );
         }
-        self.local_speaker_tracker = Some(LocalSessionSpeakerTracker::from_wake(
-            wake_pcm,
-            wake_end_seconds,
-            wake_phrase,
-            enrolled_owner_matched,
-            self.volcengine_asr.clone(),
+        self.local_speaker_tracker = Some(LocalSessionSpeakerTracker::from_wake_for_profile(
+            wake_pcm, wake_end_seconds, wake_phrase, enrolled_owner_matched,
+            self.volcengine_asr.clone(), profile_phrase,
         ));
     }
 
@@ -2082,6 +2100,7 @@ pub(super) struct TerminalWakeContinuation {
     wake_pcm: Vec<u8>,
     wake_end_seconds: f32,
     wake_phrase: String,
+    profile_phrase: String,
     enrolled_owner_matched: bool,
     body: TerminalWakeBody,
     expires_at: Instant,
@@ -2234,6 +2253,12 @@ struct PrefetchedOwnerVerification {
 }
 
 struct BufferedSpeakerCandidate {
+    // Enrollment remains associated with the owner's existing profile phrase.
+    // The recognized command phrase has a separate role and never reloads or
+    // invalidates that profile.
+    enrollment_phrase: String,
+    command_phrase: String,
+    voice_action: crate::voice_command::VoiceAction,
     candidate_id: u64,
     kind: BufferedSpeakerCandidateKind,
     pcm: Vec<u8>,
@@ -2247,12 +2272,12 @@ struct BufferedSpeakerCandidate {
     fact_ledger: crate::observability::CandidateFactLedger,
     next_operation_id: Option<u64>,
     source_admission_operation_id: Option<u64>,
-    wake_detector: Option<crate::wake_phrase::StreamingDetector>,
+    wake_detector: Option<crate::wake_voice_commands::VoiceCommandDetector>,
     /// Non-blocking detector init: begin buffers PCM immediately while this runs
     /// (~0.5–1s). Awaiting StreamingDetector::new before buffering made the
     /// capsule wait an extra second after the user already said 开始录音.
     wake_detector_init: Option<
-        tauri::async_runtime::JoinHandle<Result<crate::wake_phrase::StreamingDetector, String>>,
+        tauri::async_runtime::JoinHandle<Result<crate::wake_voice_commands::VoiceCommandDetector, String>>,
     >,
     pending_phrase_match: Option<PendingAutomaticPhraseMatch>,
     /// A single borderline owner score is not enough to relax the enrolled
@@ -2771,6 +2796,38 @@ fn collector_emitted_range_for_candidate_overlap(
 }
 
 impl BufferedSpeakerCandidate {
+    fn select_voice_command(&mut self, detector: &crate::wake_voice_commands::VoiceCommandDetector) {
+        let Some(selected) = detector.selected.as_ref() else { return; };
+        if self.command_phrase == selected.phrase && self.voice_action == selected.action { return; }
+        self.command_phrase = selected.phrase.clone();
+        self.voice_action = selected.action;
+        self.pending_phrase_match = None;
+        self.complete_local_wake_intent = None;
+        self.owner_local_phrase_source_range = None;
+        self.primary_owner_input = None;
+        self.owner_ambiguous_confirmations = 0;
+        self.owner_best_ambiguous_score = 0.0;
+        #[cfg(target_os = "windows")] {
+            self.primary_keyword_check = None;
+            self.local_confirmation_task = None;
+            self.local_confirmation_task_started_at = None;
+            self.local_confirmation_task_source_range = None;
+            self.local_confirmation_task_has_keyword_model_hit = false;
+            self.local_absent_coverage = None;
+            self.local_confirmation_prefix_retry = LocalConfirmationPrefixRetryState::default();
+            self.local_near_retry = LocalNearRetryState::default();
+            self.local_owner_masked_phrase_evidence = false;
+        }
+        self.local_confirmation_attempts = 0;
+        self.local_confirmation_last_snapshot_bytes = 0;
+        self.kws_local_absent_count = 0;
+        self.local_absent_count = 0;
+        self.local_kws_fusion_evidence = false;
+        self.kws_prompted_local_confirm = false;
+        self.local_owner_overlap_near_confirmations = 0;
+        self.owner_near_phrase_confirmations = 0;
+    }
+
     fn next_source_admission_operation_id(&mut self) -> Option<u64> {
         let operation_id = self.source_admission_operation_id;
         if let Some(current) = operation_id {

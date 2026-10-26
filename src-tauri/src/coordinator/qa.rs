@@ -38,7 +38,11 @@ pub(super) fn emit_qa_capsule(
         }
         dictation.session_id
     };
-    emit_capsule_for_session(inner, owner, state, level, 0, message, None);
+    // The compact question card is the sole QA surface at the capsule anchor.
+    // Only clear a previous idle dictation pill; never create a second QA pill.
+    if state == CapsuleState::Idle {
+        emit_capsule_for_session(inner, owner, state, level, 0, message, None);
+    }
     Some(owner)
 }
 
@@ -69,6 +73,9 @@ pub(super) fn schedule_qa_capsule_idle(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum QaInputSource { ComputerMicrophone, Listener }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum QaPhase {
     Idle,
     Recording,
@@ -76,6 +83,9 @@ pub(super) enum QaPhase {
 }
 
 pub(super) struct QaSessionState {
+    pub(super) input_source: QaInputSource,
+    pub(super) capture_owner: Option<SessionId>,
+    pub(super) capture_visible: bool,
     pub(super) phase: QaPhase,
     pub(super) cancelled: bool,
     pub(super) selection: Option<SelectionContext>,
@@ -98,6 +108,9 @@ pub(super) struct QaSessionState {
 impl Default for QaSessionState {
     fn default() -> Self {
         Self {
+            input_source: QaInputSource::ComputerMicrophone,
+            capture_owner: None,
+            capture_visible: false,
             phase: QaPhase::Idle,
             cancelled: false,
             selection: None,
@@ -149,6 +162,10 @@ pub(super) async fn handle_qa_hotkey_pressed(inner: &Arc<Inner>) {
 }
 
 pub(super) async fn handle_qa_option_edge(inner: &Arc<Inner>) {
+    if inner.qa_state.lock().input_source == QaInputSource::Listener {
+        let _ = super::qa_voice_capture::record_edge(inner).await;
+        return;
+    }
     let phase = inner.qa_state.lock().phase;
     log::info!("[coord] QA option edge (phase={phase:?})");
     match phase {
@@ -167,6 +184,8 @@ pub(super) fn open_qa_panel(inner: &Arc<Inner>) {
     {
         let mut state = inner.qa_state.lock();
         state.session_id = new_session_id();
+        state.input_source = QaInputSource::ComputerMicrophone;
+        state.capture_owner = None;
         state.panel_visible = true;
         state.phase = QaPhase::Idle;
         state.cancelled = false;
@@ -189,6 +208,7 @@ pub(super) fn open_qa_panel(inner: &Arc<Inner>) {
             "qa:state",
             serde_json::json!({
                 "kind": "idle",
+                "input_source": "computerMic",
                 "messages": Vec::<crate::types::QaChatMessage>::new(),
             }),
         );
@@ -197,11 +217,18 @@ pub(super) fn open_qa_panel(inner: &Arc<Inner>) {
 }
 
 pub(super) fn close_qa_panel(inner: &Arc<Inner>) {
+    let capture_owner = inner.qa_state.lock().capture_owner;
+    if capture_owner.is_some_and(|owner| {
+        let capture = inner.state.lock();
+        capture.session_id == owner && capture.voice_action == crate::voice_command::VoiceAction::Question
+            && capture.phase != SessionPhase::Idle
+    }) { super::cancel_session(inner); }
     cancel_qa_session(inner);
     {
         let mut state = inner.qa_state.lock();
         state.session_id = new_session_id();
         state.panel_visible = false;
+        state.capture_owner = None;
         state.pinned = false;
         state.messages.clear();
         state.last_answered_selection = None;

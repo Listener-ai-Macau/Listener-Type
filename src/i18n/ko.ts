@@ -163,6 +163,7 @@ export const ko: typeof zhCN = {
     openButton: "질문 창 열기",
     startButton: "질문 녹음 시작",
     submitButton: "녹음 종료 후 질문",
+    listenerSource: "Listener 마이크 · “开始提问”으로 시작",
     microphoneSource: "컴퓨터 마이크와 설정된 클라우드 음성 인식 및 AI 서비스를 사용합니다.",
     simpleHowto: "컴퓨터 마이크로 말해서 질문합니다. 질문을 직접 입력하는 기능은 지원하지 않습니다. 창을 열고 질문 녹음 시작을 누른 뒤, 말을 마치면 녹음 종료 후 질문을 누르세요. 다른 앱에서 텍스트를 미리 선택하면 답변에 참고할 수 있습니다.",
     shortcutHint: "{{recordHotkey}} 키로도 질문 녹음을 시작하거나 종료할 수 있습니다",

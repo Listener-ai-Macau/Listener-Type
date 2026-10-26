@@ -295,7 +295,8 @@ impl EmbeddedStreamingDictation {
                     Some(tauri::async_runtime::spawn_blocking(move || {
                         // Primary wake uses StreamingDetector::new() (short-prefix variants
                         // + recall-first bootstrap threshold) for weak speech / light slur.
-                        crate::wake_phrase::StreamingDetector::new(&phrase)
+                        crate::wake_voice_commands::VoiceCommandDetector::new(
+                            &phrase, Some(crate::voice_command::DEFAULT_QUESTION_PHRASE))
                     }))
                 } else {
                     None
@@ -305,6 +306,9 @@ impl EmbeddedStreamingDictation {
                 wake_detector_init.is_some()
             );
             self.speaker_candidate = Some(BufferedSpeakerCandidate {
+                enrollment_phrase: configured_phrase.clone(),
+                command_phrase: configured_phrase.clone(),
+                voice_action: crate::voice_command::VoiceAction::Dictation,
                 candidate_id: next_buffered_candidate_id(),
                 kind: candidate_kind,
                 pcm: Vec::new(),

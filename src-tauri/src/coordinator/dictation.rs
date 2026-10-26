@@ -1185,6 +1185,7 @@ fn stage_terminal_wake_continuation_with_body_at(
         wake_pcm,
         wake_end_seconds,
         wake_phrase,
+        profile_phrase: inner.prefs.get().voice_wake_phrase,
         enrolled_owner_matched,
         body,
         expires_at: now + EMBEDDED_TERMINAL_WAKE_CONTINUATION_TTL,
@@ -1873,7 +1874,26 @@ fn submission_result_from_stats(
 async fn begin_embedded_audio_dictation_session(
     inner: &Arc<Inner>,
 ) -> Result<Option<EmbeddedAudioDictationSession>, String> {
-    let current_session_id = begin_embedded_audio_dictation_session_id(inner)?;
+    begin_embedded_audio_dictation_session_for_action(inner, crate::voice_command::VoiceAction::Dictation).await
+}
+
+async fn begin_embedded_audio_dictation_session_for_action(
+    inner: &Arc<Inner>, action: crate::voice_command::VoiceAction,
+) -> Result<Option<EmbeddedAudioDictationSession>, String> {
+    if action == crate::voice_command::VoiceAction::Question {
+        super::ensure_qa_service_setup()?;
+        let qa = inner.qa_state.lock();
+        if qa.phase == super::QaPhase::Recording && qa.capture_owner.is_none() {
+            return Err("qa_dictation_busy".into());
+        }
+    }
+    let current_session_id = begin_embedded_audio_dictation_session_id_for_action(inner, action)?;
+    let question = inner.state.lock().voice_action == crate::voice_command::VoiceAction::Question;
+    if question {
+        super::qa_voice_capture::begin_card(inner, current_session_id);
+    } else if inner.qa_state.lock().panel_visible {
+        super::close_qa_panel(inner);
+    }
     clear_embedded_audio_stats(inner);
     begin_embedded_audio_preview_session(inner, current_session_id);
     // Host-start paths (terminal_wake_body_continuation, KEY start) arm the
@@ -1885,20 +1905,24 @@ async fn begin_embedded_audio_dictation_session(
         clear_automatic_wake_text_guard(inner);
     }
     clear_embedded_audio_stop_feedback(inner);
+    let editor_delivery = crate::coordinator_state::editor_delivery_allowed(
+        &inner.state.lock(), current_session_id);
     #[cfg(target_os = "windows")]
-    {
+    if editor_delivery {
         let prepared = inner.windows_ime.prepare_session();
         let mut slots = inner.prepared_windows_ime_session.lock();
         store_prepared_windows_ime_session(&mut slots, current_session_id, prepared);
     }
     // Optional TSF composition is only started when explicitly enabled. The
     // default is confirmed segment delivery while the capsule keeps listening.
-    begin_streaming_composition_session(inner, current_session_id).await;
+    if editor_delivery {
+        begin_streaming_composition_session(inner, current_session_id).await;
+    }
     inner
         .audio_archive_active
         .store(false, std::sync::atomic::Ordering::Relaxed);
-    let active_asr = active_asr_provider_from_preferences(inner);
-    sync_active_asr_provider_to_credentials_for_runtime(&active_asr);
+    let active_asr = if question { "volcengine".to_string() } else { active_asr_provider_from_preferences(inner) };
+    if !question { sync_active_asr_provider_to_credentials_for_runtime(&active_asr); }
     log_dictation_asr_engine_selection(current_session_id, &active_asr);
     publish_dictation_capsule(
         inner,
@@ -1937,7 +1961,7 @@ async fn begin_embedded_audio_dictation_session(
         return Ok(None);
     }
 
-    let archive_pcm = record_embedded_audio_for_debug_enabled(inner).then(Vec::new);
+    let archive_pcm = (!question && record_embedded_audio_for_debug_enabled(inner)).then(Vec::new);
     let local_speech_activity = volcengine_asr
         .as_ref()
         .map(|asr| {
@@ -1989,6 +2013,12 @@ async fn begin_embedded_audio_dictation_session(
 }
 
 fn begin_embedded_audio_dictation_session_id(inner: &Arc<Inner>) -> Result<SessionId, String> {
+    begin_embedded_audio_dictation_session_id_for_action(inner, crate::voice_command::VoiceAction::Dictation)
+}
+
+fn begin_embedded_audio_dictation_session_id_for_action(
+    inner: &Arc<Inner>, action: crate::voice_command::VoiceAction,
+) -> Result<SessionId, String> {
     let attach_host_start = inner.prefs.get().dictation_input_source
         == DictationInputSource::EmbeddedBle
         && embedded_ble_actor_context_active(inner);
@@ -1999,7 +2029,7 @@ fn begin_embedded_audio_dictation_session_id(inner: &Arc<Inner>) -> Result<Sessi
     // r23：HWND 与标题原子成对抓取，自愈路径靠标题识别真实窗口。
     let (focus_target, focus_title) = capture_focus_target_with_title();
     let started =
-        begin_session_state(&mut state, focus_target, capture_frontmost_app())
+        crate::coordinator_state::begin_session_state_for_action(&mut state, focus_target, capture_frontmost_app(), action)
             .ok_or_else(|| "当前已有听写会话在运行，暂不能提交嵌入式音频".to_string())?;
     state.focus_target_title = focus_title;
     // A host-started session already owns its selected output mode. Only a
@@ -3088,6 +3118,47 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     let mut device_ai_processing = DeviceAiProcessingGuard::defer(inner, current_session_id);
     device_ai_processing.start_if_needed("dictation_transcribing_processing_start");
 
+    if inner.state.lock().voice_action == crate::voice_command::VoiceAction::Question {
+        let result = match asr {
+            ActiveAsr::Volcengine(asr) => {
+                match asr.send_last_frame().await {
+                    Ok(()) => match tokio::time::timeout(
+                        Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS), asr.await_final_result()).await {
+                        Ok(result) => result.map_err(|err| err.to_string()),
+                        Err(_) => { asr.cancel(); Err("识别超时".into()) },
+                    },
+                    Err(err) => { asr.cancel(); Err(err.to_string()) },
+                }
+            }
+            _ => Err("qa_speech_setup_required".into()),
+        };
+        let result = result.map(|mut raw| {
+            raw.text = filter_automatic_wake_text(inner, current_session_id, &raw.text, true);
+            raw
+        });
+        clear_automatic_wake_text_guard(inner);
+        clear_embedded_audio_preview_session(inner, current_session_id);
+        clear_embedded_audio_stats(inner);
+        restore_prepared_windows_ime_session(inner, current_session_id);
+        let owned = crate::coordinator_state::complete_question_capture_state(
+            &mut inner.state.lock(), current_session_id);
+        if result.is_ok() {
+            device_ai_processing.complete_success("question_capture_complete").await;
+        } else {
+            device_ai_processing.complete_warning("question_capture_failed").await;
+        }
+        if !owned { return Ok(()); }
+        match result {
+            Ok(raw) => {
+                super::qa_voice_capture::handoff_answer(inner, current_session_id, raw.text, raw.duration_ms);
+                return Ok(());
+            }
+            Err(error) => {
+                super::finish_qa_with_error(inner, current_session_id, error.clone());
+                return Err(error);
+            }
+        }
+    }
     let uses_global_timeout = asr_transcribe_uses_global_timeout(&asr);
     // F2（2026-08-09 12:47:04 云端空转）：终稿空但本地持续人声时要用留存音频
     // 向新 ASR 会话重试一次——match 会移走 asr，先留 Arc 句柄。

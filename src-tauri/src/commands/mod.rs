@@ -350,6 +350,13 @@ pub struct UiTimelineEvent {
 
 #[tauri::command]
 pub fn record_ui_timeline_event(coord: CoordinatorState<'_>, payload: UiTimelineEvent) {
+    if payload.source == "frontend.qa" && payload.event == "visible"
+        && payload.state.as_deref() == Some("recording") {
+        if let Some(owner) = payload.detail.as_ref().and_then(|detail| detail.get("sessionId"))
+            .and_then(Value::as_str) {
+            coord.acknowledge_question_card_visible(owner);
+        }
+    }
     if payload.source == "frontend.capsule"
         && payload.event == "visible"
         && payload.state.as_deref() == Some("recording")

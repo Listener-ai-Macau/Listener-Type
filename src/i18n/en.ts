@@ -162,6 +162,7 @@ export const en: typeof zhCN = {
     openButton: "Open question window",
     startButton: "Start question",
     submitButton: "Finish and ask",
+    listenerSource: "Listener microphone · Say “开始提问”",
     microphoneSource: "Uses your computer microphone and your configured cloud services for recognition and answers.",
     simpleHowto: "Questions are spoken through your computer microphone; typing a question is not supported. Open the window, choose Start question, then Finish and ask when you are done speaking. You can first select text in another app to include it as context.",
     shortcutHint: "You can also use {{recordHotkey}} to start or finish a question",

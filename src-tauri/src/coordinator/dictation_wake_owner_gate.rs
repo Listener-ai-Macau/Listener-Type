@@ -41,7 +41,7 @@ fn maybe_prefetch_owner_verification(
     phrase: &str,
     embedded_session_id: u32,
 ) {
-    let phrase_enrolled = crate::speaker_verification::is_enrolled_for_phrase(phrase);
+    let phrase_enrolled = crate::speaker_verification::is_enrolled_for_phrase(&candidate.enrollment_phrase);
     if !should_prefetch_owner_verification(
         phrase_enrolled,
         candidate.owner_verification_attempted || candidate.owner_verification_task.is_some(),
@@ -63,7 +63,7 @@ fn start_owner_verification_prefetch(
 
 fn start_owner_verification_with_input(
     candidate: &mut BufferedSpeakerCandidate,
-    phrase: &str,
+    _phrase: &str,
     embedded_session_id: u32,
     input: WakeVerifierSnapshot,
 ) {
@@ -75,7 +75,7 @@ fn start_owner_verification_with_input(
     let input_ms = input.pcm.len() / 32;
     let pcm = input.pcm.clone();
     let source_range = input.range;
-    let voiceprint_phrase = phrase.to_string();
+    let voiceprint_phrase = candidate.enrollment_phrase.clone();
     candidate.owner_verification_attempted = true;
     let task = tauri::async_runtime::spawn_blocking(move || {
         let started = Instant::now();
@@ -236,7 +236,7 @@ fn wake_verification_input(
 fn prefetch_owner_for_local_confirmation(
     candidate: &mut BufferedSpeakerCandidate, phrase: &str, embedded_session_id: u32,
 ) {
-    if !crate::speaker_verification::is_enrolled_for_phrase(phrase)
+    if !crate::speaker_verification::is_enrolled_for_phrase(&candidate.enrollment_phrase)
         || candidate.pcm.len() < OWNER_VERIFICATION_START_BYTES { return; }
     if let Some(prefetched) = candidate.owner_verification_task.as_ref() {
         if owner_verification_covers_wake(prefetched.source_range, candidate.current_candidate_range())
@@ -258,7 +258,7 @@ fn refresh_owner_verification_prefetch_for_wake(
     if wake_match.complete_phrase_signal(phrase)
         == denzic_voice_activation_v1_core::PhraseSignal::None { return; }
     freeze_primary_owner_input(candidate, wake_match);
-    if !crate::speaker_verification::is_enrolled_for_phrase(phrase) { return; }
+    if !crate::speaker_verification::is_enrolled_for_phrase(&candidate.enrollment_phrase) { return; }
     let Some(required) = owner_verification_required_wake_range(candidate, wake_match, false) else { return; };
     let Ok(input) = wake_verification_input(candidate, wake_match, false) else { return; };
     // Insufficient context is pending, not an identity mismatch. The normal
@@ -281,7 +281,7 @@ fn refresh_owner_verification_prefetch_for_wake(
 async fn join_candidate_owner_verification(
     candidate: &mut BufferedSpeakerCandidate,
     expected: WakeVerifierSnapshot,
-    phrase: &str,
+    _phrase: &str,
 ) -> (WakeVerifierSnapshot, Result<crate::speaker_verification::VerificationResult, String>, u64) {
     if let Some(prefetched) = candidate.owner_verification_task.take() {
         let same = owner_verification_covers_wake(prefetched.source_range, expected.range)
@@ -294,7 +294,7 @@ async fn join_candidate_owner_verification(
         }
     }
     let pcm = expected.pcm.clone();
-    let phrase = phrase.to_string();
+    let phrase = candidate.enrollment_phrase.clone();
     let completed = tauri::async_runtime::spawn_blocking(move || {
         let began = Instant::now();
         let result = crate::speaker_verification::verify(&pcm, &phrase);

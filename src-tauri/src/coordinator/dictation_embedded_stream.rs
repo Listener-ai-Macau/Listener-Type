@@ -1360,7 +1360,6 @@ impl EmbeddedStreamingDictation {
         let automatic = candidate.kind == BufferedSpeakerCandidateKind::Verification;
         let mut local_speaker_seed = None;
         if automatic {
-            let phrase = inner.prefs.get().voice_wake_phrase;
             // Finish deferred detector init before terminal KWS/offline pass.
             if candidate.wake_detector.is_none() {
                 if let Some(handle) = candidate.wake_detector_init.take() {
@@ -1439,7 +1438,7 @@ impl EmbeddedStreamingDictation {
                 (detector, result, started.elapsed().as_millis() as u64)
             })
             .await;
-            let (_, wake_match, final_kws_ms) = match wake_task {
+            let (detector, wake_match, final_kws_ms) = match wake_task {
                 Ok(result) => {
                     candidate.kws_fed_bytes = candidate.pcm.len();
                     candidate.record_fact(
@@ -1496,6 +1495,8 @@ impl EmbeddedStreamingDictation {
                     return Ok(true);
                 }
             };
+            candidate.select_voice_command(&detector);
+            let phrase = candidate.command_phrase.clone();
             candidate.kws_total_ms = candidate.kws_total_ms.saturating_add(final_kws_ms);
             // STOP can arrive a few milliseconds after the final rolling window
             // schedules its local confirmation. Dropping that already-running
@@ -1612,7 +1613,7 @@ impl EmbeddedStreamingDictation {
             let (verification_input, verification, voiceprint_ms) =
                 join_candidate_owner_verification(&mut candidate, verification_input, &phrase).await;
             let verified_pcm_ms = verification_input.pcm.len() / 32;
-            let enrolled_owner_matched = crate::speaker_verification::is_enrolled_for_phrase(&phrase)
+            let enrolled_owner_matched = crate::speaker_verification::is_enrolled_for_phrase(&candidate.enrollment_phrase)
                 && verification.as_ref().is_ok_and(|result| result.enrolled_owner_matched());
             let retained_verification_source =
                 verification_input.observe_direct_result(&verification, &candidate);
@@ -2385,7 +2386,8 @@ impl EmbeddedStreamingDictation {
                 enrolled_owner_matched,
             ));
             save_bounded_wake_diagnostic(embedded_session_id, "accepted", &candidate.pcm);
-            if phrase_signal == denzic_voice_activation_v1_core::PhraseSignal::KeywordModel {
+            if candidate.voice_action == crate::voice_command::VoiceAction::Dictation
+                && phrase_signal == denzic_voice_activation_v1_core::PhraseSignal::KeywordModel {
                 persist_verified_wake_phrase_calibration(phrase.clone()).await;
             }
             let post_wake_offset =
@@ -2483,9 +2485,11 @@ impl EmbeddedStreamingDictation {
                     "accepted-terminal-continuation",
                     &candidate.pcm,
                 );
-                let continuation_requested = match request_embedded_ble_recording_start_from_host(
-                    inner,
-                    "terminal_wake_body_continuation",
+                if candidate.voice_action == crate::voice_command::VoiceAction::Question {
+                    super::qa_voice_capture::reset_voice_conversation(inner);
+                }
+                let continuation_requested = match super::request_embedded_ble_recording_start_for_action(
+                    inner, "terminal_wake_body_continuation", candidate.voice_action,
                 )
                 .await
                 {
@@ -2540,7 +2544,7 @@ impl EmbeddedStreamingDictation {
             );
         }
 
-        let mut session = match begin_embedded_audio_dictation_session(inner).await {
+        let mut session = match begin_embedded_audio_dictation_session_for_action(inner, candidate.voice_action).await {
             Ok(Some(session)) => session,
             Ok(None) => {
                 candidate.record_outcome_fact(
@@ -2631,7 +2635,7 @@ impl EmbeddedStreamingDictation {
         }
         if automatic {
             let capsule_audio_ms = (candidate.pcm.len() / 32) as u64;
-            let phrase = inner.prefs.get().voice_wake_phrase;
+            let phrase = candidate.command_phrase.clone();
             arm_accepted_automatic_wake_text_guard(
                 inner,
                 session.session_id,
@@ -2884,7 +2888,8 @@ impl EmbeddedStreamingDictation {
             0,
         );
         discard_pre_press_candidate_pcm(&mut candidate.pcm);
-        let mut session = match begin_embedded_audio_dictation_session(inner).await {
+        candidate.voice_action = crate::voice_command::VoiceAction::Dictation;
+        let mut session = match begin_embedded_audio_dictation_session_for_action(inner, candidate.voice_action).await {
             Ok(Some(session)) => session,
             Ok(None) => {
                 candidate.record_outcome_fact(
@@ -2996,7 +3001,8 @@ impl EmbeddedStreamingDictation {
         // Firmware VoiceActivation means only that a VAD transport window is
         // open. Prefetch identity in parallel for latency, but never let that
         // identity result manufacture phrase evidence or activate by itself.
-        let phrase = inner.prefs.get().voice_wake_phrase;
+        let mut phrase = self.speaker_candidate.as_ref().map(|candidate| candidate.command_phrase.clone())
+            .unwrap_or_else(|| inner.prefs.get().voice_wake_phrase);
         if let Some(candidate) = self.speaker_candidate.as_mut() {
             if candidate.kind == BufferedSpeakerCandidateKind::Verification {
                 maybe_prefetch_owner_verification(candidate, &phrase, embedded_session_id);
@@ -3201,12 +3207,14 @@ impl EmbeddedStreamingDictation {
                     incremental_feed_start,
                 )
             };
-            let phrase_for_rotation = phrase.clone();
+            let phrase_for_rotation = self.speaker_candidate.as_ref()
+                .map(|candidate| candidate.enrollment_phrase.clone()).unwrap_or_else(|| phrase.clone());
             let wake_task = tauri::async_runtime::spawn_blocking(move || {
                 let started = Instant::now();
                 let (mut detector, stream_origin_bytes, rotated, pcm_to_feed, actual_feed_start) =
                     if let Some(rotation_start_bytes) = rotation_start_bytes {
-                        match crate::wake_phrase::StreamingDetector::new(&phrase_for_rotation) {
+                        match crate::wake_voice_commands::VoiceCommandDetector::new(&phrase_for_rotation,
+                            Some(crate::voice_command::DEFAULT_QUESTION_PHRASE)) {
                             Ok(fresh) => (
                                 fresh,
                                 rotation_start_bytes,
@@ -3301,6 +3309,8 @@ impl EmbeddedStreamingDictation {
                     .speaker_candidate
                     .as_mut()
                     .ok_or_else(|| "自动唤醒候选已丢失".to_string())?;
+                candidate.select_voice_command(&detector);
+                phrase = candidate.command_phrase.clone();
                 candidate.wake_detector = Some(detector);
                 candidate.kws_stream_origin_bytes = stream_origin_bytes;
                 candidate.kws_total_ms = candidate.kws_total_ms.saturating_add(kws_step_ms);
@@ -3965,7 +3975,8 @@ impl EmbeddedStreamingDictation {
             let Some(wake_match) = wake_match else {
                 return Ok(false);
             };
-            let phrase_enrolled = crate::speaker_verification::is_enrolled_for_phrase(&phrase);
+            let phrase_enrolled = self.speaker_candidate.as_ref().is_some_and(|candidate|
+                crate::speaker_verification::is_enrolled_for_phrase(&candidate.enrollment_phrase));
             if self.speaker_candidate.as_ref().is_some_and(|candidate| {
                 !owner_verification_window_ready(candidate.pcm.len(), phrase_enrolled)
             }) {
@@ -4131,7 +4142,8 @@ impl EmbeddedStreamingDictation {
             );
             return Ok(false);
         }
-        if phrase_signal == denzic_voice_activation_v1_core::PhraseSignal::KeywordModel {
+        if candidate.voice_action == crate::voice_command::VoiceAction::Dictation
+            && phrase_signal == denzic_voice_activation_v1_core::PhraseSignal::KeywordModel {
             persist_verified_wake_phrase_calibration(phrase.clone()).await;
         }
 
@@ -4217,7 +4229,10 @@ impl EmbeddedStreamingDictation {
                 ceiling_ms: 500,
             },
         );
-        let mut session = match begin_embedded_audio_dictation_session(inner).await {
+        if candidate.voice_action == crate::voice_command::VoiceAction::Question {
+            super::qa_voice_capture::reset_voice_conversation(inner);
+        }
+        let mut session = match begin_embedded_audio_dictation_session_for_action(inner, candidate.voice_action).await {
             Ok(Some(session)) => session,
             Ok(None) => {
                 candidate.record_outcome_fact(
@@ -4246,11 +4261,9 @@ impl EmbeddedStreamingDictation {
             }
         };
         session.attach_pipeline_observation(self.pipeline_observation.clone());
-        session.start_local_speaker_tracking(
-            local_speaker_seed.0,
-            local_speaker_seed.1,
-            local_speaker_seed.2,
-            local_speaker_seed.3,
+        session.start_local_speaker_tracking_for_profile(
+            local_speaker_seed.0, local_speaker_seed.1, local_speaker_seed.2,
+            local_speaker_seed.3, candidate.enrollment_phrase.clone(),
         );
         session.attach_retained_wake_verification_source(
             retained_wake_verification_source,

@@ -2696,6 +2696,9 @@ async fn update_live_body_delivery(
     asr: &Arc<crate::asr::volcengine::VolcengineStreamingASR>,
     endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
 ) {
+    if !crate::coordinator_state::editor_delivery_allowed(&inner.state.lock(), session_id) {
+        return;
+    }
     streaming_composition_update_tick(inner, session_id, asr).await;
     native_composition_update_tick(inner, session_id, asr).await;
     pause_early_delivery_tick(inner, session_id, asr, endpoint_clock).await;

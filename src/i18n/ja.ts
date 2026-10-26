@@ -163,6 +163,7 @@ export const ja: typeof zhCN = {
     openButton: "質問ウィンドウを開く",
     startButton: "質問を録音",
     submitButton: "録音を終了して質問",
+    listenerSource: "Listener のマイク ·「开始提问」で起動",
     microphoneSource: "パソコンのマイクと、設定済みのクラウド音声認識・AIサービスを使用します。",
     simpleHowto: "パソコンのマイクで音声の質問をします。質問の文字入力には対応していません。ウィンドウを開き、「質問を録音」を押します。話し終えたら「録音を終了して質問」を押してください。他のアプリで文字を選択しておくと、その内容を参照して回答します。",
     shortcutHint: "{{recordHotkey}} でも録音の開始・終了ができます",

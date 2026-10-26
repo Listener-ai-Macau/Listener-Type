@@ -689,6 +689,16 @@ pub(super) fn emit_capsule_with_session(
     ) {
         return;
     }
+    if let Some(owner) = event_session_id {
+        let is_question = {
+            let capture = inner.state.lock();
+            capture.session_id == owner && capture.voice_action == crate::voice_command::VoiceAction::Question
+        };
+        if is_question && state != CapsuleState::Idle {
+            super::qa_voice_capture::present_capture(inner, owner, state, level, message);
+            return;
+        }
+    }
     let app_opt = inner.app.lock().clone();
     let Some(app) = app_opt else { return };
     let session_id = event_session_id.map(|id| id.to_string());

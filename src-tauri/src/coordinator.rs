@@ -68,6 +68,7 @@ mod dictation;
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 pub(crate) fn run_recorded_content_probe() -> i32 { dictation::run_recorded_content_probe() }
 mod qa;
+mod qa_voice_capture;
 mod qa_question_context;
 mod recording_gate;
 mod resources;
@@ -1897,7 +1898,16 @@ impl Coordinator {
         }
     }
 
+    pub fn acknowledge_question_card_visible(&self, owner: &str) {
+        if let Ok(owner) = uuid::Uuid::parse_str(owner) {
+            qa_voice_capture::acknowledge_visible(&self.inner, owner);
+        }
+    }
+
     pub async fn qa_window_record(&self) -> Result<(), String> {
+        if self.inner.qa_state.lock().input_source == qa::QaInputSource::Listener {
+            return qa_voice_capture::record_edge(&self.inner).await;
+        }
         if self.inner.state.lock().phase != SessionPhase::Idle {
             return Err("qa_dictation_busy".into());
         }
@@ -4436,7 +4446,14 @@ async fn end_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
         return Ok(());
     }
 
-    let question = raw.text.trim().to_string();
+    answer_transcribed_qa_question(inner, session_id, &raw.text, raw.duration_ms).await
+}
+
+async fn answer_transcribed_qa_question(
+    inner: &Arc<Inner>, session_id: SessionId, question: &str, duration_ms: u64,
+) -> Result<(), String> {
+    if !qa_processing_matches(inner, session_id) { return Ok(()); }
+    let question = question.trim().to_string();
     if question.is_empty() {
         // 静默录音：不调 LLM，不弹错误，直接关浮窗。
         log::info!("[coord] QA: empty transcript → silent dismiss");
@@ -4590,7 +4607,7 @@ async fn end_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
             app_name: front_app.clone(),
             insert_status: InsertStatus::CopiedFallback,
             error_code: Some("qaSession".to_string()),
-            duration_ms: Some(raw.duration_ms),
+            duration_ms: Some(duration_ms),
             dictionary_entry_count: None,
             has_audio_recording: None,
             embedded_audio_stats: None,

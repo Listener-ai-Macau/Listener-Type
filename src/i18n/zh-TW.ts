@@ -161,6 +161,7 @@ export const zhTW: typeof zhCN = {
     openButton: "開啟問答視窗",
     startButton: "開始提問",
     submitButton: "結束並提問",
+    listenerSource: "Listener 麥克風 · 說「開始提問」",
     microphoneSource: "使用電腦麥克風；辨識與回答使用已設定的雲端服務。",
     simpleHowto: "這是語音提問，使用電腦麥克風，目前不支援鍵入問題。開啟視窗，點擊「開始提問」，說完再點「結束並提問」。也可先在其他軟體選取文字，讓回答參考該內容。",
     shortcutHint: "也可用 {{recordHotkey}} 開始或結束提問",

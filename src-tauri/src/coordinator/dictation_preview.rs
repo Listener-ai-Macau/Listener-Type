@@ -915,7 +915,11 @@ fn arm_accepted_automatic_wake_text_guard(
         phrase,
         capsule_audio_boundary_ms,
     );
-    if early_capsule_was_visible {
+    let question_visible = {
+        let qa = inner.qa_state.lock();
+        qa.capture_owner == Some(session_id) && qa.capture_visible && qa.panel_visible
+    };
+    if early_capsule_was_visible || question_visible {
         acknowledge_automatic_wake_capsule_visible(inner, session_id);
         log::info!(
             "[wake-phrase] accepted automatic session inherited early capsule visibility session_id={session_id}"

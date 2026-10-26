@@ -1,6 +1,8 @@
 use super::*;
 fn candidate(pcm: Vec<u8>) -> BufferedSpeakerCandidate {
     BufferedSpeakerCandidate {
+        enrollment_phrase: "开始录音".into(), command_phrase: "开始录音".into(),
+        voice_action: crate::voice_command::VoiceAction::Dictation,
         candidate_id: 65,
         kind: BufferedSpeakerCandidateKind::Verification,
         pcm,

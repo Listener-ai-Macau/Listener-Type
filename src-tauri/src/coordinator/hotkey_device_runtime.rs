@@ -1769,6 +1769,26 @@ async fn request_embedded_ble_recording_start_with_translation(
     reason: &'static str,
     translation: bool,
 ) -> Result<SessionId, String> {
+    request_embedded_ble_recording_start_for_action_with_translation(
+        inner, reason, translation, crate::voice_command::VoiceAction::Dictation).await
+}
+
+async fn request_embedded_ble_recording_start_for_action(
+    inner: &Arc<Inner>, reason: &'static str, action: crate::voice_command::VoiceAction,
+) -> Result<SessionId, String> {
+    request_embedded_ble_recording_start_for_action_with_translation(inner, reason, false, action).await
+}
+
+async fn request_embedded_ble_recording_start_for_action_with_translation(
+    inner: &Arc<Inner>, reason: &'static str, translation: bool, action: crate::voice_command::VoiceAction,
+) -> Result<SessionId, String> {
+    if action == crate::voice_command::VoiceAction::Question {
+        ensure_qa_service_setup()?;
+        let qa = inner.qa_state.lock();
+        if qa.phase == QaPhase::Recording && qa.capture_owner.is_none() {
+            return Err("qa_dictation_busy".into());
+        }
+    }
     // Readiness recovery can await while OTA claims exclusive ownership.
     // Recheck at the actual session/transport boundary, not only at the key.
     if !recording_gate::try_admit_arc(
@@ -1794,17 +1814,18 @@ async fn request_embedded_ble_recording_start_with_translation(
             SessionPhase::Idle => {
                 // r23：HWND 与标题原子成对抓取，自愈路径靠标题识别真实窗口。
                 let (focus_target, focus_title) = capture_focus_target_with_title();
-                let started = begin_session_state(
-                    &mut state,
-                    focus_target,
-                    capture_frontmost_app(),
+                let started = crate::coordinator_state::begin_session_state_for_action(
+                    &mut state, focus_target, capture_frontmost_app(), action,
                 )
                 .ok_or_else(|| "Listener BLE recording start ignored while idle".to_string())?;
                 state.focus_target_title = focus_title;
                 inner.translation_modifier_seen.store(translation, Ordering::SeqCst);
                 started
             }
-            SessionPhase::Starting | SessionPhase::Listening => state.session_id,
+            SessionPhase::Starting | SessionPhase::Listening => {
+                if state.voice_action != action { return Err("qa_dictation_busy".into()); }
+                state.session_id
+            }
             phase => {
                 return Err(format!(
                     "Listener BLE recording start ignored while dictation phase is {phase:?}"
@@ -1813,6 +1834,11 @@ async fn request_embedded_ble_recording_start_with_translation(
         }
     };
 
+    if action == crate::voice_command::VoiceAction::Question {
+        qa_voice_capture::begin_card(inner, session_id);
+    } else if inner.qa_state.lock().panel_visible {
+        close_qa_panel(inner);
+    }
     record_embedded_ble_session_actor_command(
         inner,
         EmbeddedBleSessionActorCommand::StartCommand,

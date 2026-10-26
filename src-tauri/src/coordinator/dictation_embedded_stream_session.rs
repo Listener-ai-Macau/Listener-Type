@@ -394,11 +394,10 @@ impl EmbeddedStreamingDictation {
             // the fresh coordinator session.
             session.source_admission_ledger =
                 Arc::clone(&continuation.body.source_admission_ledger);
-            session.start_local_speaker_tracking(
-                continuation.wake_pcm.clone(),
-                continuation.wake_end_seconds,
-                continuation.wake_phrase.clone(),
-                continuation.enrolled_owner_matched,
+            session.start_local_speaker_tracking_for_profile(
+                continuation.wake_pcm.clone(), continuation.wake_end_seconds,
+                continuation.wake_phrase.clone(), continuation.enrolled_owner_matched,
+                continuation.profile_phrase.clone(),
             );
             // Safety net: host-start arms the wake guard before PCM attaches, but
             // if begin_session raced and cleared it, re-arm so empty-body abandon

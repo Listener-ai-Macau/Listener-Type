@@ -123,8 +123,10 @@ fn continue_keyword_search_after_conflict(candidate: &mut BufferedSpeakerCandida
     // Only decoder context advances. All original audio stays available to ASR
     // after a later real command; this veto has no text/owner/STOP authority.
     candidate.wake_detector = None;
-    let phrase = found.matched_keyword.clone().unwrap();
-    candidate.wake_detector_init = Some(tauri::async_runtime::spawn_blocking(move || crate::wake_phrase::StreamingDetector::new(&phrase)));
+    let phrase = candidate.enrollment_phrase.clone();
+    candidate.wake_detector_init = Some(tauri::async_runtime::spawn_blocking(move ||
+        crate::wake_voice_commands::VoiceCommandDetector::new(&phrase,
+            Some(crate::voice_command::DEFAULT_QUESTION_PHRASE))));
     candidate.kws_stream_origin_bytes = end;
     candidate.kws_fed_bytes = end;
     candidate.kws_first_hit_at = None;

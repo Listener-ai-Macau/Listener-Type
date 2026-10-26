@@ -50,6 +50,8 @@ mod polish;
 mod protected_voice_profile;
 mod qa_hotkey;
 mod qa_overlay_layout;
+mod voice_command;
+mod wake_voice_commands;
 mod recorder;
 mod selection;
 mod shortcut_binding;
@@ -292,7 +294,7 @@ use tauri::menu::{
 };
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 use tauri::{
-    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, PhysicalPosition, RunEvent, Runtime,
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, RunEvent, Runtime,
     WebviewWindow,
 };
 use uuid::Uuid;

@@ -25,6 +25,9 @@ impl EmbeddedStreamingDictation {
             .expect("wake_detector_init present");
         match handle.await {
             Ok(Ok(detector)) => {
+                if let Some(error) = &detector.question_unavailable {
+                    log::warn!("[voice-command] question keyword unavailable; preserving dictation: {error}");
+                }
                 candidate.wake_detector = Some(detector);
                 log::info!(
                     "[wake-phrase] deferred streaming detector ready embedded_session_id={embedded_session_id} buffered_pcm_ms={}",

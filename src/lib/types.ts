@@ -816,6 +816,8 @@ export interface QaChatMessage {
 }
 
 export interface QaStatePayload {
+  input_source?: 'computerMic' | 'listener';
+  session_id?: string;
   kind: QaStateKind;
   /** 后端权威：当前已有的多轮对话历史（user → assistant 交替）。answer 事件带完整版。 */
   messages?: QaChatMessage[];

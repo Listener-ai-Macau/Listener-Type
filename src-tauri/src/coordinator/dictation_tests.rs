@@ -37,6 +37,61 @@ use super::{
     LOCAL_CONFIRMATION_START_MS, LocalSpeechActivity, PRESERVED_CANDIDATE_LEDGER_CAPACITY,
 };
 use crate::coordinator::Coordinator;
+
+#[tokio::test]
+#[ignore = "Requires explicit private-profile existing-service QA acceptance opt-in"]
+async fn question_capture_existing_services_without_editor_delivery() {
+    assert_eq!(std::env::var("LISTENER_TYPE_QA_EXISTING_SERVICES_OPT_IN").as_deref(), Ok("1"));
+    assert!(std::env::var("LISTENER_TYPE_CREDENTIAL_NAMESPACE").is_ok());
+    let root = std::path::PathBuf::from(std::env::var("LISTENER_TYPE_DATA_DIR").unwrap());
+    assert!(root.to_string_lossy().contains("accept131-rust-"));
+    let pcm = std::fs::read(std::env::var("LISTENER_TYPE_QA_FIXED_PCM").unwrap()).unwrap();
+    assert!((32_000..=256_000).contains(&pcm.len()) && pcm.len() % 2 == 0);
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let mut prefs = inner.prefs.get();
+    prefs.qa_save_history = true;
+    prefs.owner_activity_only = false; // No enrolled person is claimed by synthetic speech.
+    prefs.llm_thinking_enabled = false;
+    inner.prefs.set(prefs).unwrap();
+    let session = super::begin_embedded_audio_dictation_session_for_action(
+        inner, crate::voice_command::VoiceAction::Question).await.unwrap().unwrap();
+    let owner = session.session_id;
+    assert!(session.archive_pcm.is_none(), "Question does not inherit dictation audio archiving");
+    assert!(!crate::coordinator_state::editor_delivery_allowed(&inner.state.lock(), owner));
+    assert!(super::activate_embedded_audio_dictation_session(inner, owner, 0.0));
+    for chunk in pcm.chunks(3200) {
+        session.consumer.consume_pcm_chunk(chunk);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let transition = crate::coordinator_state::apply_dictation_event(&mut inner.state.lock(),
+        crate::coordinator_state::DictationEvent::Stop { session_id: owner, user_initiated: true });
+    let started = Instant::now();
+    super::finish_end_session_after_stop_transition(inner, transition).await.unwrap();
+    assert_eq!(inner.state.lock().phase, crate::coordinator_state::SessionPhase::Idle,
+        "LLM does not keep the BLE capture actor blocked");
+    tokio::time::timeout(Duration::from_secs(45), async {
+        loop {
+            let ready = {
+                let qa = inner.qa_state.lock();
+                qa.phase == crate::coordinator::qa::QaPhase::Idle && qa.messages.len() == 2
+            };
+            if ready { break; }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }).await.expect("one answer must finish within the bounded existing-service window");
+    let rows = inner.history.list().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].error_code.as_deref(), Some("qaSession"));
+    assert!(rows[0].final_text.contains('2'), "{}", rows[0].final_text);
+    assert!(inner.prepared_windows_ime_session.lock().is_empty());
+    std::fs::write(root.join("qa-existing-services-result.json"), serde_json::to_vec_pretty(&serde_json::json!({
+        "passed":true, "scope":"Synthetic question PCM through production Question capture, actual existing streaming ASR, source closeout and shared LLM answer/private opt-in history. No KWS/owner/RF/physical microphone/native display qualification.",
+        "question":rows[0].raw_transcript,"answer":rows[0].final_text,"historyCount":rows.len(),
+        "questionCaptureHasNoEditorPermission":true,"preparedEditorResourceAbsent":true,
+        "captureReleasedBeforeAnswer":true,"elapsedStopToAnswerMs":started.elapsed().as_millis(),
+    })).unwrap()).unwrap();
+}
 use crate::coordinator::{PolishPrefetch, PolishPrefetchBuf};
 
 #[tokio::test]
@@ -4458,7 +4513,7 @@ fn startup_voiceprint_pending_does_not_discard_unclassified_retained_audio() {
         profile_rx: Some(profile_rx), profile: None, classification_rx: None,
         adaptation_gate: Default::default(), rolling_pcm: Vec::new(),
         next_classification_audio_ms: super::LOCAL_SPEAKER_CLASSIFY_MIN_MS as u64,
-        wake_phrase: "开始录音".into(), enrolled_owner_matched: true,
+        wake_phrase: "开始录音".into(), profile_phrase: "开始录音".into(), enrolled_owner_matched: true,
     };
     let pcm = (0..6_000_u16).flat_map(|ms|
         std::iter::repeat_n(ms.to_le_bytes(), 16).flatten()).collect::<Vec<_>>();
@@ -4739,7 +4794,7 @@ async fn recorded_startup_speaker_coverage_live_delivery_probe() {
         profile_rx: Some(profile_rx), profile: None, classification_rx: None,
         adaptation_gate: Default::default(), rolling_pcm: Vec::new(),
         next_classification_audio_ms: super::LOCAL_SPEAKER_CLASSIFY_MIN_MS as u64,
-        wake_phrase: wake_phrase.into(), enrolled_owner_matched: false,
+        wake_phrase: wake_phrase.into(), profile_phrase: wake_phrase.into(), enrolled_owner_matched: false,
     };
     let credential = |account| CredentialsVault::get(account).unwrap()
         .filter(|v| !v.is_empty()).expect("installed credential");

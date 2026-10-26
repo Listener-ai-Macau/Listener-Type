@@ -32,6 +32,8 @@ pub(crate) enum SessionPhase {
 }
 
 pub(crate) struct SessionState {
+    /// Selected at session birth, before any preview or editor consumer starts.
+    pub(crate) voice_action: crate::voice_command::VoiceAction,
     pub(crate) phase: SessionPhase,
     pub(crate) started_at: Instant,
     /// Starting 阶段（ASR 握手中）按下 stop 边沿（toggle 第二次按 / hold 松开）→
@@ -60,6 +62,7 @@ pub(crate) struct SessionState {
 impl Default for SessionState {
     fn default() -> Self {
         Self {
+            voice_action: crate::voice_command::VoiceAction::Dictation,
             phase: SessionPhase::Idle,
             started_at: Instant::now(),
             pending_stop: false,
@@ -79,6 +82,7 @@ pub(crate) enum DictationEvent {
     Start {
         focus_target: Option<usize>,
         front_app: Option<String>,
+        voice_action: crate::voice_command::VoiceAction,
     },
     Stop {
         session_id: SessionId,
@@ -260,6 +264,7 @@ pub(crate) fn apply_dictation_event(
         DictationEvent::Start {
             focus_target,
             front_app,
+            voice_action,
         } => {
             if state.phase != SessionPhase::Idle {
                 return DictationTransition::Ignored {
@@ -267,6 +272,7 @@ pub(crate) fn apply_dictation_event(
                 };
             }
             state.phase = SessionPhase::Starting;
+            state.voice_action = voice_action;
             state.started_at = Instant::now();
             state.pending_stop = false;
             state.cancelled = false;
@@ -508,6 +514,11 @@ pub(crate) fn apply_dictation_event(
                     reason: DictationIgnoreReason::InvalidPhase,
                 };
             }
+            if !state.voice_action.permits_editor_delivery() {
+                return DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::InvalidPhase,
+                };
+            }
             if state.cancelled && !already_streamed {
                 state.phase = SessionPhase::Idle;
                 return DictationTransition::Ignored {
@@ -564,11 +575,22 @@ pub(crate) fn begin_session_state(
     focus_target: Option<usize>,
     front_app: Option<String>,
 ) -> Option<SessionId> {
+    begin_session_state_for_action(state, focus_target, front_app,
+        crate::voice_command::VoiceAction::Dictation)
+}
+
+pub(crate) fn begin_session_state_for_action(
+    state: &mut SessionState,
+    focus_target: Option<usize>,
+    front_app: Option<String>,
+    voice_action: crate::voice_command::VoiceAction,
+) -> Option<SessionId> {
     match apply_dictation_event(
         state,
         DictationEvent::Start {
             focus_target,
             front_app,
+            voice_action,
         },
     ) {
         DictationTransition::Applied {
@@ -577,6 +599,20 @@ pub(crate) fn begin_session_state(
         } => Some(session_id),
         _ => None,
     }
+}
+
+pub(crate) fn editor_delivery_allowed(state: &SessionState, session_id: SessionId) -> bool {
+    state.session_id == session_id && !state.cancelled
+        && state.voice_action.permits_editor_delivery()
+}
+
+pub(crate) fn complete_question_capture_state(state: &mut SessionState, owner: SessionId) -> bool {
+    if state.session_id != owner || state.cancelled || state.phase != SessionPhase::Processing
+        || state.voice_action != crate::voice_command::VoiceAction::Question { return false; }
+    state.phase = SessionPhase::Idle;
+    state.focus_target = None;
+    state.focus_target_title = None;
+    true
 }
 
 /// stop_dictation / hold release 在 Starting 阶段只记录 pending_stop，等待启动完成后处理。
@@ -720,6 +756,44 @@ pub(crate) fn publish_abort_idle_after_restore(state: &mut SessionState, session
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn question_capture_cannot_deliver_to_an_editor_even_after_asr() {
+        let mut state = SessionState::default();
+        let id = begin_session_state_for_action(&mut state, Some(7), None,
+            crate::voice_command::VoiceAction::Question).unwrap();
+        assert!(!editor_delivery_allowed(&state, id));
+        state.phase = SessionPhase::Processing;
+        for already_streamed in [false, true] {
+            assert!(matches!(apply_dictation_event(&mut state,
+                DictationEvent::InsertionStarted { session_id: id, already_streamed }),
+                DictationTransition::Ignored { .. }));
+            assert_eq!(state.phase, SessionPhase::Processing);
+        }
+        state.phase = SessionPhase::Idle;
+        let next = begin_session_state(&mut state, Some(8), None).unwrap();
+        assert_ne!(id, next);
+        assert!(editor_delivery_allowed(&state, next));
+        assert!(!editor_delivery_allowed(&state, id));
+        state.cancelled = true;
+        assert!(!editor_delivery_allowed(&state, next));
+    }
+
+    #[test]
+    fn question_handoff_releases_only_its_processing_capture() {
+        let mut state = SessionState::default();
+        let owner = begin_session_state_for_action(&mut state, None, None,
+            crate::voice_command::VoiceAction::Question).unwrap();
+        assert!(!complete_question_capture_state(&mut state, owner));
+        state.phase = SessionPhase::Processing;
+        assert!(!complete_question_capture_state(&mut state, new_session_id()));
+        assert!(complete_question_capture_state(&mut state, owner));
+        assert_eq!(state.phase, SessionPhase::Idle);
+        assert!(!complete_question_capture_state(&mut state, owner));
+        let next = begin_session_state(&mut state, None, None).unwrap();
+        state.phase = SessionPhase::Processing;
+        assert!(!complete_question_capture_state(&mut state, next));
+    }
 
     fn session_id(n: u128) -> SessionId {
         Uuid::from_u128(n)

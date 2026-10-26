@@ -6014,7 +6014,7 @@ async fn qa_capsule_notifications_do_not_override_active_dictation() {
 }
 
 #[test]
-fn qa_capsule_idle_owner_keeps_normal_feedback_and_rejects_replaced_generation() {
+fn qa_card_owns_feedback_and_capsule_idle_rejects_replaced_generation() {
     let coordinator = Coordinator::new();
     let idle_owner = session_id(14511);
     coordinator.inner.state.lock().session_id = idle_owner;
@@ -6023,7 +6023,10 @@ fn qa_capsule_idle_owner_keeps_normal_feedback_and_rejects_replaced_generation()
         assert_eq!(qa::emit_qa_capsule(&coordinator.inner, state, 0.1, None), Some(idle_owner));
     }
     let events = support::CAPSULE_TEST_EMISSIONS.with(|events| events.borrow().clone());
-    assert_eq!(events.len(), 5);
+    // QA now renders recording/progress/errors in its single compact card.
+    // Only Idle clears the previous pill. The old ownership contract below
+    // still prevents that clear from hiding a newer dictation.
+    assert_eq!(events, vec![(Some(idle_owner), CapsuleState::Idle)]);
     assert!(events.iter().all(|(owner, _)| *owner == Some(idle_owner)));
     // Exercise the real final presentation-cache check after a recording starts
     // between QA's idle snapshot and capsule publication.

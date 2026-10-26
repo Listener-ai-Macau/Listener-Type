@@ -40,6 +40,7 @@ export function QaPanel() {
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [selectionPreview, setSelectionPreview] = useState<string>('');
   const [pinned, setPinned] = useState(false);
+  const [inputSource, setInputSource] = useState<'computerMic' | 'listener'>('computerMic');
   const pendingActions = useRef(new Set<'start' | 'stop'>());
   const [requestedActions, setRequestedActions] = useState(new Set<'start' | 'stop'>());
   /** 流式 LLM 答案：answer_delta 累积、answer 事件来时清空（最终内容已落到 messages）。 */
@@ -68,6 +69,7 @@ export function QaPanel() {
         const { listen } = await import('@tauri-apps/api/event');
         const stateHandle = await listen<QaStatePayload>('qa:state', event => {
           const payload = event.payload;
+          if (payload.input_source) setInputSource(payload.input_source);
           if (payload.messages) {
             setMessages(payload.messages);
           }
@@ -81,6 +83,14 @@ export function QaPanel() {
               setLevel(0);
               break;
             case 'recording':
+              if (payload.input_source === 'listener' && payload.session_id) {
+                const owner = payload.session_id;
+                requestAnimationFrame(() => {
+                  void import('@tauri-apps/api/core').then(({ invoke }) => invoke('record_ui_timeline_event', {
+                    payload: { source: 'frontend.qa', event: 'visible', state: 'recording', detail: { sessionId: owner } },
+                  }));
+                });
+              }
               followAnswerTail.current = true;
               setStatus('recording');
               setSelectionPreview(payload.selection_preview ?? '');
@@ -273,17 +283,14 @@ export function QaPanel() {
           <ErrorRow message={QA_ERROR_TRANSLATIONS.has(errorMsg) ? t(QA_ERROR_TRANSLATIONS.get(errorMsg)!) : errorMsg} t={t} recordHotkey={recordHotkeyLabel} />
         )}
       </div>
-      <div data-qa-actions style={{ padding: '10px 14px', borderTop: '1px solid var(--ol-line)', display: 'grid', gap: 6 }}>
-        <div style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--ol-ink-3)' }}>{t('qa.microphoneSource')}</div>
+      <div data-qa-actions style={{ padding: '6px 10px', borderTop: '1px solid var(--ol-line)', display: 'grid', gap: 4 }}>
+        <div style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--ol-ink-3)' }}>{t(inputSource === 'listener' ? 'qa.listenerSource' : 'qa.microphoneSource')}</div>
         <button data-qa-record-control onMouseDown={event => event.preventDefault()} onClick={() => void onRecord()}
           disabled={status === 'thinking' || (status !== 'recording' && !preparation.ready) || requestedActions.has(status === 'recording' ? 'stop' : 'start')}
-          style={{ border: 0, borderRadius: 8, padding: '10px 12px', background: 'var(--ol-blue)', color: 'white', font: 'inherit', fontSize: 13, opacity: status !== 'recording' && !preparation.ready ? .45 : 1, cursor: status === 'thinking' ? 'wait' : status !== 'recording' && !preparation.ready ? 'not-allowed' : 'pointer' }}>
+          style={{ border: 0, borderRadius: 8, padding: '6px 10px', background: 'var(--ol-blue)', color: 'white', font: 'inherit', fontSize: 13, opacity: status !== 'recording' && !preparation.ready ? .45 : 1, cursor: status === 'thinking' ? 'wait' : status !== 'recording' && !preparation.ready ? 'not-allowed' : 'pointer' }}>
           {t(status === 'recording' ? 'qa.submitButton' : status === 'thinking' ? 'qa.thinking' : 'qa.startButton')}
         </button>
-        <div style={{ fontSize: 10.5, color: 'var(--ol-ink-4)' }}>{t('qa.shortcutHint', { recordHotkey: recordHotkeyLabel })}</div>
       </div>
-      <StatusBar status={status} t={t} recordHotkey={recordHotkeyLabel}
-        idleLabel={preparation.ready ? undefined : t(!preparation.credentials ? preparation.failed ? 'qaPreparation.unknown' : 'qaPreparation.checking' : 'qaPreparation.setupRequired')} />
     </div>
   );
 }
@@ -594,53 +601,6 @@ function ErrorRow({
   );
 }
 
-function StatusBar({
-  status,
-  t,
-  recordHotkey,
-  idleLabel,
-}: {
-  status: Status;
-  t: ReturnType<typeof useTranslation>['t'];
-  recordHotkey: string;
-  idleLabel?: string;
-}) {
-  let label = '';
-  let dotColor = 'transparent';
-  switch (status) {
-    case 'idle':
-      label = idleLabel ?? t('qa.statusIdle', { recordHotkey });
-      dotColor = 'rgba(0,0,0,0.18)';
-      break;
-    case 'recording':
-      label = t('qa.statusRecording');
-      dotColor = 'var(--ol-err)';
-      break;
-    case 'thinking':
-      label = t('qa.statusThinking');
-      dotColor = 'var(--ol-blue)';
-      break;
-    case 'error':
-      label = t('qa.statusError');
-      dotColor = 'var(--ol-err)';
-      break;
-  }
-  return (
-    <div data-qa-status style={statusBarStyle}>
-      <span
-        style={{
-          width: 7,
-          height: 7,
-          borderRadius: '50%',
-          background: dotColor,
-          flexShrink: 0,
-        }}
-      />
-      <span style={{ fontSize: 11.5, color: 'var(--ol-ink-3)', fontWeight: 500 }}>{label}</span>
-    </div>
-  );
-}
-
 function SkeletonLine({ width }: { width: string }) {
   return (
     <div
@@ -710,7 +670,7 @@ const contentStyle: CSSProperties = {
   flex: 1,
   minHeight: 0,
   overflow: 'auto',
-  padding: '14px 16px',
+  padding: '8px 10px',
   display: 'flex',
   flexDirection: 'column',
   gap: 12,
@@ -801,17 +761,6 @@ const recordingDotStyle: CSSProperties = {
   borderRadius: '50%',
   background: 'var(--ol-err)',
   animation: 'qa-pulse 1.2s var(--ol-motion-soft) infinite',
-};
-
-const statusBarStyle: CSSProperties = {
-  height: 28,
-  flexShrink: 0,
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  padding: '0 14px',
-  borderTop: '0.5px solid var(--ol-line-soft)',
-  background: 'var(--ol-glass-bg)',
 };
 
 const globalCss = `
