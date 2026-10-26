@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-26T09:57:34.047029+08:00",
+  "updated_at": "2026-10-26T11:23:40.606977+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -8445,17 +8445,19 @@
     {
       "id": "question_voice_route_shared_card_and_bounded_speech_recovery",
       "subject": "Independent question wake and capsule-anchored answer card; question automatic endpoint waits for recognition rather than impossible editor receipt, with one bounded retained-audio recovery",
-      "state": "194_actual_question_manual_end_answer_passed_195_shared_endpoint_contract_and_medium_native_card_passed_actual_auto_end_pending",
+      "state": "196_actual_question_preview_and_automatic_source_stop_passed_calendar_answer_failed_separate_context_fix_in_progress",
       "repo": "type",
-      "commit": "20d9cf33382bef75f0e464f20301c350c36be451",
-      "commit_subject": "Separate question endpoint completion from editor delivery and enlarge answer card",
+      "commit": "f60756875bc21e688ab04eecef1f79abdeef58ed",
+      "commit_subject": "Preview live questions and preserve enrolled identity across question commands",
       "humanAccepted": false,
       "protects": [
         "Keep configured dictation wake and enrolled owner profile; distinct strict question keyword reuses the existing KWS runtime",
         "Bind question action before ASR/editor consumers; no question or answer automatic editor/clipboard delivery",
         "Use medium360x240 card at the same capsule bottom anchor; preserve user resize and streamed-answer reading position",
         "Use one existing-provider retained-audio recovery for question speech transport errors; preserve scoped cancellation and no duplicate question/answer",
-        "All three Question endpoint readers wait for unfinished recognition, never for an editor receipt; Dictation keeps existing receipt protection"
+        "All three Question endpoint readers wait for unfinished recognition, never for an editor receipt; Dictation keeps existing receipt protection",
+        "Question capture previews are reversible and UUID-bound; late/stale partials cannot enter another question.",
+        "The new question command text cannot replace the enrolled identity profile used by native-word and pending-source verification."
       ],
       "guards": [
         "Pure action/editor permission/stale-owner state checks",
@@ -8476,14 +8478,17 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\qa195-endpoint-contract-tests.log",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native195-snapshot-20261026-095247\\qa195-native.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native195-snapshot-20261026-095247\\qa195-stream-native.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261026-build195\\type195-installed.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261026-build195\\type195-installed.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261026-build196\\human-question196-reviewed.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\Listener-售前验收-20261026-build196\\qa-actual-observer-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native196-snapshot-20261026-103952\\qa196-native.json"
       ],
       "machine_accepted_scope": [
-        "194 actual owner speech via 开始提问 produced the correct native answer after manual End and Ask. Automatic end is not implied.193 real timeout retained;194 exact-error injection verifies the existing-provider recovery separately.195 endpoint contract is software evidence until actual silence/end check."
+        "Actual196 Listener voice question produced reversible partial question text and first stop_feedback=target_speaker_inactive_3000ms, then native answer. This trace qualifies preview/automatic capture ending. Its calendar answer was incorrect and remains a separate answer-context defect; not all QA facts, environments or original22 scopes qualified."
       ],
       "pending_human_scope": [
-        "Actual195 stop-speaking without clicking End, automatic capture completion and native answer",
-        "Original22 other unresolved scopes preserved"
+        "Calendar semantic defect is tested separately at the actual service after context repair, not implied by automatic capture success.",
+        "Original22 other unresolved scopes retained."
       ]
     }
   ],
@@ -9923,8 +9928,8 @@
     },
     {
       "id": "question-voice-command",
-      "accepted_scope": "194 actual owner new voice command to correct answer after manual stop;195 endpoint software contract and exact medium native display. Actual automatic stop remains pending.",
-      "baseline_state": "194_actual_question_manual_end_answer_passed_195_shared_endpoint_contract_and_medium_native_card_passed_actual_auto_end_pending",
+      "accepted_scope": "Actual196 Listener voice question produced reversible partial question text and first stop_feedback=target_speaker_inactive_3000ms, then native answer. This trace qualifies preview/automatic capture ending. Its calendar answer was incorrect and remains a separate answer-context defect; not all QA facts, environments or original22 scopes qualified.",
+      "baseline_state": "196_actual_question_preview_and_automatic_source_stop_passed_calendar_answer_failed_separate_context_fix_in_progress",
       "guard_entries": [
         "question_voice_route_shared_card_and_bounded_speech_recovery"
       ],
@@ -9940,12 +9945,16 @@
           "src-tauri/src/lib.rs",
           "src-tauri/src/qa_overlay_layout.rs",
           "src-tauri/tauri.conf.json",
-          "src/components/QaPanel.tsx"
+          "src/pages/QaPanel.tsx",
+          "src-tauri/src/asr/volcengine.rs",
+          "src-tauri/src/coordinator/dictation_wake_polish.rs",
+          "src-tauri/src/wake_phrase.rs"
         ]
       },
       "known_failures": [
         "193 actual voice card appeared but speech WebSocket writer timed out after2500ms; retained as failure,194 shared retained-audio recovery checked separately.",
-        "194 owner confirmed manual End and Ask; automatic endpoint had approved text waiting for an editor receipt despite Question forbidding editor output.195 repairs the shared pending reader; actual automatic behavior still pending."
+        "194 owner confirmed manual End and Ask; automatic endpoint had approved text waiting for an editor receipt despite Question forbidding editor output.195 repairs the shared pending reader; actual automatic behavior still pending.",
+        "196 preview and automatic capture ending succeeded; the LLM answered Sunday for 2026-10-27 Tuesday because QA had no current date context. The recording source is not reverted for a separate answer error."
       ]
     }
   ]

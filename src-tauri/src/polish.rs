@@ -15,6 +15,9 @@ use thiserror::Error;
 
 use crate::types::{ChineseScriptPreference, OutputLanguagePreference, PolishMode, QaChatMessage};
 
+#[path = "qa_calendar_context.rs"]
+mod qa_calendar_context;
+
 const DEFAULT_TEMPERATURE: f32 = 0.3;
 const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 30;
 /// 从发出润色请求到收到第一段可显示正文的绝对上限。网络连接成功、HTTP 200、
@@ -2317,7 +2320,7 @@ pub mod prompts {
     /// 划词语音问答 system prompt — 用户选中一段文字后口头提问，要求基于选区给出简短答案。
     /// 详见 issue #118。
     pub fn qa_system_prompt() -> String {
-        "# 任务（基于选区的语音问答）\n\
+        let task = "# 任务（基于选区的语音问答）\n\
          用户选中了一段文字，并对它提了一个语音问题。请基于选中内容回答这个问题。\n\
          \n\
          ## 输入约定\n\
@@ -2331,7 +2334,8 @@ pub mod prompts {
          - 用大白话，不要客套话（\u{201C}希望能帮到你\u{201D}等）。\n\
          - 不要重复用户的提问。\n\
          - 如果选中文本和提问无关，按提问独立回答，**不编造选区里没有的信息**。"
-            .to_string()
+            .to_string();
+        format!("{task}\n\n{}", super::qa_calendar_context::current_calendar_context())
     }
 
     /// 翻译模式 system prompt — 用户在「翻译」页选定的目标语言（内置 15 种自然语言原生名）。

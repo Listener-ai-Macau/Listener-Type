@@ -6496,6 +6496,30 @@ fn translation_unknown_new_fields_cannot_reset_existing_provider_preferences() {
     }
 }
 
+// One existing-service answer check, explicitly isolated; no ASR or microphone.
+#[tokio::test]
+#[ignore = "Requires explicit private existing-service calendar QA opt-in"]
+async fn qa_calendar_existing_service_uses_current_local_date() {
+    use chrono::{Datelike,Days};
+    assert_eq!(std::env::var("LISTENER_TYPE_QA_EXISTING_SERVICES_OPT_IN").as_deref(),Ok("1"));
+    let root=PathBuf::from(std::env::var("LISTENER_TYPE_DATA_DIR").unwrap());
+    assert!(root.to_string_lossy().contains("accept131-rust-"));
+    assert!(std::env::var("LISTENER_TYPE_CREDENTIAL_NAMESPACE").is_ok());
+    let c=Coordinator::new();let inner=&c.inner;let owner=new_session_id();
+    let mut prefs=inner.prefs.get();prefs.qa_save_history=false;prefs.llm_thinking_enabled=false;
+    prefs.output_language_preference=OutputLanguagePreference::ZhCn;inner.prefs.set(prefs).unwrap();
+    assert_eq!(CredentialsVault::get_active_llm(),"deepseek");
+    { let mut state=inner.qa_state.lock();state.session_id=owner;state.phase=QaPhase::Processing;state.panel_visible=true; }
+    let today=chrono::Local::now().date_naive();let tomorrow=today.checked_add_days(Days::new(1)).unwrap();
+    let started=Instant::now();
+    tokio::time::timeout(Duration::from_secs(45),answer_transcribed_qa_question(inner,owner,"明天是星期几？",0)).await.unwrap().unwrap();
+    let state=inner.qa_state.lock();assert_eq!(state.messages.len(),2);let answer=state.messages[1].content.clone();
+    let labels=["一","二","三","四","五","六","日"];let suffix=labels[tomorrow.weekday().num_days_from_monday() as usize];
+    let correct=answer.contains(&format!("星期{suffix}")) || answer.contains(&format!("周{suffix}")) || (suffix=="日" && answer.contains("星期天"));
+    std::fs::write(root.join("qa-existing-services-result.json"),serde_json::to_vec_pretty(&serde_json::json!({"passed":correct,"scope":"One explicit typed question through production shared QA final answer and existing DeepSeek; current calendar context only. No ASR, microphone, UI, physical or universal factual-accuracy qualification.","today":today.to_string(),"expectedTomorrow":tomorrow.to_string(),"answer":answer,"durationMs":started.elapsed().as_millis(),"asrRequests":0})).unwrap()).unwrap();
+    assert!(correct,"calendar answer did not match local next-day weekday: {answer}");
+}
+
 // Explicit acceptance probe only: the private runner supplies a non-private
 // fixed PCM fixture and disposable copies of the already-authorized services.
 // This deliberately bypasses Recorder/selection capture, so it cannot qualify
