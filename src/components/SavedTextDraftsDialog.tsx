@@ -18,6 +18,12 @@ export function SavedTextDraftsDialog({onClose,initialDraftId,onUnavailable}:{on
   const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[loadError,setLoadError]=useState(false),[error,setError]=useState(''),[copied,setCopied]=useState(''),[confirm,setConfirm]=useState(false);
   const [editing,setEditing]=useState<SavedTextDraft|null>(null),[editText,setEditText]=useState(''),[editName,setEditName]=useState(''),[editBaseline,setEditBaseline]=useState('');
   const [leaveTarget,setLeaveTarget]=useState<'dialog'|'editor'|null>(null);
+  const leaveConfirmation=useRef<HTMLDivElement>(null);
+  useEffect(()=>{
+    if(!leaveTarget)return;
+    leaveConfirmation.current?.scrollIntoView({block:'nearest'});
+    leaveConfirmation.current?.querySelector('button')?.focus({preventScroll:true});
+  },[leaveTarget]);
   const [keyPhrase,setKeyPhrase]=useState<string|null>(null);
   const [nameEdit,setNameEdit]=useState(''),[nameError,setNameError]=useState(''),[namedId,setNamedId]=useState('');
   const selected=items.find(d=>d.id===selectedId);
@@ -94,7 +100,7 @@ export function SavedTextDraftsDialog({onClose,initialDraftId,onUnavailable}:{on
         {confirm&&<div role="alert"><p>{t('textDraft.confirm')}</p><Btn size="sm" variant="ghost" disabled={busy} onClick={()=>setConfirm(false)}>{t('common.cancel')}</Btn> <Btn size="sm" disabled={busy} onClick={()=>void remove()}>{t('textDraft.delete')}</Btn></div>}
       </section>}
     </>}
-    {leaveTarget&&<div role="alert"><p>{t(nameDirty?'textDraft.discardNameConfirm':'textDraft.discardCopyConfirm')}</p>
+    {leaveTarget&&<div ref={leaveConfirmation} role="alert" className="ol-device-layout-confirm"><p>{t(nameDirty?'textDraft.discardNameConfirm':'textDraft.discardCopyConfirm')}</p>
       <Btn size="sm" variant="ghost" onClick={()=>setLeaveTarget(null)}>{t('common.cancel')}</Btn>{' '}
       <Btn size="sm" onClick={()=>finishLeave(leaveTarget)}>{t('textDraft.discardCopy')}</Btn>
     </div>}

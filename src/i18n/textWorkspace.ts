@@ -1,4 +1,8 @@
 const en = {
+  translateResult: 'Translate this result…', refineResult: 'Refine this translation…',
+  previousStep: 'Previous step · for comparison',
+  continuationHint: 'The result is now the input for the next step. Nothing was sent or saved automatically. This reference stays in this workspace session; save any versions you want to keep.',
+  nextInputTooLong: 'The next step accepts up to 4,000 characters. Your result is unchanged; shorten a copy before continuing.',
   localTranslationEntry: 'Chinese ↔ English on this PC',
   translationOptions: 'Translation settings · {{source}} → {{target}} · {{engine}}', styleOptions: 'Text settings · {{style}}',
   title: 'Text workspace', task: 'What would you like to do?', textTask: 'Keep the language · choose a writing style', translationTask: 'Translate text',
@@ -21,6 +25,10 @@ const en = {
 export const textWorkspaceTranslations = {
   en,
   'zh-CN': {
+    translateResult: '接着翻译这份结果…', refineResult: '接着润色这份译文…',
+    previousStep: '上一步 · 供对照',
+    continuationHint: '结果已带入下一步输入，没有自动发送或保存。此对照保留在当前工作区会话；需要长期保留的版本请另行保存成稿。',
+    nextInputTooLong: '下一步最多接受 4,000 字符。当前结果保持完整，请先缩短一份副本再继续。',
     localTranslationEntry: '本机中英翻译',
     translationOptions: '翻译设置 · {{source}} → {{target}} · {{engine}}', styleOptions: '文字设置 · {{style}}',
     title: '文字工作区', task: '文字任务', textTask: '保留原语言 · 选择文字风格', translationTask: '翻译文字',
@@ -36,6 +44,10 @@ export const textWorkspaceTranslations = {
     draftsIntro: '成稿保存在本机，与录音分别存放。', draftsDetails: '成稿保存说明',
   },
   'zh-TW': {
+    translateResult: '接著翻譯這份結果…', refineResult: '接著潤飾這份譯文…',
+    previousStep: '上一步 · 供對照',
+    continuationHint: '結果已帶入下一步輸入，沒有自動傳送或儲存。此對照保留在目前工作區階段；需要長期保留的版本請另行儲存成稿。',
+    nextInputTooLong: '下一步最多接受 4,000 字元。目前結果保持完整，請先縮短一份副本再繼續。',
     localTranslationEntry: '本機中英翻譯',
     translationOptions: '翻譯設定 · {{source}} → {{target}} · {{engine}}', styleOptions: '文字設定 · {{style}}',
     title: '文字工作區', task: '文字任務', textTask: '保留原語言 · 選擇文字風格', translationTask: '翻譯文字',
@@ -51,6 +63,10 @@ export const textWorkspaceTranslations = {
     draftsIntro: '成稿儲存在本機，與錄音分開存放。', draftsDetails: '成稿儲存說明',
   },
   ja: {
+    translateResult: 'この結果を翻訳…', refineResult: 'この訳文を推敲…',
+    previousStep: '前のステップ · 比較用',
+    continuationHint: '結果を次の入力に移しました。自動送信・保存はしていません。この比較は現在の作業中のみ保持されます。残したい版は下書きとして保存してください。',
+    nextInputTooLong: '次の入力は4,000文字までです。結果はそのまま残っています。コピーを短くしてから続けてください。',
     localTranslationEntry: 'このPCで中国語・英語翻訳',
     translationOptions: '翻訳設定 · {{source}} → {{target}} · {{engine}}', styleOptions: '文章の設定 · {{style}}',
     title: '文章ワークスペース', task: '文章の操作', textTask: '言語を保つ · スタイルを選択', translationTask: '文章を翻訳',
@@ -66,6 +82,10 @@ export const textWorkspaceTranslations = {
     draftsIntro: 'このPCに保存した文章です。録音とは別に保管されます。', draftsDetails: '下書きの保存について',
   },
   ko: {
+    translateResult: '이 결과 번역…', refineResult: '이 번역 다듬기…',
+    previousStep: '이전 단계 · 비교용',
+    continuationHint: '결과를 다음 입력으로 가져왔습니다. 자동으로 전송하거나 저장하지 않았습니다. 비교 내용은 현재 작업 중에만 유지됩니다. 보관할 버전은 초안으로 저장하세요.',
+    nextInputTooLong: '다음 입력은 4,000자까지 가능합니다. 현재 결과는 그대로 유지됩니다. 사본을 줄인 후 계속하세요.',
     localTranslationEntry: '이 PC에서 중·영 번역',
     translationOptions: '번역 설정 · {{source}} → {{target}} · {{engine}}', styleOptions: '텍스트 설정 · {{style}}',
     title: '텍스트 작업 공간', task: '텍스트 작업', textTask: '언어 유지 · 문체 선택', translationTask: '텍스트 번역',
