@@ -1,5 +1,6 @@
 const en = {
   translateResult: 'Translate this result…', refineResult: 'Refine this translation…',
+  refineTranslationHint: 'Check the meaning against the original before refining. This step only changes the translation’s wording; it does not compare it with the original.',
   continueSaved: 'Continue in text workspace…',
   savedDraftInput: 'Started from saved draft “{{name}}”. The saved draft stays unchanged. Choose a task and submit when ready; nothing was sent automatically.',
   savedDraftTooLong: 'The text workspace accepts up to 4,000 characters. This saved draft stays complete; edit and save a shorter copy to continue.',
@@ -29,6 +30,7 @@ export const textWorkspaceTranslations = {
   en,
   'zh-CN': {
     translateResult: '接着翻译这份结果…', refineResult: '接着润色这份译文…',
+    refineTranslationHint: '先对照原文核对译义，再润色。润色只处理当前译文，不会对照原文核验含义。',
     continueSaved: '在文字工作区继续…',
     savedDraftInput: '从已保存成稿「{{name}}」开始，原成稿保持不变。选好任务后再提交，没有自动发送。',
     savedDraftTooLong: '文字工作区最多接受 4,000 字符。已保存成稿保持完整，可编辑并保存一份较短副本再继续。',
@@ -51,6 +53,7 @@ export const textWorkspaceTranslations = {
   },
   'zh-TW': {
     translateResult: '接著翻譯這份結果…', refineResult: '接著潤飾這份譯文…',
+    refineTranslationHint: '先對照原文核對譯義，再潤飾。潤飾只處理目前譯文，不會對照原文核驗含義。',
     continueSaved: '在文字工作區繼續…',
     savedDraftInput: '從已儲存成稿「{{name}}」開始，原成稿維持不變。選好工作後再提交，沒有自動傳送。',
     savedDraftTooLong: '文字工作區最多接受 4,000 字元。已儲存成稿保持完整，可編輯並儲存一份較短副本再繼續。',
@@ -73,6 +76,7 @@ export const textWorkspaceTranslations = {
   },
   ja: {
     translateResult: 'この結果を翻訳…', refineResult: 'この訳文を推敲…',
+    refineTranslationHint: '推敲の前に原文と意味を照合してください。この処理は訳文の表現だけを整え、原文との意味の照合は行いません。',
     continueSaved: 'テキスト作業スペースで続ける…',
     savedDraftInput: '保存した下書き「{{name}}」から開始しました。元の下書きは変わりません。内容と処理を確認してから実行してください。自動送信はしていません。',
     savedDraftTooLong: '作業スペースは4,000文字までです。保存した本文はそのまま残ります。短いコピーを編集・保存してから続けてください。',
@@ -95,6 +99,7 @@ export const textWorkspaceTranslations = {
   },
   ko: {
     translateResult: '이 결과 번역…', refineResult: '이 번역 다듬기…',
+    refineTranslationHint: '다듬기 전에 원문과 뜻을 대조하세요. 이 단계는 현재 번역문의 표현만 다듬으며 원문과 의미를 대조하지 않습니다.',
     continueSaved: '텍스트 작업 공간에서 계속…',
     savedDraftInput: '저장한 초안 “{{name}}”에서 시작했습니다. 원본 초안은 바뀌지 않습니다. 작업을 선택하고 준비되면 실행하세요. 자동으로 전송하지 않았습니다.',
     savedDraftTooLong: '텍스트 작업 공간은 4,000자까지 지원합니다. 저장한 초안은 그대로 유지됩니다. 짧은 사본을 편집하고 저장한 뒤 계속하세요.',

@@ -62,7 +62,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
   const [storedResult, setResult] = useState<StyleTextTrialResult | null>(null);
   const [resultSignature, setResultSignature] = useState('');
   const [editedOutput, setEditedOutput] = useState<string | null>(null);
-  const [previousStep, setPreviousStep] = useState<{ input: string; output: string; name: string } | null>(null);
+  const [previousStep, setPreviousStep] = useState<{ input: string; output: string; name: string; translated: boolean } | null>(null);
   // Session-only comparisons, never History or persistent customer text storage.
   const completed = useRef(new Map<string, { signature: string; input: string; result: StyleTextTrialResult; edited: string | null }>());
   // A request can finish before its target style becomes selected. Carry that
@@ -241,7 +241,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
     // An explicit handoff starts a new input, never a new service request. Keep
     // the exact edited output and its source visible instead of relying on the
     // clipboard or mislabelling the preceding result as a new one.
-    setPreviousStep({ input: draft, output: resultOutput, name: presentation.name });
+    setPreviousStep({ input: draft, output: resultOutput, name: presentation.name, translated: !!translationTarget });
     onDraftChange(resultOutput);
     // The previous source-language choice described the previous input, not
     // this output (which may now be in another language).
@@ -322,6 +322,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
       </div>
       <p id={`${workspaceId}-description`} className="ol-style-trial-hint" data-style-trial-service-notice>{t(offline ? 'offlineTranslation.localNotice' : readiness?.requiresTextService === false ? prepareShorter ? 'textWorkspace.localWithShorterNotice' : 'textWorkspace.localNotice' : 'textWorkspace.cloudNotice')}</p>
       {inputOriginName && <p role="note" className="ol-style-trial-hint" data-saved-draft-origin>{t('textWorkspace.savedDraftInput', { name: inputOriginName })}</p>}
+      {!translationTarget && previousStep?.translated && <p role="note" className="ol-style-trial-hint" data-translation-refine-hint>{t('textWorkspace.refineTranslationHint')}</p>}
       <details className="ol-style-trial-options-panel" data-text-options-panel open={optionsOpen}
         onToggle={event => setOptionsOpen(event.currentTarget.open)}>
         <summary>{translationTarget ? t(offline ? 'textWorkspace.translationOptions' : 'textDraft.cloudTranslationOptions', {
@@ -437,6 +438,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
               onChange={event => setDraftNameEdit(event.target.value)} />
           </label>
           {draftNameInvalid && <p role="alert" className="ol-style-trial-hint">{t('textDraft.nameInvalid')}</p>}
+          {onTranslationTargetChange && translationTarget && <p role="note" className="ol-style-trial-hint" data-translation-refine-hint>{t('textWorkspace.refineTranslationHint')}</p>}
           <div className="ol-style-trial-primary-actions">
             <Btn size="sm" variant="blue" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => void copyResult()}>
               {t(copying ? 'style.trial.copying' : copiedResult === result ? 'style.trial.copied' : 'style.trial.copyResult')}
@@ -478,7 +480,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, pr
         <h3>{t('textWorkspace.previousStep')}</h3>
         <p className="ol-style-trial-hint">{t('textWorkspace.continuationHint')}</p>
         <h4>{previousStep.name}</h4><pre>{previousStep.output}</pre>
-        <details className="ol-style-trial-details"><summary>{t('earlierTrial.input')}</summary><pre>{previousStep.input}</pre></details>
+        <details className="ol-style-trial-details" open={previousStep.translated}><summary>{t('earlierTrial.input')}</summary><pre>{previousStep.input}</pre></details>
       </section>}
       {earlier && (!previousStep || earlier.input !== previousStep.input || (earlier.edited ?? earlier.result.outputText) !== previousStep.output) && <section className="ol-style-trial-comparisons" aria-label={t('earlierTrial.title')} data-style-trial-earlier-result>
         <h3>{t('earlierTrial.title')}</h3>
