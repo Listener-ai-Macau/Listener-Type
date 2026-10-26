@@ -2573,10 +2573,28 @@ fn pause_early_pending_body_delivery(
     inner: &Arc<Inner>, session_id: SessionId,
     asr: &crate::asr::volcengine::VolcengineStreamingASR,
 ) -> Option<crate::asr::volcengine::PendingBodyDelivery> {
-    match pause_early_committed_body_consumption(inner, session_id) {
+    let pending = match pause_early_committed_body_consumption(inner, session_id) {
         Some(consumed) => asr.pending_body_delivery_from_consumption(&consumed),
         None => asr.pending_body_delivery_after(&pause_early_admitted_source_key(inner, session_id)),
-    }
+    };
+    let action = {
+        let state = inner.state.lock();
+        if state.session_id == session_id { state.voice_action }
+        else { crate::voice_command::VoiceAction::Dictation }
+    };
+    pending_endpoint_body_for_action(action, pending)
+}
+
+fn pending_endpoint_body_for_action(
+    action: crate::voice_command::VoiceAction,
+    pending: Option<crate::asr::volcengine::PendingBodyDelivery>,
+) -> Option<crate::asr::volcengine::PendingBodyDelivery> {
+    // All three endpoint readers (provider callback, watchdog, physical STOP
+    // revalidation) come through here. A question never has an editor receipt.
+    // Its unfinished recognition must still hold STOP, but an approved native
+    // question must not wait forever for an impossible editor submission.
+    // Dictation retains the existing consumption/receipt contract unchanged.
+    pending.filter(|body| action.permits_editor_delivery() || body.recognition_pending)
 }
 
 fn pause_early_provider_consumed_key(inner: &Arc<Inner>, session_id: SessionId) -> String {

@@ -2727,6 +2727,33 @@ fn arm_settled_target_endpoint_for_visible_body(
 #[cfg(test)]
 mod endpoint_clock_submission_tests {
     use super::*;
+
+    #[test]
+    fn question_endpoint_waits_for_recognition_but_never_for_an_editor_receipt() {
+        use crate::asr::volcengine::PendingBodyDelivery;
+        use crate::personal_vad::{PresenceObservation, PresenceState};
+        use crate::voice_command::VoiceAction;
+        let now = Instant::now();
+        for action in [VoiceAction::Dictation, VoiceAction::Question] {
+            for recognition_pending in [true, false] {
+                let mut clock = automatic_body_clock();
+                clock.latest_update = Some(owner_update(7_000, 4_000));
+                clock.note_personal_presence(Some(PresenceObservation {
+                    analyzed_end_ms: 7_000, last_positive_end_ms: Some(4_000),
+                    last_unresolved_end_ms: None, source_history_complete: true,
+                    state: PresenceState::ConfirmedOther, observed_at: now,
+                }), now);
+                let pending = pending_endpoint_body_for_action(action, Some(PendingBodyDelivery {
+                    key: "The actual recognized question".into(), updated_at: now,
+                    recognition_pending,
+                }));
+                clock.refresh_pending_body_delivery(pending, now);
+                let expected = action == VoiceAction::Question && !recognition_pending;
+                assert_eq!(clock.personal_presence_stop_due(7_000, now, 3_000), expected,
+                    "action={action:?} recognition_pending={recognition_pending}");
+            }
+        }
+    }
     use crate::insertion::{
         pending_receipt_handle_for_test, PasteReceiptCompletion, PasteReceiptOutcome,
         PasteReceiptProof,
