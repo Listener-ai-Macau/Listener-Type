@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-27T21:23:00.858734+08:00",
+  "updatedAt": "2026-10-27T22:41:01.903444+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 210,
-    "source": "3154195a4415d1d5e396fe70c2edc80135f21925",
-    "sourceTag": "build-source/type210-20261027",
+    "build": 211,
+    "source": "5cbb60298c14a40e716f4a1c090248237a18d6e4",
+    "sourceTag": "build-source/type211-20261027",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "f916b1cb6296beafade23d5de6ea920a56c5b75b7ab97b55b293533f2bae0373",
-    "sizeBytes": 299794432,
-    "exeSha256": "de1867d64cfbe0964f2f56bdefd49fdb4317ea8e1709bdc1fdeadaaf8c8ab9c2",
+    "sha256": "b9cffc8cd85c66e0fe9347d9b4b6b88348ce19df7665fb9bc56d61bf20076f6f",
+    "sizeBytes": 299786240,
+    "exeSha256": "05b86d99ef0464cd6c9d88d14a16ed01a910b4e382edb21c56cdbfe43ce03f5f",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -511,7 +511,7 @@
     "navigationScope": "Exact189 private native sidebar/guide only; no recording/Bluetooth changes",
     "toolDisclosureQualified": true,
     "voiceQuestionExpectationFiveLocalesQualified": true,
-    "scope": "Direct drafting from the raw workspace; explicit cloud retranslation of the complete original keeps edited local output for comparison; translated variants receive bounded language/route names. Seven React request/failure/Unicode contracts and exact210 ordinary native UI with two real text-service calls, one local translation, three saved variants and exact reread passed. Existing dictation unchanged. This does not fix offline-model semantic accuracy or close original22 physical/global/long-term scope.",
+    "scope": "Saved-draft/workspace navigation reuses the current workspace and keeps one active dialog. Before fix three save/view/continue cycles grew1to7 open dialogs; fixed actual React nineteen checkpoints remain1, preserving edited output, name, scroll, selected record and deletion invalidation. Six React contracts and exact ordinary211 native local-only save/view/continue/delete/resave/history-return passed. No new voice, model-quality, physical or universal OS acceptance claim.",
     "qaStreamingDisplayControlledNativeQualified": true,
     "readyMadeStyleLibraryNativeQualified": true,
     "listenerQuestionPreviewAndAutoStopActual196": true,
@@ -551,7 +551,11 @@
     "writing210DictationPreserved": true,
     "writing210ReactContracts": 7,
     "writing209IndependentAIActualUse": true,
-    "offlineTranslationSemanticAccuracyFixed": false
+    "offlineTranslationSemanticAccuracyFixed": false,
+    "draftNavigation211Native": true,
+    "draftNavigation211OneActiveDialog": true,
+    "draftNavigation211DeleteInvalidationAndResave": true,
+    "draftNavigation211ReactContracts": 6
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -569,6 +573,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build210-20261027"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build211-20261027"
   }
 }

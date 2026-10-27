@@ -1,35 +1,35 @@
-# Type build210 / Firmware38 · Listener v1.0.6-rc1
+# Type build211 / Firmware38 · Listener v1.0.6-rc1
 
 | Download | File |
 | --- | --- |
 | **Windows app** | **[Download MSI](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **ESP32-S3 firmware · USB or Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
-## Write, compare and keep useful versions
+## Saved drafts without piling up windows
 
-Open **Overview → Open text workspace**. **Draft from my instructions** is available directly from the original-text workspace, without first choosing Formal wording. The separate drafting style turns a writing brief into a recipient-facing message while keeping facts, questions, conditions and alternatives. Review before sending.
+Viewing a saved result switches from the workspace to the draft library. **Continue in text workspace…** reuses the workspace; repeated save/view/continue cycles no longer create a growing stack of dialogs. One dialog stays active.
 
-After an on-device translation, **Retranslate the original with my cloud service…** keeps the edited local draft for comparison and selects the existing cloud route. The input remains the complete original, rather than the possibly inaccurate translation. Review the service and charges, then explicitly click Translate. Route preparation makes no text-service request. Cloud errors keep the source and comparison available; there is no automatic paid fallback.
+Closing the library returns to the same edited result, name and scroll position. Starting from History and returning keeps the selected draft. Deleting a viewed draft invalidates its saved receipt so the retained text can be saved again. Unsaved rename and copy protections remain. Navigation does not submit text or change active dictation.
 
-Moving a named draft into translation now creates a name including its language and actual local/cloud route. Each explicitly saved variant keeps its own original and output. Existing saved drafts and active dictation are unchanged.
+The old React path grew from one to seven open dialogs in three cycles. Six affected React interaction checks now pass, including the short viewport, History and style-page entries. The matching211 ordinary native UI also saved, viewed, continued, deleted, resaved and returned to exact local records without text-service requests. These are bounded engineering checks; no new211 independent customer or physical acceptance is claimed.
 
-The matching210 ordinary native UI used the existing text service twice and local translation once, saved three variants and reopened their exact names and text. Seven React interaction checks cover explicit sending, failed preparation, failed/unconfigured cloud service, retained edits and Unicode name bounds. The preceding209 independent AI customer actually used drafting and saved/reopened Chinese and English versions. These are bounded software results, not real orders or physical acceptance.
+Retains210 direct instruction-to-message drafting, explicit original-source cloud retranslation with the edited local comparison, and language/route variant names. Retains208 question preview/readiness, protected History clearing and explicit completed-answer draft saving. Firmware38 is unchanged; no firmware flash is required.
 
-**Known translation limit:** the current offline model can confuse actions and date relationships. The retained customer case reproduces inside the offline worker. This release improves the path back to the original and does not claim model accuracy is fixed. Cloud output also needs review; polishing a translation does not verify its meaning against the original.
+## Existing limits
 
-Retains208 computer-question preview/readiness, stable History refresh, explicit clear confirmation and completed-answer draft saving. Firmware38 and its ZIP are unchanged; no firmware flash is required.
+The offline translation model can change important actions or dates. This release does not fix model accuracy; local and cloud output still need review. Strong background-speech isolation, some early-ending conditions, real global/physical/cross-PC/long-term qualifications and the original brownout trigger remain open. RC1 remains a prerelease.
 
-US$49 is the hardware price. Type is free/open source; service preparation and usage charges are separate, without an included official cloud account or allowance. RC1 remains a prerelease. Strong background-speech isolation, the original brownout cause and remaining physical/global/long-term qualifications are open.
+US$49 is the hardware price. Type is free/open source. Service preparation and usage charges are separate; no official cloud account or allowance is included.
 
 ## File identity
 
-- Type source: `3154195a4415d1d5e396fe70c2edc80135f21925` · `build-source/type210-20261027`
-- MSI: 299794432 bytes · SHA256 `f916b1cb6296beafade23d5de6ea920a56c5b75b7ab97b55b293533f2bae0373`
-- Native EXE SHA256: `de1867d64cfbe0964f2f56bdefd49fdb4317ea8e1709bdc1fdeadaaf8c8ab9c2`
-- Native DLL SHA256: `590bfb9576e6988dbdc1c720f73aa218c21fd71c39dc69d9723f83cac21bb3e4`
+- Type source: `5cbb60298c14a40e716f4a1c090248237a18d6e4` · `build-source/type211-20261027`
+- MSI: 299786240 bytes · SHA256 `b9cffc8cd85c66e0fe9347d9b4b6b88348ce19df7665fb9bc56d61bf20076f6f`
+- Native EXE SHA256: `05b86d99ef0464cd6c9d88d14a16ed01a910b4e382edb21c56cdbfe43ce03f5f`
+- Native DLL SHA256: `f34988cdae0bd10e48a8ed9521427e6c02faab63a94d51e0bdd7a2bd8606b42c`
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`
 - ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`
 
 ## 中文说明
 
-从「概览 → 打开文字工作区」即可直接选择按要求起草正文。本机译文含义有疑问时，可保留包括手改内容在内的译稿作为对照，并明确选择现有云端服务，从完整原文重新翻译；核对服务和费用后再次点击翻译才会发送。翻译稿名自动带语言与本机／云端方式，三份稿已在精确210原生界面实际保存并逐份重新打开核对。日常听写、旧成稿与固件38保持。现有本机模型的动作与日期译义问题仍未修好，云端也需核对；本批改善可用处理路径，不代表普遍翻译质量、实体、长期或真实成交通过。
+修复「保存 → 查看成稿 → 继续处理」反复叠加窗口的问题，改为复用工作区并保持一个活动窗口。返回保留手改正文、名称、滚动位置和所选成稿；删除后可重新保存保留的正文，未保存改名与副本保护继续有效。原前端三轮从1层累积到7层，修复后的六类交互检查及精确211原生本机保存／回找／删除重存／历史返回通过。导航不发起文本处理请求，不改变日常听写。固件38和既有语音处理保持；本机翻译准确性、强背景干扰、真实全局与长期范围、欠压触发源仍未完成。
