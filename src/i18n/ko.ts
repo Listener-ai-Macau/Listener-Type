@@ -5,6 +5,7 @@ import { hardwareLayoutTranslations } from './hardwareLayout.ts';
 import { audioFileTranslations } from './audioFile.ts';
 import { politeEditsTranslations } from './politeEdits.ts';
 import { conciseDraftTranslations } from './conciseDraft.ts';
+import { messageDraftTranslations } from './messageDraft.ts';
 import { offlineHelpTranslations } from './offlineHelp.ts';
 import type { zhCN } from './zh-CN';
 import { en } from './en.ts';
@@ -20,6 +21,7 @@ export const ko: typeof zhCN = {
   networkHealth: networkHealthTranslations.ko,
   politeEdits: politeEditsTranslations.ko,
   conciseDraft: conciseDraftTranslations.ko,
+  messageDraft: messageDraftTranslations.ko,
   offlineHelp: offlineHelpTranslations.ko,
   textWorkspace: textWorkspaceTranslations['ko'],
   textDraft: textDraftTranslations['ko'],

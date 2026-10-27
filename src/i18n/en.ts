@@ -5,6 +5,7 @@ import { hardwareLayoutTranslations } from './hardwareLayout.ts';
 import { audioFileTranslations } from './audioFile.ts';
 import { politeEditsTranslations } from './politeEdits.ts';
 import { conciseDraftTranslations } from './conciseDraft.ts';
+import { messageDraftTranslations } from './messageDraft.ts';
 import { offlineHelpTranslations } from './offlineHelp.ts';
 // English resources — translated from zh-CN.ts. Keep keys in sync.
 
@@ -19,6 +20,7 @@ export const en: typeof zhCN = {
   networkHealth: networkHealthTranslations.en,
   politeEdits: politeEditsTranslations.en,
   conciseDraft: conciseDraftTranslations.en,
+  messageDraft: messageDraftTranslations.en,
   offlineHelp: offlineHelpTranslations.en,
   textWorkspace: textWorkspaceTranslations['en'],
   textDraft: textDraftTranslations['en'],

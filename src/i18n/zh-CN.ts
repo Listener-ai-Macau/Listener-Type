@@ -5,6 +5,7 @@ import { hardwareLayoutTranslations } from './hardwareLayout.ts';
 import { audioFileTranslations } from './audioFile.ts';
 import { politeEditsTranslations } from './politeEdits.ts';
 import { conciseDraftTranslations } from './conciseDraft.ts';
+import { messageDraftTranslations } from './messageDraft.ts';
 import { offlineHelpTranslations } from './offlineHelp.ts';
 // 简体中文资源 — 与产品当前文案保持一致。
 // 添加新 key 时，必须同步更新 en.ts，否则首次切换到 English 会回落到中文残留。
@@ -16,6 +17,7 @@ export const zhCN = {
   networkHealth: networkHealthTranslations['zh-CN'],
   politeEdits: politeEditsTranslations['zh-CN'],
   conciseDraft: conciseDraftTranslations['zh-CN'],
+  messageDraft: messageDraftTranslations['zh-CN'],
   offlineHelp: offlineHelpTranslations['zh-CN'],
   textWorkspace: textWorkspaceTranslations['zh-CN'],
   textDraft: textDraftTranslations['zh-CN'],

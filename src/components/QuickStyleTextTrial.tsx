@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { createStylePackFromTemplate, listStylePacks } from '../lib/ipc';
 import { everydayListStyle, isEverydayListStyle } from '../lib/everydayListStyle';
 import { conciseDraftStyle, isConciseDraftStyle } from '../lib/conciseDraftStyle';
+import { isMessageDraftStyle, messageDraftStyle } from '../lib/messageDraftStyle';
 import type { StylePack } from '../lib/types';
 import { Btn } from '../pages/_atoms';
 import { StyleTextTrial } from './StyleTextTrial';
@@ -22,8 +23,8 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTran
   const [translationTarget, setTranslationTarget] = useState(initialTranslationTarget);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const [adding, setAdding] = useState<'list' | 'concise' | null>(null);
-  const [addFailed, setAddFailed] = useState<'list' | 'concise' | null>(null);
+  const [adding, setAdding] = useState<'list' | 'concise' | 'draft' | null>(null);
+  const [addFailed, setAddFailed] = useState<'list' | 'concise' | 'draft' | null>(null);
   const addingRef = useRef(false);
   const mounted = useRef(false);
   useEffect(() => {
@@ -45,6 +46,7 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTran
   const selected = packs.find(pack => pack.id === selectedId);
   const savedEverydayList = packs.find(isEverydayListStyle);
   const savedConcise = packs.find(isConciseDraftStyle);
+  const savedMessageDraft = packs.find(isMessageDraftStyle);
   const prepareConcise = async (): Promise<StylePack> => {
     if (savedConcise) return savedConcise;
     if (addingRef.current) throw new Error('style_trial_prepare_shorter_failed');
@@ -57,6 +59,25 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTran
       return created;
     } catch {
       throw new Error('style_trial_prepare_shorter_failed');
+    } finally {
+      addingRef.current = false;
+      if (mounted.current) setAdding(null);
+    }
+  };
+  const chooseMessageDraft = async () => {
+    if (addingRef.current) return;
+    if (savedMessageDraft) { setSelectedId(savedMessageDraft.id); return; }
+    addingRef.current = true;
+    setAdding('draft');
+    setAddFailed(null);
+    try {
+      const created = await createStylePackFromTemplate(messageDraftStyle(t), true);
+      if (mounted.current) {
+        setPacks(current => [...current.filter(pack => pack.id !== created.id), created]);
+        setSelectedId(created.id);
+      }
+    } catch {
+      if (mounted.current) setAddFailed('draft');
     } finally {
       addingRef.current = false;
       if (mounted.current) setAdding(null);
@@ -90,6 +111,10 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTran
       label: t(savedEverydayList ? 'style.everydayList.choose' : 'style.everydayList.add'),
       hint: t('style.everydayList.hint'), pending: adding !== null,
       error: addFailed === 'list' ? t('style.everydayList.failed') : '', onChoose: () => void chooseEverydayList(),
+    } : !translationTarget && selected?.id === 'builtin.formal' ? {
+      label: t(savedMessageDraft ? 'messageDraft.choose' : 'messageDraft.add'),
+      hint: t('messageDraft.hint'), pending: adding !== null,
+      error: addFailed === 'draft' ? t('messageDraft.failed') : '', onChoose: () => void chooseMessageDraft(),
     } : undefined}
     prepareShorter={translationTarget ? undefined : prepareConcise}
     inputOriginName={inputOriginName} onClose={onClose} /> :
