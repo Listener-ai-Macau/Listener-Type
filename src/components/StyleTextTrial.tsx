@@ -355,7 +355,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
       aria-describedby={`${workspaceId}-description`}
       onCancel={event => { event.preventDefault(); if (!draftSaving) onClose(); }}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
+      <div className="ol-style-trial-header">
         <h2 id={`${workspaceId}-title`} data-style-trial-title style={{ margin: 0, fontSize: 21 }}>{translationTarget ? t('offlineTranslation.title', { language: translationLanguageLabel(translationTarget, i18n.resolvedLanguage ?? i18n.language) }) : onTranslationTargetChange ? t('textWorkspace.title') : t('style.trial.title', { name: presentation.name })}</h2>
         <Btn size="sm" variant="ghost" disabled={draftSaving} onClick={() => { if (!draftSaving) onClose(); }}>{t('common.close')}</Btn>
       </div>
