@@ -10,7 +10,7 @@
 
 | 用途 | 直接下载 |
 | --- | --- |
-| **Windows 软件** | **[下载 MSI · Type build211](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows 软件** | **[下载 MSI · Type build213](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **固件：USB 烧写 / 蓝牙 OTA** | **[下载固件 ZIP · 两种方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 <!-- listener-local-text-entry -->
@@ -41,7 +41,7 @@
 Type 默认使用 **USB 有线刷机**，刷机能力已内置；客户无需另装 Python、ESP-IDF 或其它刷机软件。
 设备设置各自独立：选择一台有线／蓝牙设备并读取；完成编辑后自动保存明确修改，读取或切换设备不会写入电脑默认值。名称、灯光、电源、按键和旋钮设置保存在所选设备中。请配套使用本页 MSI 与固件 ZIP。
 
-Type build211：已保存成稿和文字工作区切换时不再反复叠加窗口；重复保存、查看和继续处理会复用工作区，返回保留手改正文、名称、滚动位置与所选成稿。删除已查看成稿后，仍可重新保存保留的正文；导航不请求文本服务。保留210直接起草和从原文云端重译，固件38不变。
+Type build213：本机翻译不再把常见称呼或带点时间缩写的后续内容误拆为独立句子，例如保住“3 p.m. tomorrow”的截止时间关系，同时保留真正的后续句子。文字工作区滚动时标题和关闭按钮保持可见。原翻译模型、运行组件与固件38不变，译文仍需核对事实。
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-27T23:49:09.627197+08:00",
+  "updated_at": "2026-10-28T01:30:39.031388+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9013,7 +9013,7 @@
     {
       "id": "text_workspace_close_visible_after_scrolling",
       "subject": "Keep workspace title and Close reachable while reading or saving a long result",
-      "state": "source_checkpoint_only_native211_problem_reproduced_React_CSS_viewports_passed_not_packaged",
+      "state": "included_in213_exact_native_verified_installed",
       "protects": [
         "After scrolling the workspace, Close stays visible and clickable without scrolling back to the top.",
         "Existing disabled-during-save and Escape/close actions are retained; no text, service, navigation state or provider behavior changes."
@@ -9023,8 +9023,7 @@
         "Existing six navigation interactions checked with the header candidate; final layout separately reviewed"
       ],
       "pending_human_scope": [
-        "No candidate MSI, native candidate acceptance, installation or public release; daily/public Type211 and firmware38 remain.",
-        "No NMT accuracy, noise separation, voice, physical key or brownout fix claim."
+        "No independent213 customer, NMT accuracy, noise separation, physical key, long-term or brownout-root-cause qualification."
       ],
       "repo": "type",
       "commit": "7e5c38cafab76bdf85b16ab64d06dc0dbdb77ec2",
@@ -9034,11 +9033,80 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native211-snapshot-20261027-232428\\workspace-close211-before.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-header211-ui.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-header211-navigation-candidate.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native211-snapshot-20261027-232428\\customer211-reviewed.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native211-snapshot-20261027-232428\\customer211-reviewed.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native213-snapshot-20261028-012528\\text-workspace213-native.json"
       ],
       "machine_accepted_scope": [
-        "Original211 native Close was at y=-63.2 after scrolling the retained final text. Candidate actual React/CSS keeps Close clickable on three viewports, preserves input and closes normally; TypeScript passed. Candidate held for the next related substantive batch."
+        "Original211 native Close was at y=-63.2 after scrolling the retained final text. Candidate actual React/CSS keeps Close clickable on three viewports, preserves input and closes normally; TypeScript passed. Candidate held for the next related substantive batch.",
+        "Exact ordinary213 MSI native translation/save/reread/return passed; after155px scroll Close top62.4px remained visible and clickable. Installed exact EXE/DLL; no daily persistent-state changes."
+      ],
+      "included_release": {
+        "build": 213,
+        "source": "d965daf77a96893c265d550ba1847d81dd002416",
+        "nativeEvidence": "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native213-snapshot-20261028-012528\\text-workspace213-native.json"
+      }
+    },
+    {
+      "id": "local_translation_abbreviation_boundaries_and_reachable_workspace_exit",
+      "subject": "Keep title/time context in local translation and Close reachable in the text workspace",
+      "state": "213_exact_native_local_deadline_title_save_return_scrolled_close_and_14_worker_cases_passed",
+      "protects": [
+        "A dotted a.m./p.m. time must not detach its following ordinary deadline/day continuation into another model request.",
+        "Ordinary titles stay with their names without rewriting source text.",
+        "A genuine next sentence after p.m., including a May question or a separate no-send instruction, stays separate to avoid sentence-model collapse.",
+        "Original paragraph, long-input, numeric, negative and draft-only preservation remain; no new model/runtime or automatic cloud fallback.",
+        "Workspace title and Close stay visible/clickable while scrolling, with existing save/close safeguards retained."
+      ],
+      "guards": [
+        "python -m unittest discover -s scripts -p test_translation_sentence_boundaries.py",
+        "scripts/check-local-translation-preservation.py actual prepared-worker cases",
+        "check_text_workspace212_native.py exact ordinary MSI private UI"
+      ],
+      "pending_human_scope": [
+        "Existing Chinese NMT date/action/negation inaccuracies and wording/name errors remain; this is a bounded source-boundary fix.",
+        "No213 independent natural customer, actual global/physical/cross-PC/long-term acceptance or brownout-root-cause claim."
+      ],
+      "repo": "type",
+      "commit": "d965daf77a96893c265d550ba1847d81dd002416",
+      "commit_subject": "fix(translation): preserve time and title sentence inputs",
+      "humanAccepted": false,
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\sentence-boundary212-native-worker-comparison.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\sentence-boundary212-structure.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\sentence-boundary212-final-preservation.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-header211-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native213-snapshot-20261028-012528\\text-workspace213-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261028-build213\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261028-build213\\type213-installed.json"
+      ],
+      "machine_accepted_scope": [
+        "Ordinary time/title abbreviations stay with their continuation in offline translation input, while genuine next sentences remain separate. Retained English deadline no longer becomes a separate tomorrow suggestion; same Argos1.9 weights/runtime, token bounds and paragraph/no-send preservation retained. Fourteen real-worker cases and pure boundary controls passed; exact ordinary213 private UI confirmed local deadline/title output, exact save/reread/return and reachable Close after scrolling. No cloud, microphone, hardware, whole-model accuracy or whole22 qualification."
       ]
+    },
+    {
+      "id": "type212_failed_workflow_scope_publication",
+      "repo": "type",
+      "commit": "96f43d09edb039f5433783021b5a9796803a8f39",
+      "commit_subject": "fix(translation): preserve time and title abbreviations in sentence inputs",
+      "subject": "Retain failed212 workflow-scope publication and verified211 public recovery",
+      "state": "local212_failure_retained_public211_restored_213_excludes_workflow_change",
+      "validation_kind": "evidence_only",
+      "guards": [],
+      "humanAccepted": false,
+      "protects": [
+        "Source publication permission failures must precede canonical MSI replacement.",
+        "Do not request broader workflow privileges, relabel212 bytes, or push the denied source as a dependency of213.",
+        "Retain exact failed212 artifact, local source and restoration evidence."
+      ],
+      "evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261028-build212\\publication-workflow-scope-failure.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261028-build212\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\publish212-scope-recovery\\restore211-safe-promotion.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\business-source-equivalence213.json"
+      ],
+      "commit_availability": "local_snapshot",
+      "local_retention_ref": "refs/tags/regression-baseline/type-96f43d09edb0",
+      "public_history_exclusion_reason": "Unpushed212 optional-workflow source was rejected by OAuth workflow-scope protection and remains retained locally. Final213 ancestry from public211 fully excludes that workflow change; business source equivalence is preserved."
     }
   ],
   "feature_routes_updated_at": "2026-10-27T08:54:34.710494+08:00",
@@ -10347,7 +10415,8 @@
         "offline_translation_explicit_preview_voice_route_and_legacy_provider_preservation",
         "offline_translation_sentence_units_preserve_short_paragraph_content",
         "local_translation_actual_route_notice_and_exact_saved_draft_navigation",
-        "local_saved_draft_deleted_or_missing_record_never_becomes_another_draft"
+        "local_saved_draft_deleted_or_missing_record_never_becomes_another_draft",
+        "local_translation_abbreviation_boundaries_and_reachable_workspace_exit"
       ],
       "paths": {
         "type": [
@@ -10370,7 +10439,9 @@
           "src/components/AudioFileTrial.tsx",
           "src/lib/appVersion.ts",
           "vite.config.ts",
-          "scripts/windows-package-msvc.ps1"
+          "scripts/windows-package-msvc.ps1",
+          "scripts/test_translation_sentence_boundaries.py",
+          "src/components/StyleTextTrial.css"
         ]
       }
     },
