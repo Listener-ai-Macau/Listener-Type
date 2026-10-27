@@ -1,102 +1,53 @@
 fn foundry_language_hint_from_preferences(prefs: &UserPreferences) -> FoundryLanguageHintSelection {
     let explicit = prefs.foundry_local_asr_language_hint.trim();
-    if !explicit.is_empty() {
-        return FoundryLanguageHintSelection {
-            hint: Some(explicit.to_string()),
-            source: "explicit",
-        };
+    // Recognition language is an input setting. Output translation, Chinese
+    // script and working-language preferences must not force the decoder when
+    // the user selected automatic recognition.
+    FoundryLanguageHintSelection {
+        hint: if explicit.is_empty() { None } else { Some(explicit.to_string()) },
+        source: if explicit.is_empty() { "auto" } else { "explicit" },
     }
+}
 
-    if let Some(hint) = foundry_language_hint_for_output_language(prefs.output_language_preference)
-    {
-        return FoundryLanguageHintSelection {
-            hint: Some(hint.to_string()),
-            source: "output_language_preference",
-        };
-    }
+#[cfg(test)]
+mod foundry_language_selection_tests {
+    use super::foundry_language_hint_from_preferences;
+    use crate::types::{ChineseScriptPreference, OutputLanguagePreference, UserPreferences};
 
-    if matches!(
-        prefs.chinese_script_preference,
-        ChineseScriptPreference::Simplified | ChineseScriptPreference::Traditional
-    ) {
-        return FoundryLanguageHintSelection {
-            hint: Some("zh".to_string()),
-            source: "chinese_script_preference",
-        };
-    }
-
-    for language in &prefs.working_languages {
-        if let Some(hint) = foundry_language_hint_for_working_language(language) {
-            return FoundryLanguageHintSelection {
-                hint: Some(hint.to_string()),
-                source: "working_languages",
-            };
+    #[test]
+    fn automatic_recognition_keeps_input_language_independent_of_output_preferences() {
+        for output in [OutputLanguagePreference::Auto, OutputLanguagePreference::ZhCn,
+            OutputLanguagePreference::ZhTw, OutputLanguagePreference::En,
+            OutputLanguagePreference::Ja, OutputLanguagePreference::Ko] {
+            for script in [ChineseScriptPreference::Auto, ChineseScriptPreference::Simplified,
+                ChineseScriptPreference::Traditional] {
+                for hint in ["", "   "] {
+                    let mut prefs = UserPreferences::default();
+                    prefs.foundry_local_asr_language_hint = hint.into();
+                    prefs.output_language_preference = output;
+                    prefs.chinese_script_preference = script;
+                    prefs.working_languages = vec!["中文".into(), "en".into(), "日本語".into()];
+                    let selected = foundry_language_hint_from_preferences(&prefs);
+                    assert_eq!(selected.hint, None, "output={output:?} script={script:?}");
+                    assert_eq!(selected.source, "auto");
+                }
+            }
         }
     }
 
-    FoundryLanguageHintSelection {
-        hint: None,
-        source: "auto",
+    #[test]
+    fn explicit_recognition_language_survives_conflicting_output_preferences() {
+        for language in ["zh", "en", "ja", "ko"] {
+            let mut prefs = UserPreferences::default();
+            prefs.foundry_local_asr_language_hint = format!(" {language} ");
+            prefs.output_language_preference = OutputLanguagePreference::ZhCn;
+            prefs.chinese_script_preference = ChineseScriptPreference::Traditional;
+            prefs.working_languages = vec!["中文".into()];
+            let selected = foundry_language_hint_from_preferences(&prefs);
+            assert_eq!(selected.hint.as_deref(), Some(language));
+            assert_eq!(selected.source, "explicit");
+        }
     }
-}
-
-fn foundry_language_hint_for_output_language(
-    preference: OutputLanguagePreference,
-) -> Option<&'static str> {
-    match preference {
-        OutputLanguagePreference::ZhCn | OutputLanguagePreference::ZhTw => Some("zh"),
-        OutputLanguagePreference::En => Some("en"),
-        OutputLanguagePreference::Ja => Some("ja"),
-        OutputLanguagePreference::Ko => Some("ko"),
-        OutputLanguagePreference::Auto => None,
-    }
-}
-
-fn foundry_language_hint_for_working_language(language: &str) -> Option<&'static str> {
-    let normalized = language.trim().to_ascii_lowercase();
-    if normalized.is_empty() {
-        return None;
-    }
-
-    if language.contains("中文")
-        || language.contains("汉语")
-        || language.contains("漢語")
-        || language.contains("简体")
-        || language.contains("簡體")
-        || language.contains("繁体")
-        || language.contains("繁體")
-        || normalized == "zh"
-        || normalized.starts_with("zh-")
-        || normalized.contains("chinese")
-    {
-        return Some("zh");
-    }
-
-    if normalized == "en" || normalized.starts_with("en-") || normalized.contains("english") {
-        return Some("en");
-    }
-
-    if language.contains("日本")
-        || language.contains("日语")
-        || language.contains("日語")
-        || normalized == "ja"
-        || normalized.starts_with("ja-")
-        || normalized.contains("japanese")
-    {
-        return Some("ja");
-    }
-
-    if language.contains("한국")
-        || language.contains("韩语")
-        || language.contains("韓語")
-        || normalized == "ko"
-        || normalized.starts_with("ko-")
-        || normalized.contains("korean")
-    {
-        return Some("ko");
-    }
-
-    None
 }
 
 fn dictation_asr_engine_backend_id(active_asr: &str) -> &'static str {
