@@ -10,7 +10,7 @@
 
 | 用途 | 直接下载 |
 | --- | --- |
-| **Windows 软件** | **[下载 MSI · Type build208](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows 软件** | **[下载 MSI · Type build210](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **固件：USB 烧写 / 蓝牙 OTA** | **[下载固件 ZIP · 两种方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 <!-- listener-local-text-entry -->
@@ -41,7 +41,7 @@
 Type 默认使用 **USB 有线刷机**，刷机能力已内置；客户无需另装 Python、ESP-IDF 或其它刷机软件。
 设备设置各自独立：选择一台有线／蓝牙设备并读取；完成编辑后自动保存明确修改，读取或切换设备不会写入电脑默认值。名称、灯光、电源、按键和旋钮设置保存在所选设备中。请配套使用本页 MSI 与固件 ZIP。
 
-Type build208：电脑提问显示实时预览并修复误等音频就绪；完成回答可直接保存本机成稿，历史刷新位置固定、清空须明确确认。保留205本地识别与原固件38，生成内容仍需核对，RC1其余限制保留。
+Type build210：打开文字工作区即可直接按要求起草正文。本机译稿可保留对照，再明确选择现有云端服务从完整原文重新翻译；翻译稿名自动区分语言和实际处理方式。选择步骤不发送文字，明确处理才按服务商计费。本机译义仍需核对，保留208问答／历史保护，固件38不变。
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-27T17:16:40.942641+08:00",
+  "updated_at": "2026-10-27T21:23:00.858734+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -8911,6 +8911,71 @@
       "machine_accepted_scope": [
         "208 consolidates PC-question ready/preview, stable History refresh and in-app explicit clear confirmation, and narrow completed-native-answer draft save. Same-source nonshipping input build real existing services: first question history off, second on, explicit exact answer save, close QA and selected ID/name/full textarea reread passed. Default208 MSI rejected UI-forged answers. Reuses207 clear-protection native proof and206 ready/preview proof. No live microphone, hardware, universal answer-quality, external/global or whole22 qualification."
       ]
+    },
+    {
+      "id": "explicit_message_drafting_preserves_dictation_and_recipient_requests",
+      "subject": "Explicit writing brief to recipient-facing message keeps source facts and existing dictation behavior",
+      "state": "209_exact_native_and_independent_AI_customer_software_use_passed_physical_unknown",
+      "protects": [
+        "Writer-facing directions are applied by an explicitly chosen drafting style, not by modifying raw/formal transcription prompts.",
+        "Recipient requests, prohibitions, alternatives and conditions remain message content.",
+        "Style preparation is trial-only and preserves active dictation/input; explicit processing alone requests the text service.",
+        "Saving and reopening retain the exact source brief and generated body."
+      ],
+      "guards": [
+        "Actual private existing-service check_message_draft_native.py contrasts",
+        "Actual React check_message_draft_ui.py request/failure/reuse gates",
+        "Exact MSI209 check_drafting209_native_ui.py normal UI processing/save/reread"
+      ],
+      "pending_human_scope": [
+        "Real customer/physical/global/long-term acceptance and universal writing/translation quality remain open."
+      ],
+      "repo": "type",
+      "commit": "ad1cb757efb41964ac4a9548968d4da960c0eebb",
+      "commit_subject": "Add explicit instruction-to-message drafting in text workspace",
+      "humanAccepted": false,
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native208-snapshot-20261027-172757\\message-draft-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\message-draft-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native209-snapshot-20261027-175131\\drafting209-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261027-build209\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261027-build209\\type209-installed.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\outputs\\Listener-FIRST_USE209-deep-aftersale-20261027\\customer-experience.md"
+      ],
+      "machine_accepted_scope": [
+        "Explicit optional instruction-to-message drafting: three existing-service contrasts preserve original notice facts, recipient requests/conditions and existing English. Actual React explicit-send/failure/reuse gates passed. Exact209 ordinary native UI selected trial-only drafting, called actual existing text service, saved exact input/output and reread the same named draft, retaining active dictation style. No209 independent customer, universal writing quality, live speech, physical or original22 closure claim."
+      ]
+    },
+    {
+      "id": "writing_original_retranslation_retains_local_edits_and_variant_names",
+      "subject": "Direct drafting and original-source retranslation preserve user text, explicit requests and named variants",
+      "state": "210_exact_native_three_variant_save_reread_and_7_React_contracts_passed",
+      "protects": [
+        "Drafting is reachable from raw without activating daily dictation or sending text.",
+        "Preparing cloud retranslation preserves complete source and edited local comparison; actual submission is explicit and needs a configured service.",
+        "Local failure/retry and route selection do not overwrite saved versions; language/route names fit80 Unicode characters."
+      ],
+      "guards": [
+        "check_writing_continuation210_ui.py actual React interaction with explicit fixtures",
+        "check_writing210_native.py exact MSI normal UI with real services and saved-draft reread"
+      ],
+      "pending_human_scope": [
+        "Offline-model semantic limitations, real customer purchase, physical/global/long-term and other original22 qualifications remain open."
+      ],
+      "repo": "type",
+      "commit": "3154195a4415d1d5e396fe70c2edc80135f21925",
+      "commit_subject": "fix(writing): expose drafting and preserve source for translation retry",
+      "humanAccepted": false,
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\writing-continuation210-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\local-translation209-diagnosis.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native210-snapshot-20261027-211313\\writing210-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261027-build210\\type-artifact-verification.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\outputs\\release-rc1-20261027-build210\\type210-installed.json"
+      ],
+      "machine_accepted_scope": [
+        "Direct drafting from the raw workspace; explicit cloud retranslation of the complete original keeps edited local output for comparison; translated variants receive bounded language/route names. Seven React request/failure/Unicode contracts and exact210 ordinary native UI with two real text-service calls, one local translation, three saved variants and exact reread passed. Existing dictation unchanged. This does not fix offline-model semantic accuracy or close original22 physical/global/long-term scope."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-27T08:54:34.710494+08:00",
@@ -10500,6 +10565,25 @@
         "Native port first used a raw-data tensor constructor that rejects zero axes; allocator-based zero history fixed the actual error.",
         "A simplified-only test assertion rejected correct traditional text; production script conversion and numeric equivalence now compare facts. This was a test defect, not lost content."
       ]
+    },
+    {
+      "id": "message-drafting",
+      "accepted_scope": "Explicit optional instruction-to-message drafting: three existing-service contrasts preserve original notice facts, recipient requests/conditions and existing English. Actual React explicit-send/failure/reuse gates passed. Exact209 ordinary native UI selected trial-only drafting, called actual existing text service, saved exact input/output and reread the same named draft, retaining active dictation style. No209 independent customer, universal writing quality, live speech, physical or original22 closure claim.",
+      "baseline_state": "209_three_service_contrasts_React_request_boundary_and_exact_native_save_reread_passed_customer_pending",
+      "guard_entries": [
+        "explicit_message_drafting_preserves_dictation_and_recipient_requests",
+        "writing_original_retranslation_retains_local_edits_and_variant_names"
+      ],
+      "paths": {
+        "type": [
+          "src/lib/messageDraftStyle.ts",
+          "src/components/QuickStyleTextTrial.tsx",
+          "src/i18n/messageDraft.ts",
+          "src/components/StyleTextTrial.tsx",
+          "src/components/StyleTextTrial.css",
+          "src/i18n/textWorkspace.ts"
+        ]
+      }
     }
   ]
 }

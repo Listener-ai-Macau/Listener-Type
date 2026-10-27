@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-27T17:16:40.942641+08:00",
+  "updatedAt": "2026-10-27T21:23:00.858734+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 208,
-    "source": "1d4e7978f52fd5fd0c1f4b0d57437cc91833d3c1",
-    "sourceTag": "build-source/type208-20261027",
+    "build": 210,
+    "source": "3154195a4415d1d5e396fe70c2edc80135f21925",
+    "sourceTag": "build-source/type210-20261027",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "3d4dc7ab0d337a0d7be7946ea6791c70674773c249830eea339f7e1eb25d1d56",
-    "sizeBytes": 299790336,
-    "exeSha256": "5ce4eb64a20bbe35f939cd6664659e481a84dda9df11819f6cbca188345f0786",
+    "sha256": "f916b1cb6296beafade23d5de6ea920a56c5b75b7ab97b55b293533f2bae0373",
+    "sizeBytes": 299794432,
+    "exeSha256": "de1867d64cfbe0964f2f56bdefd49fdb4317ea8e1709bdc1fdeadaaf8c8ab9c2",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -511,7 +511,7 @@
     "navigationScope": "Exact189 private native sidebar/guide only; no recording/Bluetooth changes",
     "toolDisclosureQualified": true,
     "voiceQuestionExpectationFiveLocalesQualified": true,
-    "scope": "208 consolidates PC-question ready/preview, stable History refresh and in-app explicit clear confirmation, and narrow completed-native-answer draft save. Same-source nonshipping input build real existing services: first question history off, second on, explicit exact answer save, close QA and selected ID/name/full textarea reread passed. Default208 MSI rejected UI-forged answers. Reuses207 clear-protection native proof and206 ready/preview proof. No live microphone, hardware, universal answer-quality, external/global or whole22 qualification.",
+    "scope": "Direct drafting from the raw workspace; explicit cloud retranslation of the complete original keeps edited local output for comparison; translated variants receive bounded language/route names. Seven React request/failure/Unicode contracts and exact210 ordinary native UI with two real text-service calls, one local translation, three saved variants and exact reread passed. Existing dictation unchanged. This does not fix offline-model semantic accuracy or close original22 physical/global/long-term scope.",
     "qaStreamingDisplayControlledNativeQualified": true,
     "readyMadeStyleLibraryNativeQualified": true,
     "listenerQuestionPreviewAndAutoStopActual196": true,
@@ -545,7 +545,13 @@
     "qa208FrontendOnlyAnswerRejected": true,
     "qa207StableHistoryRefreshAndExplicitClearReused": true,
     "qa206ComputerQuestionReadyAndPreviewReused": true,
-    "acceptanceSyntheticInputAbsentFrom208Msi": true
+    "acceptanceSyntheticInputAbsentFrom208Msi": true,
+    "writing210DirectDraftOriginalCloudRetryNative": true,
+    "writing210ThreeVariantsSaveReread": true,
+    "writing210DictationPreserved": true,
+    "writing210ReactContracts": 7,
+    "writing209IndependentAIActualUse": true,
+    "offlineTranslationSemanticAccuracyFixed": false
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -563,6 +569,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build208-20261027"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build210-20261027"
   }
 }
