@@ -8670,7 +8670,7 @@
       ],
       "repo": "type",
       "commit": "650b37611622952b44f3592e9622a5acfe4cd750",
-      "commit_subject": "Read Listener OTA hardware identity from complete peer DIS metadata",
+      "commit_subject": "Read OTA hardware identity in one session and distinguish model metadata",
       "humanAccepted": false,
       "machine_evidence": [
         "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/customer-onboarding-20261020/ble-ui201-20261027/identity-before.log",
@@ -8709,7 +8709,18 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ble-ui202-20261027/wake202-status-confirmed-write.txt"
       ],
       "known_scope": "One actualS3rev0.2/UID98c377b4e88c/FW37. Recovery at2026-10-27 09:45 confirmed by actualRF/HCI/UART/Type; Type202 not exited. Physical original cause and permanent recovery behavior unqualified. No hardware reset reenactment guard; reuse retained evidence first.",
-      "guards": []
+      "guards": [],
+      "commit_subject": "Add USB request-tagged key replies and prevent staging restart after chunks",
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ble-ui202-20261027/wake202-recovery-conclusion.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ble-ui202-20261027/wake202-rom-stack.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ble-ui202-20261027/wake202-boot-pins.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ble-ui202-20261027/wake202-usb-hard-reset.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ble-ui202-20261027/wake202-runtime-after-rtc.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ble-ui202-20261027/wake202-status-confirmed-write.txt"
+      ]
     },
     {
       "id": "type203_native_s3_verified_boot_reset_and_same_usb_app_receipt",
@@ -8731,7 +8742,8 @@
       "guards": [
         "cargo test --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --lib commands::device::wired_boot_reset::tests"
       ],
-      "known_scope": "Exact203/FW38 one-board normalUI wired flash, checksum/reset/USB reply and key/settings retention passed.203+FW37 actually exposed persistent USB descriptor error despite BLE app ready; old failure retained. Does not solve original brownout trigger or all-board reliability."
+      "known_scope": "Exact203/FW38 one-board normalUI wired flash, checksum/reset/USB reply and key/settings retention passed.203+FW37 actually exposed persistent USB descriptor error despite BLE app ready; old failure retained. Does not solve original brownout trigger or all-board reliability.",
+      "commit_subject": "Recover verified native S3 firmware from latched download mode"
     },
     {
       "id": "firmware38_clean_usb_startup_before_driver_ownership",
@@ -8753,7 +8765,8 @@
       "guards": [
         "python tools/verify_power_manager_static.py"
       ],
-      "known_scope": "FW37 post-reset appBLE ready but nativeUSB same physical port Code43 descriptor request failed; Windows node restart did not recover. FW38 OTA restoredCOM16, actual boot094f5a60049f59f4; then same203 full factory UI pass with matching stored settings. Report18996 is a matching hypothesis, not conclusive hardware root attribution; original brownout source and long-term qualification stay open."
+      "known_scope": "FW37 post-reset appBLE ready but nativeUSB same physical port Code43 descriptor request failed; Windows node restart did not recover. FW38 OTA restoredCOM16, actual boot094f5a60049f59f4; then same203 full factory UI pass with matching stored settings. Report18996 is a matching hypothesis, not conclusive hardware root attribution; original brownout source and long-term qualification stay open.",
+      "commit_subject": "Reinitialize native USB once before application driver startup"
     }
   ],
   "feature_routes_updated_at": "2026-10-27T08:54:34.710494+08:00",
