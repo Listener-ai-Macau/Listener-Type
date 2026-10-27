@@ -36,6 +36,13 @@ def main():
         ('zh', '你好，我们可以把周二下午三点的会议改到周三上午十点吗？如果这个时间不方便，请告诉我你有空的时间。谢谢！', [('meeting',), ('tuesday 3 p.m.', 'tuesday 3 pm'), ('wednesday 10 am', 'wednesday 10 a.m.'), ('thank',)]),
         # Coverage-penalty research dropped this already-correct closing.
         ('zh', '请在明天下午三点前把修改后的报价单发给我，谢谢。', [('revised quotation',), ('3 p.m.', '3 pm'), ('tomorrow',), ('thank',)]),
+        # A dotted time used to split the deadline into a separate "tomorrow"
+        # model request, changing it to "we will talk tomorrow" in this output.
+        ('en', 'Please send me the revised quotation by 3 p.m. tomorrow. Thank you.', [('明天下午3', '明天下午三'), ('谢谢', '感谢')]),
+        ('en', 'Dr. Lee will call at 3 p.m. on Friday. Do not cancel the meeting.', [('星期五下午3', '星期五下午三', '周五下午3', '周五下午三'), ('不取消会议', '不要取消会议')]),
+        # "May" starts a question here; joining it after the time can again
+        # collapse one of two distinct sentences in a small sentence model.
+        ('en', 'The meeting ends at 3 p.m. May I call you tomorrow?', [('会议结束',), ('明天',)]),
     ]
     rows = []
     for language, text, meaning_groups in cases:

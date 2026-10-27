@@ -11,6 +11,37 @@ import sys
 sys.dont_write_bytecode = True
 
 
+def translation_sentences(value):
+    """Keep ordinary titles/time abbreviations attached to their continuation.
+
+    A real next sentence still needs a separate model input; joining short
+    sentences can make these sentence models omit an earlier instruction.
+    The returned units retain every source character without rewriting text.
+    """
+    temporal_words = {
+        'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+        'utc', 'gmt',
+    }
+    units = []
+    start = 0
+    for match in re.finditer(r'(?<=[。！？!?])|(?<=\.)(?=\s)', value):
+        end = match.start()
+        if value[end - 1] == '.':
+            before, after = value[:end], value[end:]
+            if re.search(r'\b(?:Mr|Mrs|Ms|Dr|Prof)\.$', before, re.IGNORECASE) and after.strip():
+                continue
+            if re.search(r'\b[ap]\.m\.$', before, re.IGNORECASE):
+                following = re.match(r'\s*([^\W\d_]+)', after)
+                if following and (following[1][0].islower() or following[1].lower() in temporal_words):
+                    continue
+                if re.match(r'\s*\(\s*(?:UTC|GMT)(?:\s*[+-]\s*\d|\s*\))', after, re.IGNORECASE):
+                    continue
+        units.append(value[start:end])
+        start = end
+    units.append(value[start:])
+    return units
+
+
 def translate(request):
     # Windows' extension discovery can otherwise omit a .pyd at MAX_PATH,
     # reporting a misleading circular import. The customer profile/cache may
@@ -44,7 +75,7 @@ def translate(request):
         # These are sentence translation models, not paragraph/chat models.
         # Even a short two-sentence source can collapse to its last sentence.
         # Keep every sentence as a separate unit regardless of token count.
-        sentences = re.split(r'(?<=[。！？])|(?<=[!?])|(?<=[.])(?=\s)', value)
+        sentences = translation_sentences(value)
         chunks = []
         for sentence in sentences:
             tokens = tokenizer.encode(sentence, out_type=str)
