@@ -107,14 +107,15 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTran
   return <>{displayed ? <StyleTextTrial pack={displayed} packs={translationTarget ? undefined : packs}
     onSelectPack={translationTarget ? undefined : setSelectedId} draft={draft} onDraftChange={onDraftChange}
     translationTarget={translationTarget || undefined} onTranslationTargetChange={setTranslationTarget}
+    draftingChoice={!translationTarget && selected && !isMessageDraftStyle(selected) ? {
+      label: t(savedMessageDraft ? 'messageDraft.choose' : 'messageDraft.add'),
+      hint: t('messageDraft.hint'), pending: adding !== null,
+      error: addFailed === 'draft' ? t('messageDraft.failed') : '', onChoose: () => void chooseMessageDraft(),
+    } : undefined}
     extraStyleChoice={!translationTarget && selected?.id === 'builtin.structured' ? {
       label: t(savedEverydayList ? 'style.everydayList.choose' : 'style.everydayList.add'),
       hint: t('style.everydayList.hint'), pending: adding !== null,
       error: addFailed === 'list' ? t('style.everydayList.failed') : '', onChoose: () => void chooseEverydayList(),
-    } : !translationTarget && selected?.id === 'builtin.formal' ? {
-      label: t(savedMessageDraft ? 'messageDraft.choose' : 'messageDraft.add'),
-      hint: t('messageDraft.hint'), pending: adding !== null,
-      error: addFailed === 'draft' ? t('messageDraft.failed') : '', onChoose: () => void chooseMessageDraft(),
     } : undefined}
     prepareShorter={translationTarget ? undefined : prepareConcise}
     inputOriginName={inputOriginName} onClose={onClose} /> :

@@ -1,5 +1,7 @@
 const en = {
   translateResult: 'Translate this result…', refineResult: 'Refine this translation…',
+  retranslateOriginal: 'Retranslate the original with my cloud service…',
+  retranslationReferenceHint: 'This local draft is kept for comparison. The input is still the complete original. Review the cloud service and charges, then click Translate to submit.',
   refineTranslationHint: 'Check the meaning against the original before refining. This step only changes the translation’s wording; it does not compare it with the original.',
   continueSaved: 'Continue in text workspace…',
   savedDraftInput: 'Started from saved draft “{{name}}”. The saved draft stays unchanged. Choose a task and submit when ready; nothing was sent automatically.',
@@ -30,6 +32,8 @@ export const textWorkspaceTranslations = {
   en,
   'zh-CN': {
     translateResult: '接着翻译这份结果…', refineResult: '接着润色这份译文…',
+    retranslateOriginal: '用云端从原文重新翻译…',
+    retranslationReferenceHint: '这份本机译稿留在这里供对照，输入仍是完整原文。核对云端服务和费用后，再点击翻译提交。',
     refineTranslationHint: '先对照原文核对译义，再润色。润色只处理当前译文，不会对照原文核验含义。',
     continueSaved: '在文字工作区继续…',
     savedDraftInput: '从已保存成稿「{{name}}」开始，原成稿保持不变。选好任务后再提交，没有自动发送。',
@@ -53,6 +57,8 @@ export const textWorkspaceTranslations = {
   },
   'zh-TW': {
     translateResult: '接著翻譯這份結果…', refineResult: '接著潤飾這份譯文…',
+    retranslateOriginal: '用雲端從原文重新翻譯…',
+    retranslationReferenceHint: '這份本機譯稿保留在此供對照，輸入仍是完整原文。核對雲端服務和費用後，再點擊翻譯提交。',
     refineTranslationHint: '先對照原文核對譯義，再潤飾。潤飾只處理目前譯文，不會對照原文核驗含義。',
     continueSaved: '在文字工作區繼續…',
     savedDraftInput: '從已儲存成稿「{{name}}」開始，原成稿維持不變。選好工作後再提交，沒有自動傳送。',
@@ -76,6 +82,8 @@ export const textWorkspaceTranslations = {
   },
   ja: {
     translateResult: 'この結果を翻訳…', refineResult: 'この訳文を推敲…',
+    retranslateOriginal: '原文をクラウドサービスで翻訳し直す…',
+    retranslationReferenceHint: '端末で作成した訳文は比較用に残ります。入力は元の原文のままです。クラウドサービスと料金を確認し、「翻訳」を押して送信してください。',
     refineTranslationHint: '推敲の前に原文と意味を照合してください。この処理は訳文の表現だけを整え、原文との意味の照合は行いません。',
     continueSaved: 'テキスト作業スペースで続ける…',
     savedDraftInput: '保存した下書き「{{name}}」から開始しました。元の下書きは変わりません。内容と処理を確認してから実行してください。自動送信はしていません。',
@@ -99,6 +107,8 @@ export const textWorkspaceTranslations = {
   },
   ko: {
     translateResult: '이 결과 번역…', refineResult: '이 번역 다듬기…',
+    retranslateOriginal: '원문을 클라우드 서비스로 다시 번역…',
+    retranslationReferenceHint: '기기의 번역문을 비교용으로 남깁니다. 입력은 전체 원문 그대로입니다. 클라우드 서비스와 요금을 확인한 후 번역을 눌러 제출하세요.',
     refineTranslationHint: '다듬기 전에 원문과 뜻을 대조하세요. 이 단계는 현재 번역문의 표현만 다듬으며 원문과 의미를 대조하지 않습니다.',
     continueSaved: '텍스트 작업 공간에서 계속…',
     savedDraftInput: '저장한 초안 “{{name}}”에서 시작했습니다. 원본 초안은 바뀌지 않습니다. 작업을 선택하고 준비되면 실행하세요. 자동으로 전송하지 않았습니다.',

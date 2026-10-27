@@ -461,7 +461,7 @@ export const zhTW: typeof zhCN = {
     firstDictationSetup: "先設定語音辨識",
     firstDictationInput: "麥克風與輸入來源",
     firstDictationCancel: "按 Esc 可取消錄音。",
-    tryTypedText: "先試一段文字",
+    tryTypedText: "開啟文字工作區",
     tryTypedTextHint: 'Windows 本機中英翻譯無需 API Key 或翻譯費用；元件未準備時需先下載，已準備可直接使用。AI 潤色另需文字服務。',
     quickStartTitle: '快速開始',
     quickStartDesc: "先設定語音辨識，即可開始聽寫；AI 潤飾為選用功能。",
