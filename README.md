@@ -8,7 +8,7 @@ A microphone, a recording knob and four customizable keys. Speak a message, emai
 
 | Purpose | Direct download |
 | --- | --- |
-| **Windows app** | **[Download MSI · Type build201](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · Type build203](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **Firmware: USB flashing / Bluetooth OTA** | **[Download firmware ZIP · both methods](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 <!-- listener-local-text-entry -->
@@ -35,11 +35,11 @@ A microphone, a recording knob and four customizable keys. Speak a message, emai
 <details>
 <summary>Already have a device? Firmware, settings and current build</summary>
 
-Firmware: **ESP32-S3 N16R8**, build `9d7fbbe67ed0223d`. Select the same ZIP for USB flashing or Bluetooth OTA in Type.
+Firmware: **ESP32-S3 N16R8**, build `094f5a60049f59f4`. Select the same ZIP for USB flashing or Bluetooth OTA in Type.
 Type defaults to **USB wired flashing**, with the flasher included in the MSI. No Python, ESP-IDF or separate flashing software is required.
 Device settings are independent: select one USB/Bluetooth device and read its settings. Explicit edits save automatically when editing finishes; reading or switching devices does not write computer defaults. Names, lights, power, keys and knob settings stay on the selected board. Use this paired MSI and firmware ZIP.
 
-Type build201: Continue a selected saved draft directly in the text workspace and name a new result before first save. The saved source stays intact; no automatic service request or truncation. Retains build200/199 protections and unchanged Firmware37. Local translation meaning review and modest shortening limits remain.
+Type build203: Paired with Firmware38: native USB flashing confirms the application has restarted, and firmware starts USB from a clean peripheral state. Real USB flashing and Bluetooth OTA passed on the current board with keys/settings preserved. Retains saved-draft continuation and first-save naming; RC1 limitations remain.
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 

@@ -1,27 +1,27 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-26T22:10:45.538118+08:00",
+  "updatedAt": "2026-10-27T10:47:57.966046+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 201,
-    "source": "a30fe3cd67768b54ea09378837e36e03bc1924a9",
-    "sourceTag": "build-source/type201-20261026",
+    "build": 203,
+    "source": "394eb24266c9a9c68548d11a4e2a6c7d9b1599fa",
+    "sourceTag": "build-source/type203-20261027",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "7b519fd1f4d2d7d7e139e0338cb9be85c52bdbd69c79eb8ef46c7e4bf619afcc",
-    "sizeBytes": 299479040,
-    "exeSha256": "d9161788953d04b9dcadfc542705a57beaec59ec6dc4f3177d9b3c4492e96e52",
+    "sha256": "91657b1229af7fb072c51fb7ac5e1872f346898a3fca922114edf3bb20c079ea",
+    "sizeBytes": 299507712,
+    "exeSha256": "1da2154b9af98f0375e0770ba77a63eed3e4d1b3e941eff9e5706adf7f46d453",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
-    "build": 37,
-    "source": "87ea79ec3d6e34a95d09b73e2a5848207a919f1c",
-    "sourceTag": "build-source/firmware37-20261023",
-    "runtimeBuild": "9d7fbbe67ed0223d",
+    "build": 38,
+    "source": "bc1a1241e44ba79a424263bb89acdb8d72dec36a",
+    "sourceTag": "build-source/firmware38-20261027",
+    "runtimeBuild": "094f5a60049f59f4",
     "file": "ListenerFirmware_1.0.6-rc1_ESP32S3.zip",
-    "sha256": "fea25f0bf8f0d20edbb1e0ac326a5f026a0145915384372bde5f58d29b528b84",
-    "sizeBytes": 1956799,
-    "appSha256": "73d6a6c35cbef8f0bcbbbd344d81f9c7a7a259a4f9503e69d7c005b792859668",
+    "sha256": "af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7",
+    "sizeBytes": 1957429,
+    "appSha256": "c16fba3faeb6c7998a9012cb85e639655f8c7c3f95e348081e810ea90eba4e98",
     "hardware": "keyboard-v2-n16r8",
     "url": "https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip"
   },
@@ -36,7 +36,7 @@
     "usbAndBluetoothCoreUiRoundtripVerified": true,
     "denseOnboardKeysUiWriteReadbackVerified": true,
     "keysCleanupRestoredThroughExactDeviceApi": true,
-    "actualNativeFilePickerToUiOtaComplete": false,
+    "actualNativeFilePickerToUiOtaComplete": true,
     "customerSetup68IsolatedUiVerified": true,
     "type68InstalledExeAndPreferencesVerified": true,
     "customerSpeechOrHardwarePurchaseValueVerified": false,
@@ -527,7 +527,13 @@
     "text200ExplicitHandoffNoAutomaticRequest": true,
     "text200NamedCopyNativeRetention": true,
     "text201SavedDraftContinuationNativeRetention": true,
-    "text201NamedFirstSaveNativeRetention": true
+    "text201NamedFirstSaveNativeRetention": true,
+    "actualNative202Fw38OtaEvidence": "work/customer-onboarding-20261020/ble-ui202-20261027/firmware38-ui/ui-ota.json",
+    "actualNative203Fw38WiredComplete": true,
+    "native203Fw38WiredEvidence": "work/customer-onboarding-20261020/isolated-native203-snapshot-20261027-103846/wired203-ui-flash.json",
+    "nativeS3ResetAndUsbStartupRecoveryThisBoardVerified": true,
+    "originalBrownoutSourceFixed": false,
+    "remainingPhysicalAndGlobalScopesQualified": false
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -545,6 +551,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build201-20261026"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build203-20261027"
   }
 }

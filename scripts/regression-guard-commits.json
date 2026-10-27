@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-27T09:53:14.141923+08:00",
+  "updated_at": "2026-10-27T10:49:25.695715+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -8710,6 +8710,50 @@
       ],
       "known_scope": "One actualS3rev0.2/UID98c377b4e88c/FW37. Recovery at2026-10-27 09:45 confirmed by actualRF/HCI/UART/Type; Type202 not exited. Physical original cause and permanent recovery behavior unqualified. No hardware reset reenactment guard; reuse retained evidence first.",
       "guards": []
+    },
+    {
+      "id": "type203_native_s3_verified_boot_reset_and_same_usb_app_receipt",
+      "repo": "type",
+      "commit": "394eb24266c9a9c68548d11a4e2a6c7d9b1599fa",
+      "state": "actual203_normal_wired_UI_with_fw38_passed_and_installed",
+      "subject": "After all checksums, select a boot-state-aware nativeS3 reset and prove same-USB application readiness",
+      "protects": [
+        "All segment MD5 comparisons precede restart. BOOT still low or unreadable state does not arm a reset.",
+        "Use actual connected nativeUSB/chip identity, clear only forced-download bit, RTC reset for low sampled strap.",
+        "Only a fresh normal-mode application reply on the same USB serial confirms startup. No success from a control ACK or enumeration alone."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native203-snapshot-20261027-103846\\wired203-ui-flash.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261027-build203\\type203-installed.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261027-build203\\post-update-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ble-ui202-20261027\\reset-unit.log"
+      ],
+      "guards": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --lib commands::device::wired_boot_reset::tests"
+      ],
+      "known_scope": "Exact203/FW38 one-board normalUI wired flash, checksum/reset/USB reply and key/settings retention passed.203+FW37 actually exposed persistent USB descriptor error despite BLE app ready; old failure retained. Does not solve original brownout trigger or all-board reliability."
+    },
+    {
+      "id": "firmware38_clean_usb_startup_before_driver_ownership",
+      "repo": "firmware",
+      "commit": "bc1a1241e44ba79a424263bb89acdb8d72dec36a",
+      "state": "actual202_UI_OTA_and203_UI_wired_same_board_usb_restore_passed",
+      "subject": "Reset stale nativeUSB peripheral once before driver startup, with500ms host detach and debugger/active-driver exclusions",
+      "protects": [
+        "PWR_HOLD latch is configured first. No EN/GPIO0/power pulse and no recurring USB interruption during dictation.",
+        "Debugger attached or USB driver already installed skips the reset. USB driver later owns normal IRQ/RX/TX setup.",
+        "App watchdog/brownout policies and stored device keys/settings remain intact."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ble-ui202-20261027\\firmware38-ui\\ui-ota.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ble-ui202-20261027\\firmware38-after-ota-uart.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native203-snapshot-20261027-103846\\wired203-ui-flash.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261027-build203\\firmware38-artifact-verification.json"
+      ],
+      "guards": [
+        "python tools/verify_power_manager_static.py"
+      ],
+      "known_scope": "FW37 post-reset appBLE ready but nativeUSB same physical port Code43 descriptor request failed; Windows node restart did not recover. FW38 OTA restoredCOM16, actual boot094f5a60049f59f4; then same203 full factory UI pass with matching stored settings. Report18996 is a matching hypothesis, not conclusive hardware root attribution; original brownout source and long-term qualification stay open."
     }
   ],
   "feature_routes_updated_at": "2026-10-27T08:54:34.710494+08:00",
@@ -9266,12 +9310,14 @@
     },
     {
       "id": "wired-firmware",
-      "baseline_state": "installed52c2_source_backend_full_flash_pass_board_usb_only_power_unresolved",
-      "accepted_scope": "Current COM17 actual product backend writes FW22 at921600 in16.641s, explicitly compares4 MD5 values and resets. Final MSI installed and hash-matched, main/helper restored, installed read-only package check passes. Candidate raw executable hash differs from final bundle metadata; source09d8558 same, final exact binary not reflashed due uncertain supply. User clarified no battery; brownout9/USB error observed after write, later power_on1/crash0/>100s uptime. ADC2.866V is not an actual battery reading. Not all-board validation, not proof hardware supply is fixed, not a uniquely established RAM-stub internal cause.",
+      "baseline_state": "actual203_fw38_normalUI_wired_and202_identical_ota_source_complete",
+      "accepted_scope": "Exact203/FW38 one-board normalUI wired flash, checksum/reset/USB reply and key/settings retention passed.203+FW37 actually exposed persistent USB descriptor error despite BLE app ready; old failure retained. Does not solve original brownout trigger or all-board reliability.",
       "guard_entries": [
         "wired_native_s3_rom_default_and_explicit_segment_verification",
         "wired_firmware188_actual_ui_zip_to_verify_and_recovery",
-        "firmware_brownout_rom_wait_recovery_scope"
+        "firmware_brownout_rom_wait_recovery_scope",
+        "type203_native_s3_verified_boot_reset_and_same_usb_app_receipt",
+        "firmware38_clean_usb_startup_before_driver_ownership"
       ],
       "paths": {
         "type": [
