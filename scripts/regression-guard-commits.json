@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-27T12:36:36.712609+08:00",
+  "updated_at": "2026-10-27T15:02:37.525254+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -8844,6 +8844,39 @@
       ],
       "known_scope": "Exact205 ordinary private UI activation/release plus engineering production replay of the same two public fixtures; Tiny only. Explicit en/zh, ORT1.23/1.24 and Whisper frontend goldens passed. Installed205 and persistent state preserved. No new customer, all-language, actual microphone, BLE or physical qualification.",
       "guard_environment": "Windows MSVC developer environment; ignored native case requires explicit private cached Foundry data root plus public EN/ZH fixture environment, as recorded in original receipt; no implicit downloads."
+    },
+    {
+      "id": "microphone_question_ready_flush_and_preview",
+      "repo": "type",
+      "commit": "7c0912745ae771400d44d1f04565d073416feefa",
+      "commit_subject": "Fix microphone question startup readiness and live preview",
+      "subject": "Computer microphone questions publish owned previews and become ready after deferred capture is attached",
+      "state": "source_verified_default_native_and_private_instrumented206_same_PCM_UI_passed",
+      "humanAccepted": false,
+      "protects": [
+        "Flush every buffered prefix before marking QA audio delivery ready; do not force healthy questions into1800ms startup recovery",
+        "Computer-mic recording events identify source and generation, and only live matching callbacks update the question preview",
+        "Keep real transport recovery, stale-resource cancellation and Listener capture ownership; optional selection is not fabricated",
+        "Default MSI excludes the synthetic-microphone input feature; the isolated input is not live-microphone, voice-wake or BLE qualification"
+      ],
+      "guards": [
+        "coordinator::qa::tests::microphone_question_flushes_prefix_before_becoming_ready",
+        "coordinator::qa::tests::microphone_preview_rejects_stale_closed_and_other_source_events",
+        "coordinator::qa_voice_capture::tests::question_preview_is_reversible_and_bound_to_live_recording",
+        "Default source24 related QA checks passed with two explicit live-service tests ignored; no default test silently calls paid services"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ble-ui202-20261027\\synthetic-mic-ui-test\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ble-ui202-20261027\\synthetic-mic-ui-test206\\result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261027-build206\\type-artifact-verification.json"
+      ],
+      "machine_accepted_scope": [
+        "Same5.035second synthetic PCM SHA5a491bc5 through ordinary private native UI: old205 core had no live question and forced recovery;206 showed preview at0.91s, primary finalization ready immediately and one actual existing-service answer with no recovery. Timing is this controlled input, not a real-microphone or latency-distribution claim.",
+        "MSI206 executable and native DLL match the default source build and contain no synthetic-input log marker. Actual human microphone, Listener wake/endpoint, external/global and physical conditions retain their prior scope."
+      ],
+      "pending_human_scope": [
+        "Actual computer microphone recording and real-device voice question environmental/long-term behavior remain separate; old196 Listener preview/auto-stop evidence is retained without extending it."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-27T08:54:34.710494+08:00",
@@ -10051,7 +10084,8 @@
         "qa_start_requires_both_service_setups_before_capture",
         "deferred_main_creation_off_ui_callback_and_retained_navigation",
         "qa_fixed_pcm_existing_services_answer_and_history",
-        "qa_stream_display_follow_tail_preserves_reading"
+        "qa_stream_display_follow_tail_preserves_reading",
+        "microphone_question_ready_flush_and_preview"
       ],
       "paths": {
         "type": [
@@ -10084,7 +10118,8 @@
       "known_failures": [
         "Type139 source b2c6f33d7ecc83977373ddc8cc33c116e3123751: an old QA recorder channel registered after replacement ends the new Recording as Idle. Actual production-monitor counterexample failed; preserved in outputs/Listener-售前验收-20261023-build139/qa139-counterexample.rs.txt and accept131-rust-20261023-101755-e2806d/result.json.",
         "A separate identity precheck is insufficient if cleanup later takes unowned global resources. Keep original session identity through cleanup and final answer/history publication.",
-        "144 and earliest732a: actual QA close/error emits unowned Idle/Error while dictation Starting/Listening/Processing/Inserting. Test-only observer captures8 conflicting requests; QA does not itself stop the active dictation in this counterexample."
+        "144 and earliest732a: actual QA close/error emits unowned Idle/Error while dictation Starting/Listening/Processing/Inserting. Test-only observer captures8 conflicting requests; QA does not itself stop the active dictation in this counterexample.",
+        "205 legacy computer-mic QA omitted ready-after-bridge-flush after ASR contract379f8f1e0; every healthy finalization could falsely time out and replay. PC previews were not connected by the Listener-only f6075687 change. Same controlled PCM failure and206 improvement retained under microphone_question_ready_flush_and_preview; not a live-microphone blanket pass."
       ],
       "latest_source_candidate": {
         "source": "2c953a8386e45f9e19b64588946ccc88fc6d9e75",

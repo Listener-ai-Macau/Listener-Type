@@ -17,6 +17,7 @@ import type { QaChatMessage, QaStatePayload, UserPreferences } from '../lib/type
 import { formatComboLabel } from '../lib/hotkey';
 import { renderQaMarkdown, renderQaPlainText } from '../lib/qaMarkdown';
 import { QaPreparation, useQaPreparation } from '../components/QaPreparation';
+import { QaAnswerDraftSave } from '../components/QaAnswerDraftSave';
 
 const SELECTION_PREVIEW_MAX = 60;
 
@@ -481,13 +482,14 @@ function MessageList({ messages }: { messages: QaChatMessage[] }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {messages.map((m, i) => (
-        <MessageRow key={i} message={m} />
+        <MessageRow key={i} message={m}
+          question={messages[i - 1]?.role === 'user' ? splitFirstTurnUser(messages[i - 1].content).question : ''} />
       ))}
     </div>
   );
 }
 
-function MessageRow({ message }: { message: QaChatMessage }) {
+function MessageRow({ message, question }: { message: QaChatMessage; question: string }) {
   // 钩子顺序与 message.role 无关：先无条件 useMemo（user 消息时 html 不渲染但计算无害）。
   const html = useMemo(() => {
     if (message.role !== 'assistant') return '';
@@ -517,12 +519,15 @@ function MessageRow({ message }: { message: QaChatMessage }) {
     );
   }
   return (
-    <div
-      className="qa-answer"
-      style={assistantBubbleStyle}
-      // eslint-disable-next-line react/no-danger
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+    <div style={{ display: 'grid', gap: 5 }}>
+      <div
+        className="qa-answer"
+        style={assistantBubbleStyle}
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+      <QaAnswerDraftSave question={question} answer={message.content} />
+    </div>
   );
 }
 

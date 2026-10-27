@@ -12,6 +12,7 @@ import type { DictationSession, PolishMode } from '../lib/types';
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import { Btn, Card, PageHeader, Pill } from './_atoms';
 import './History.css';
+import { HistoryClearDialog } from '../components/HistoryClearDialog';
 
 function useFilters(): Array<{ id: 'all' | PolishMode; label: string }> {
   const { t } = useTranslation();
@@ -53,6 +54,9 @@ export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void 
   const [actionError, setActionError] = useState<string | null>(null);
   const [copiedEntry, setCopiedEntry] = useState<{ id: string; text: string } | null>(null);
   const [copying, setCopying] = useState(false);
+  const [clearRequested, setClearRequested] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const clearRunning = useRef(false);
   const copyPendingRef = useRef(false);
   const copyTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const mountedRef = useRef(true);
@@ -146,16 +150,24 @@ export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void 
   const showRawComparison = !!item && (isQaSession(item) || item.rawTranscript !== item.finalText);
 
   const onClear = async () => {
-    if (items.length === 0) return;
-    if (!confirm(t('history.confirmClear', { count: items.length }))) return;
+    if (!clearRequested || clearRunning.current || items.length === 0) return;
+    clearRunning.current = true;
+    setClearing(true);
     setActionError(null);
     try {
       await clearHistory();
+      if (!mountedRef.current) return;
+      historyReadRef.current += 1;
       setItems([]);
       setSelectedId(null);
+      setClearRequested(false);
     } catch (error) {
+      if (!mountedRef.current) return;
       console.error('[history] failed to clear history', error);
       setActionError(t('history.clearFailed', { err: errorMessage(error) }));
+    } finally {
+      clearRunning.current = false;
+      if (mountedRef.current) setClearing(false);
     }
   };
 
@@ -240,6 +252,9 @@ export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      {clearRequested && <HistoryClearDialog count={items.length} busy={clearing} error={actionError}
+        onCancel={() => { if (!clearRunning.current) setClearRequested(false); }}
+        onConfirm={() => void onClear()} />}
       <PageHeader
         kicker={t('history.kicker')}
         title={t('history.title')}
@@ -247,8 +262,9 @@ export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void 
         right={
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {onOpenSavedDrafts && <Btn size="sm" variant="ghost" onClick={onOpenSavedDrafts}>{t('textDraft.title')}</Btn>}
-            <Btn icon="refresh" variant="ghost" size="sm" onClick={() => void refresh(true)}>{t('common.refresh')}</Btn>
-            {items.length > 0 && <Btn icon="trash" variant="ghost" size="sm" disabled={loading} onClick={onClear}>{t('common.clear')}</Btn>}
+            <Btn icon="trash" variant="ghost" size="sm" disabled={loading || !!loadError || items.length === 0 || clearing}
+              onClick={() => { setActionError(null); setClearRequested(true); }}>{t('common.clear')}</Btn>
+            <Btn icon="refresh" variant="ghost" size="sm" disabled={clearing} onClick={() => void refresh(true)}>{t('common.refresh')}</Btn>
           </div>
         }
       />
