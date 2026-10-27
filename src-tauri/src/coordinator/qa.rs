@@ -5,6 +5,7 @@ use tauri::Emitter;
 use crate::coordinator_state::{initial_session_id, new_session_id, SessionId, SessionPhase};
 use crate::selection::SelectionContext;
 use crate::types::CapsuleState;
+use crate::asr::volcengine::VolcengineStreamingASR;
 
 use super::{
     begin_qa_session, cancel_qa_session, capture_frontmost_app, emit_capsule_for_session,
@@ -18,6 +19,31 @@ pub(super) fn validate_qa_setup(status: &crate::types::CredentialsStatus) -> Res
         Err("qa_answer_setup_required".into())
     } else {
         Ok(())
+    }
+}
+
+/// Capture becomes ready only after every buffered prefix has joined the live
+/// provider. This is the same transport contract as dictation; omitting this
+/// step makes every healthy question finalizer report a false startup timeout.
+pub(super) fn attach_ready_audio(
+    bridge: &super::DeferredAsrBridge,
+    asr: &Arc<VolcengineStreamingASR>,
+) -> usize {
+    let target: Arc<dyn crate::asr::AudioConsumer> = asr.clone();
+    let flushed = bridge.attach(target);
+    asr.mark_audio_delivery_ready();
+    flushed
+}
+
+pub(super) fn present_microphone_transcript(inner: &Arc<Inner>, owner: SessionId, text: &str) {
+    let mut qa = inner.qa_state.lock();
+    if qa.session_id != owner || !qa.panel_visible || qa.phase != QaPhase::Recording
+        || qa.cancelled || qa.input_source != QaInputSource::ComputerMicrophone
+        || qa.capture_owner.is_some() || qa.capture_preview == text { return; }
+    qa.capture_preview = text.to_owned();
+    if let Some(app) = inner.app.lock().clone() {
+        let _ = app.emit_to("qa", "qa:transcript",
+            serde_json::json!({"session_id":owner.to_string(),"text":text}));
     }
 }
 
@@ -253,6 +279,50 @@ pub(super) fn close_qa_panel(inner: &Arc<Inner>) {
 mod tests {
     use super::*;
     use crate::coordinator::Coordinator;
+
+    #[test]
+    fn microphone_question_flushes_prefix_before_becoming_ready() {
+        use crate::asr::volcengine::VolcengineCredentials;
+        let bridge = super::super::DeferredAsrBridge::new();
+        let pcm = vec![1_u8; 3_840];
+        crate::recorder::AudioConsumer::consume_pcm_chunk(&bridge, &pcm);
+        let asr = Arc::new(VolcengineStreamingASR::new(VolcengineCredentials {
+            app_id: "isolated-test".into(), access_token: "not-a-key".into(),
+            resource_id: VolcengineCredentials::default_resource_id().into(),
+        }, Vec::new()));
+        assert!(!asr.delivery_ready_for_test());
+        assert_eq!(attach_ready_audio(&bridge, &asr), pcm.len());
+        assert_eq!(asr.retained_pcm_snapshot(), pcm);
+        assert!(asr.delivery_ready_for_test(), "a healthy QA must not enter false startup recovery");
+        asr.cancel();
+        attach_ready_audio(&bridge, &asr);
+        assert!(asr.cancelled_for_test(), "late readiness cannot resurrect a cancelled question");
+    }
+
+    #[test]
+    fn microphone_preview_rejects_stale_closed_and_other_source_events() {
+        let c = Coordinator::new(); let owner = new_session_id();
+        {
+            let mut qa = c.inner.qa_state.lock();
+            qa.panel_visible = true; qa.session_id = owner; qa.phase = QaPhase::Recording;
+            qa.input_source = QaInputSource::ComputerMicrophone;
+        }
+        present_microphone_transcript(&c.inner, new_session_id(), "old question");
+        assert!(c.inner.qa_state.lock().capture_preview.is_empty());
+        present_microphone_transcript(&c.inner, owner, "current question");
+        assert_eq!(c.inner.qa_state.lock().capture_preview, "current question");
+        c.inner.qa_state.lock().phase = QaPhase::Processing;
+        present_microphone_transcript(&c.inner, owner, "late question");
+        assert_eq!(c.inner.qa_state.lock().capture_preview, "current question");
+        { let mut qa = c.inner.qa_state.lock(); qa.phase = QaPhase::Recording;
+          qa.input_source = QaInputSource::Listener; }
+        present_microphone_transcript(&c.inner, owner, "wrong source");
+        assert_eq!(c.inner.qa_state.lock().capture_preview, "current question");
+        { let mut qa = c.inner.qa_state.lock(); qa.input_source = QaInputSource::ComputerMicrophone;
+          qa.panel_visible = false; }
+        present_microphone_transcript(&c.inner, owner, "closed question");
+        assert_eq!(c.inner.qa_state.lock().capture_preview, "current question");
+    }
 
     #[test]
     fn qa_start_requires_both_services_shown_by_the_ui() {

@@ -167,7 +167,7 @@ export const ja: typeof zhCN = {
     recoveringSpeech: "音声認識に再接続中…",
     speechRecoveryFailed: "音声認識の接続を復元できませんでした。もう一度お試しください。",
     microphoneSource: "パソコンのマイクと、設定済みのクラウド音声認識・AIサービスを使用します。",
-    simpleHowto: "パソコンのマイクで音声の質問をします。質問の文字入力には対応していません。ウィンドウを開き、「質問を録音」を押します。話し終えたら「録音を終了して質問」を押してください。他のアプリで文字を選択しておくと、その内容を参照して回答します。",
+    simpleHowto: "Listener を接続して音声起動を有効にすると、「开始提问」に続けて質問し、話し終えると自動で回答します。下のウィンドウを開き、PC マイクで「質問を開始」「終了して質問」を押す方法もあります。テキスト選択は必須ではありません。",
     shortcutHint: "{{recordHotkey}} でも録音の開始・終了ができます",
     actionFailed: "操作を完了できませんでした。再試行するか、ウィンドウを閉じてください。",
     dictationBusy: "現在の音声入力を終了してから質問してください。",
@@ -198,7 +198,7 @@ export const ja: typeof zhCN = {
     style: "音声を文章にするときの表現を選びます。",
     vocab: "名前や専門用語の認識を補助します。",
     translation: "翻訳言語とショートカットを設定します。",
-    selectionAsk: "選択したテキストについて AI に質問します。",
+    selectionAsk: "音声で AI に質問します。選択テキストは任意の参考情報です。",
   },
   nav: {
     tools: "ツール",
@@ -207,7 +207,7 @@ export const ja: typeof zhCN = {
     vocab: '語彙',
     style: 'スタイル',
     translation: '翻訳',
-    selectionAsk: '選択追問',
+    selectionAsk: "音声で質問",
   },
   shell: {
     browserPreviewTitle: '画面プレビュー・サンプルデータ。',
@@ -697,7 +697,7 @@ export const ja: typeof zhCN = {
   },
   selectionAsk: {
     kicker: 'SELECTION ASK',
-    title: '選択追問',
+    title: "音声で質問",
     desc: '任意のアプリでテキストを選択し {{hotkey}} を押すとフロートウィンドウが開き、{{recordHotkey}} で録音質問できます。複数ターンの追問対応、手動で閉じるまで保持。',
     statusEnabled: '有効',
     statusDisabled: '無効',

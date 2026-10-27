@@ -4207,6 +4207,9 @@ async fn begin_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
         state.phase = QaPhase::Recording;
         state.cancelled = false;
         state.session_id = new_session_id();
+        state.input_source = qa::QaInputSource::ComputerMicrophone;
+        state.capture_owner = None;
+        state.capture_preview.clear();
         state.front_app = capture_frontmost_app();
         state.selection = None;
         state.session_id
@@ -4238,6 +4241,8 @@ async fn begin_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
                 "qa:state",
                 serde_json::json!({
                     "kind": "recording",
+                    "session_id": session_id.to_string(),
+                    "input_source": "computerMic",
                     "selection_preview": selection_preview_text,
                     "messages": state.messages.clone(),
                 }),
@@ -4265,6 +4270,15 @@ async fn begin_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
             ),
     );
     let bridge = Arc::new(DeferredAsrBridge::new());
+    let preview_owner = Arc::downgrade(inner);
+    asr.set_streaming_event_callback(Some(Arc::new(move |event| {
+        use crate::asr::volcengine::VolcengineStreamingEvent;
+        if let VolcengineStreamingEvent::Partial(text) | VolcengineStreamingEvent::Final(text) = event {
+            if let Some(inner) = preview_owner.upgrade() {
+                qa::present_microphone_transcript(&inner, session_id, &text);
+            }
+        }
+    })));
     let consumer: Arc<dyn crate::recorder::AudioConsumer> = bridge.clone();
     {
         let state = inner.qa_state.lock();
@@ -4373,8 +4387,7 @@ async fn begin_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
         return Ok(());
     }
 
-    let target: Arc<dyn crate::asr::AudioConsumer> = asr;
-    let flushed = bridge.attach(target);
+    let flushed = qa::attach_ready_audio(&bridge, &asr);
     log::info!("[coord] QA ASR connected; flushed {flushed} deferred audio bytes");
 
     // 显式弹胶囊到 Recording。level_handler 后续会持续推电平，胶囊里"录音中…"

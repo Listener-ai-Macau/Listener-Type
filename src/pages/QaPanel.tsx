@@ -296,7 +296,7 @@ export function QaPanel() {
             recordHotkey={recordHotkeyLabel}
           />
         )}
-        {inputSource === 'listener' && (status === 'recording' || (status === 'thinking' && !!capturePreview)) && (
+        {(status === 'recording' || (status === 'thinking' && !!capturePreview)) && (
           <div data-qa-capture-preview role="status" aria-live="polite" style={{ margin: '8px 0', padding: '9px 11px', borderRadius: 10, background: 'var(--ol-raised, rgba(128,128,128,.08))', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: 13, lineHeight: 1.6, color: 'var(--ol-ink)' }}>
             <div style={{ fontSize: 11, marginBottom: 3, color: 'var(--ol-ink-3)' }}>{t('qa.questionPreview')}</div>
             <div>{capturePreview || t('qa.waitingForQuestion')}</div>

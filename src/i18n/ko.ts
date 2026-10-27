@@ -167,7 +167,7 @@ export const ko: typeof zhCN = {
     recoveringSpeech: "음성 인식에 다시 연결 중…",
     speechRecoveryFailed: "음성 인식 연결을 복구하지 못했습니다. 다시 시도해 주세요.",
     microphoneSource: "컴퓨터 마이크와 설정된 클라우드 음성 인식 및 AI 서비스를 사용합니다.",
-    simpleHowto: "컴퓨터 마이크로 말해서 질문합니다. 질문을 직접 입력하는 기능은 지원하지 않습니다. 창을 열고 질문 녹음 시작을 누른 뒤, 말을 마치면 녹음 종료 후 질문을 누르세요. 다른 앱에서 텍스트를 미리 선택하면 답변에 참고할 수 있습니다.",
+    simpleHowto: "Listener를 연결하고 음성 호출을 켠 뒤 “开始提问”에 이어 질문하고 말을 멈추면 자동으로 답합니다. 아래 창을 열어 컴퓨터 마이크로 시작과 종료 버튼을 사용할 수도 있습니다. 글 선택은 필수가 아닙니다.",
     shortcutHint: "{{recordHotkey}} 키로도 질문 녹음을 시작하거나 종료할 수 있습니다",
     actionFailed: "작업을 완료하지 못했습니다. 다시 시도하거나 창을 닫으세요.",
     dictationBusy: "현재 음성 입력을 종료한 뒤 질문을 시작하세요.",
@@ -198,7 +198,7 @@ export const ko: typeof zhCN = {
     style: "말한 내용을 글로 표현하는 방식을 선택합니다.",
     vocab: "이름과 전문 용어의 인식을 돕습니다.",
     translation: "번역 언어와 단축키를 설정합니다.",
-    selectionAsk: "선택한 텍스트에 관해 AI에 질문합니다.",
+    selectionAsk: "음성으로 AI에 질문합니다. 선택한 글은 참고 자료로 사용할 수 있습니다.",
   },
   nav: {
     tools: "도구",
@@ -207,7 +207,7 @@ export const ko: typeof zhCN = {
     vocab: '어휘',
     style: '스타일',
     translation: '번역',
-    selectionAsk: '선택 질문',
+    selectionAsk: "음성 질문",
   },
   shell: {
     browserPreviewTitle: '화면 미리보기 · 예시 데이터.',
@@ -697,7 +697,7 @@ export const ko: typeof zhCN = {
   },
   selectionAsk: {
     kicker: 'SELECTION ASK',
-    title: '선택 질문',
+    title: "음성 질문",
     desc: '아무 앱에서 텍스트를 선택하고 {{hotkey}} 로 플로팅 창을 띄운 후 {{recordHotkey}} 로 녹음 질문. 다중 라운드 후속 질문 지원, 수동으로 닫을 때까지 유지.',
     statusEnabled: '활성화됨',
     statusDisabled: '비활성화됨',

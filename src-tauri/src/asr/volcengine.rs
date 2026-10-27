@@ -8005,6 +8005,11 @@ impl VolcengineStreamingASR {
         matches!(self.state.lock().audio_delivery_readiness, AudioDeliveryReadiness::Cancelled)
     }
 
+    #[cfg(test)]
+    pub(crate) fn delivery_ready_for_test(&self) -> bool {
+        matches!(self.state.lock().audio_delivery_readiness, AudioDeliveryReadiness::Ready)
+    }
+
     fn set_audio_delivery_readiness(&self, next: AudioDeliveryReadiness) {
         let changed = {
             let mut state = self.state.lock();

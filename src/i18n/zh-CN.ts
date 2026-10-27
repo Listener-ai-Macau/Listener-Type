@@ -163,7 +163,7 @@ export const zhCN = {
     recoveringSpeech: "正在恢复识别…",
     speechRecoveryFailed: "识别连接中断，恢复未成功。请稍后重试。",
     microphoneSource: "使用电脑麦克风；识别与回答使用已配置的云服务。",
-    simpleHowto: "这是语音提问，使用电脑麦克风，暂不支持键入问题。打开窗口，点击“开始提问”，说完再点“结束并提问”。也可先在其它软件选中文字，让回答参考该内容。",
+    simpleHowto: "连接 Listener 并开启语音唤醒后，说“开始提问”再说问题，停说后自动回答。也可打开下方窗口，用电脑麦克风点击“开始提问”和“结束并提问”。选中文字是可选的参考，不是必需步骤。",
     shortcutHint: "也可用 {{recordHotkey}} 开始或结束提问",
     actionFailed: "操作未完成，请重试或关闭窗口。",
     dictationBusy: "请先结束当前听写，再开始提问。",
@@ -194,7 +194,7 @@ export const zhCN = {
     style: "选择语音转成文字后的表达方式。",
     vocab: "帮助识别姓名、专有名词和常用术语。",
     translation: "设置翻译语言和快捷键。",
-    selectionAsk: "选中文字后，向 AI 提问。",
+    selectionAsk: "说出问题，让 AI 回答；也可参考选中文字。",
   },
   nav: {
     tools: "工具",
@@ -203,7 +203,7 @@ export const zhCN = {
     vocab: '词汇表',
     style: '风格',
     translation: '翻译',
-    selectionAsk: '划词追问',
+    selectionAsk: "语音提问",
   },
   marketplace: {
     kicker: 'MARKETPLACE',
@@ -737,7 +737,7 @@ export const zhCN = {
   },
   selectionAsk: {
     kicker: 'SELECTION ASK',
-    title: '划词追问',
+    title: "语音提问",
     desc: '选中任意 app 里的一段文字，按 {{hotkey}} 弹出浮窗，再按 {{recordHotkey}} 录音提问。支持多轮追问，浮窗一直保留直到你手动关。',
     statusEnabled: '已启用',
     statusDisabled: '未启用',

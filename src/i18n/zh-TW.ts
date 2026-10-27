@@ -165,7 +165,7 @@ export const zhTW: typeof zhCN = {
     recoveringSpeech: "正在恢復辨識…",
     speechRecoveryFailed: "辨識連線中斷，恢復未成功。請稍後重試。",
     microphoneSource: "使用電腦麥克風；辨識與回答使用已設定的雲端服務。",
-    simpleHowto: "這是語音提問，使用電腦麥克風，目前不支援鍵入問題。開啟視窗，點擊「開始提問」，說完再點「結束並提問」。也可先在其他軟體選取文字，讓回答參考該內容。",
+    simpleHowto: "連接 Listener 並開啟語音喚醒後，說「開始提問」再說問題，停止說話後自動回答。也可開啟下方視窗，用電腦麥克風點「開始提問」和「結束並提問」。選取文字是可選參考，並非必要步驟。",
     shortcutHint: "也可用 {{recordHotkey}} 開始或結束提問",
     actionFailed: "操作未完成，請重試或關閉視窗。",
     dictationBusy: "請先結束目前的聽寫，再開始提問。",
@@ -196,7 +196,7 @@ export const zhTW: typeof zhCN = {
     style: "選擇語音轉成文字後的表達方式。",
     vocab: "協助辨識姓名、專有名詞和常用術語。",
     translation: "設定翻譯語言和快捷鍵。",
-    selectionAsk: "選取文字後，向 AI 提問。",
+    selectionAsk: "說出問題，讓 AI 回答；也可參考選取文字。",
   },
   nav: {
     tools: "工具",
@@ -205,7 +205,7 @@ export const zhTW: typeof zhCN = {
     vocab: '詞彙表',
     style: '風格',
     translation: '翻譯',
-    selectionAsk: '劃詞追問',
+    selectionAsk: "語音提問",
   },
   marketplace: {
     kicker: 'MARKETPLACE',
@@ -739,7 +739,7 @@ export const zhTW: typeof zhCN = {
   },
   selectionAsk: {
     kicker: 'SELECTION ASK',
-    title: '劃詞追問',
+    title: "語音提問",
     desc: '選中任意 app 裏的一段文字，按 {{hotkey}} 彈出浮窗，再按 {{recordHotkey}} 錄音提問。支持多輪追問，浮窗一直保留直到你手動關。',
     statusEnabled: '已啓用',
     statusDisabled: '未啓用',

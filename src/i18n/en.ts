@@ -166,7 +166,7 @@ export const en: typeof zhCN = {
     recoveringSpeech: "Reconnecting recognition…",
     speechRecoveryFailed: "The speech connection was interrupted and could not be recovered. Please try again.",
     microphoneSource: "Uses your computer microphone and your configured cloud services for recognition and answers.",
-    simpleHowto: "Questions are spoken through your computer microphone; typing a question is not supported. Open the window, choose Start question, then Finish and ask when you are done speaking. You can first select text in another app to include it as context.",
+    simpleHowto: "With Listener connected and voice wake enabled, say “开始提问” followed by your question, then stop speaking for an automatic answer. Or open the window below and use the computer microphone with Start question and Finish and ask. Selecting text is optional.",
     shortcutHint: "You can also use {{recordHotkey}} to start or finish a question",
     actionFailed: "The action did not finish. Try again or close the window.",
     dictationBusy: "Finish the current dictation before starting a question.",
@@ -197,7 +197,7 @@ export const en: typeof zhCN = {
     style: "Choose how your spoken words are written.",
     vocab: "Help recognition with names and specialist terms.",
     translation: "Set up translation languages and shortcuts.",
-    selectionAsk: "Ask AI about selected text.",
+    selectionAsk: "Ask AI by voice, with optional selected text as context.",
   },
   nav: {
     tools: "Tools",
@@ -206,7 +206,7 @@ export const en: typeof zhCN = {
     vocab: 'Vocabulary',
     style: 'Style',
     translation: 'Translation',
-    selectionAsk: 'Ask',
+    selectionAsk: "Voice questions",
   },
   marketplace: {
     kicker: 'MARKETPLACE',
@@ -740,7 +740,7 @@ export const en: typeof zhCN = {
   },
   selectionAsk: {
     kicker: 'SELECTION ASK',
-    title: 'Selection Ask',
+    title: "Voice questions",
     desc: 'Select text in any app, press {{hotkey}} to open the panel, then press {{recordHotkey}} to record a question. Multi-turn follow-ups stay in the same panel until you close it.',
     statusEnabled: 'Enabled',
     statusDisabled: 'Disabled',
