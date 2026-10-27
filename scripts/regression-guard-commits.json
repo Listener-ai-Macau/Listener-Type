@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-27T09:02:48.221701+08:00",
+  "updated_at": "2026-10-27T09:53:14.141923+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -8687,6 +8687,29 @@
         "No physical LED/key/human whole-product qualification. Full UI OTA and RF remain pending absent nRF52840 receiver per Owner."
       ],
       "known_failure_source": "cc5c40452 preexisting fallback returned broad model as revision; actual201 normal UI update blocked before firmware bytes, HCI discovered hardware characteristic without reading it."
+    },
+    {
+      "id": "firmware_brownout_rom_wait_recovery_scope",
+      "repo": "firmware",
+      "commit": "87ea79ec3d6e34a95d09b73e2a5848207a919f1c",
+      "state": "observed_failure_recovered_no_product_root_fix",
+      "subject": "Preserve real brownout/ROM download evidence and distinguish full reset recovery from a root fix",
+      "protects": [
+        "Lights do not prove application or BLE readiness; actual ROM stack and hardware reset reason take precedence.",
+        "Ordinary nativeUSB/JTAG core reset did not escape latched strap0; officialRTC full reset recovered this exactFW37 board without flash or setting changes.",
+        "Do not disable brownout/WDT or claim original power/boot transient fixed. Battery4.03V does not measure3V3 transients.",
+        "Zero-attempt serial echoes are not sent commands; helper27bfd9b rejects this diagnostic error."
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ble-ui202-20261027/wake202-recovery-conclusion.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ble-ui202-20261027/wake202-rom-stack.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ble-ui202-20261027/wake202-boot-pins.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ble-ui202-20261027/wake202-usb-hard-reset.txt",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ble-ui202-20261027/wake202-runtime-after-rtc.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ble-ui202-20261027/wake202-status-confirmed-write.txt"
+      ],
+      "known_scope": "One actualS3rev0.2/UID98c377b4e88c/FW37. Recovery at2026-10-27 09:45 confirmed by actualRF/HCI/UART/Type; Type202 not exited. Physical original cause and permanent recovery behavior unqualified. No hardware reset reenactment guard; reuse retained evidence first.",
+      "guards": []
     }
   ],
   "feature_routes_updated_at": "2026-10-27T08:54:34.710494+08:00",
@@ -8698,7 +8721,8 @@
       "guard_entries": [
         "type_wake_tail_and_cross_restart_diagnostic_retention",
         "type_recording_latency_and_ble_audio_control",
-        "firmware_audio_real_block_media_credit"
+        "firmware_audio_real_block_media_credit",
+        "firmware_brownout_rom_wait_recovery_scope"
       ],
       "paths": {
         "type": [
@@ -8716,7 +8740,8 @@
       "known_failures": [
         "2026-10-16/17: delayed ownership confirmation and closed physical source; build20 fixes EOF closeout, not every device adoption failure.",
         "2026-10-17 firmware16 source snapshot54741272bccfd12ae76bffd3c21510f7aae5fcfa: fixes FIFO ownership receipt backlog and queued-STOP/DRAINING revocation; installed identity b8f21838a6d41bbc. Focused production checks passed; natural ENSURE timing and overall field acceptance remain pending.",
-        "09c3b67 credits early small-packet IDLE0 waits but omits real transport admission/retry and post-job Blocked waits; FW22 reuses the existing bounded credit. This does not certify all cold/KWS/ENSURE latency."
+        "09c3b67 credits early small-packet IDLE0 waits but omits real transport admission/retry and post-job Blocked waits; FW22 reuses the existing bounded credit. This does not certify all cold/KWS/ENSURE latency.",
+        "2026-10-27 currentFW37 had brownout cause15 and ROM downloader/strap0 while LEDs remained lit. FullRTC reset recovered actualBLE/audio; ordinary USB/JTAG reset did not. Not proof of a wake-admission or wired-flash-triggered regression; original power/boot source remains unresolved. Reuse wake202-recovery-conclusion.json first."
       ]
     },
     {
@@ -9245,7 +9270,8 @@
       "accepted_scope": "Current COM17 actual product backend writes FW22 at921600 in16.641s, explicitly compares4 MD5 values and resets. Final MSI installed and hash-matched, main/helper restored, installed read-only package check passes. Candidate raw executable hash differs from final bundle metadata; source09d8558 same, final exact binary not reflashed due uncertain supply. User clarified no battery; brownout9/USB error observed after write, later power_on1/crash0/>100s uptime. ADC2.866V is not an actual battery reading. Not all-board validation, not proof hardware supply is fixed, not a uniquely established RAM-stub internal cause.",
       "guard_entries": [
         "wired_native_s3_rom_default_and_explicit_segment_verification",
-        "wired_firmware188_actual_ui_zip_to_verify_and_recovery"
+        "wired_firmware188_actual_ui_zip_to_verify_and_recovery",
+        "firmware_brownout_rom_wait_recovery_scope"
       ],
       "paths": {
         "type": [
@@ -9258,7 +9284,8 @@
       "known_failures": [
         "Type51/native RAM-stub full sequence fails with wrapped USB Windows31. One minimal stub run succeeds; do not assert universal stub failure.",
         "Bundled espflash3.2 bulk write hardcodes verifyfalse and resets; explicit checksum before reset is required.",
-        "Current replacement has no battery. USB-only power and3V3 stability remain hardware checks; no software brownout bypass."
+        "Current replacement has no battery. USB-only power and3V3 stability remain hardware checks; no software brownout bypass.",
+        "2026-10-27 currentFW37 had brownout cause15 and ROM downloader/strap0 while LEDs remained lit. FullRTC reset recovered actualBLE/audio; ordinary USB/JTAG reset did not. Not proof of a wake-admission or wired-flash-triggered regression; original power/boot source remains unresolved. Reuse wake202-recovery-conclusion.json first."
       ]
     },
     {
