@@ -20,6 +20,25 @@ use parking_lot::Mutex;
 use serde::Serialize;
 use thiserror::Error;
 
+#[cfg(all(target_os = "windows", feature = "acceptance-audio"))]
+mod acceptance_microphone;
+
+enum RecorderCapture {
+    Native(CaptureSession),
+    #[cfg(all(target_os = "windows", feature = "acceptance-audio"))]
+    Synthetic(acceptance_microphone::SyntheticCapture),
+}
+
+impl RecorderCapture {
+    fn stop(self) -> Result<(), String> {
+        match self {
+            Self::Native(session) => session.stop().map_err(|e| e.to_string()),
+            #[cfg(all(target_os = "windows", feature = "acceptance-audio"))]
+            Self::Synthetic(session) => session.stop(),
+        }
+    }
+}
+
 /// 目标采样率（与 Swift 端常量一致；不要改）。
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 /// 每多少个回调打一次诊断日志。
@@ -76,7 +95,7 @@ pub enum RecorderError {
 
 /// 采集器句柄。Drop 请求平台取消；显式 `stop` 还会等待采集线程退出。
 pub struct Recorder {
-    session: Mutex<Option<CaptureSession>>,
+    session: Mutex<Option<RecorderCapture>>,
 }
 
 impl Recorder {
@@ -101,6 +120,8 @@ impl Recorder {
         level_handler: Arc<dyn Fn(f32) + Send + Sync>,
         audio_archive_path: Option<PathBuf>,
     ) -> Result<(Self, Receiver<RecorderError>, bool), RecorderError> {
+        #[cfg(all(target_os = "windows", feature = "acceptance-audio"))]
+        let synthetic_input = acceptance_microphone::configured_input()?;
         // 运行期错误：平台统一上报 cpal 与 liveness watchdog 事件。
         let (runtime_error_tx, runtime_error_rx) = channel::<RecorderError>();
 
@@ -120,26 +141,46 @@ impl Recorder {
         let level_for_sink = Arc::clone(&level_handler);
         let archive_for_sink = archiver.clone();
         let error_tx = runtime_error_tx.clone();
-        let session = CaptureSession::start(
-            CaptureOptions {
-                device_name: microphone_device_name,
-                on_stream_error: Some(Arc::new(move |message| {
-                    let _ = error_tx.send(map_capture_runtime_error(message));
-                })),
-            },
-            move |samples, input_sr| {
-                process_callback(
-                    samples,
-                    1,
-                    input_sr,
-                    consumer_for_sink.as_ref(),
-                    level_for_sink.as_ref(),
-                    archive_for_sink.as_deref(),
-                    state_for_sink.as_ref(),
-                );
-            },
-        )
-        .map_err(map_capture_error)?;
+        let sink = move |samples: &[f32], input_sr| {
+            process_callback(
+                samples,
+                1,
+                input_sr,
+                consumer_for_sink.as_ref(),
+                level_for_sink.as_ref(),
+                archive_for_sink.as_deref(),
+                state_for_sink.as_ref(),
+            );
+        };
+        #[cfg(all(target_os = "windows", feature = "acceptance-audio"))]
+        let synthetic = synthetic_input.is_some();
+        #[cfg(not(all(target_os = "windows", feature = "acceptance-audio")))]
+        let synthetic = false;
+        let session = if synthetic {
+            #[cfg(all(target_os = "windows", feature = "acceptance-audio"))]
+            {
+                RecorderCapture::Synthetic(acceptance_microphone::SyntheticCapture::start(
+                    synthetic_input.expect("configured private input"),
+                    sink,
+                    runtime_error_tx.clone(),
+                )?)
+            }
+            #[cfg(not(all(target_os = "windows", feature = "acceptance-audio")))]
+            unreachable!()
+        } else {
+            RecorderCapture::Native(
+                CaptureSession::start(
+                    CaptureOptions {
+                        device_name: microphone_device_name,
+                        on_stream_error: Some(Arc::new(move |message| {
+                            let _ = error_tx.send(map_capture_runtime_error(message));
+                        })),
+                    },
+                    sink,
+                )
+                .map_err(map_capture_error)?,
+            )
+        };
 
         Ok((
             Self {
@@ -163,6 +204,13 @@ impl Recorder {
 }
 
 pub fn list_input_devices() -> Result<Vec<MicrophoneDevice>, RecorderError> {
+    #[cfg(all(target_os = "windows", feature = "acceptance-audio"))]
+    if acceptance_microphone::configured_input()?.is_some() {
+        return Ok(vec![MicrophoneDevice {
+            name: "Simulated voice input (isolated session)".to_string(),
+            is_default: true,
+        }]);
+    }
     capture::list_input_devices()
         .map(|devices| {
             devices
