@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-27T11:16:51.281591+08:00",
+  "updated_at": "2026-10-27T12:01:09.002879+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -8791,6 +8791,28 @@
       ],
       "known_scope": "Source-only after203/FW38 delivery; Windows native10 scoped cases and frontend existing checks pass. No new MSI/install/hardware operation or real BLE field observation. Existing Type203/FW38 production remains. Original battery/3V3/EN/GPIO0 transient cause and physical/long-term qualification remain unresolved.",
       "humanAccepted": false
+    },
+    {
+      "id": "local_asr_auto_language204_actual_failure_and_existing_weight_probe",
+      "repo": "type",
+      "commit": "fda0c54cf334e26c51c8fc88d107e091e22f43fb",
+      "commit_subject": "Keep automatic local recognition independent of output language",
+      "state": "candidate204_failed_chinese_auto_not_installed_or_published",
+      "subject": "Retain rejected204 automatic-language counterexample; explicit input languages work but omitted/auto SDK parameter does not preserve Chinese",
+      "protects": [
+        "Input recognition language must not be inferred from desired output language or Chinese script.",
+        "Do not promote204 merely because English or nonempty text passes: the same Auto setting must preserve the Chinese control.",
+        "No repeat None/auto parameter guesses or model swaps under the same condition. Investigate the missing actual language-token detection using existing weights."
+      ],
+      "guards": [],
+      "validation_kind": "evidence_only",
+      "humanAccepted": false,
+      "evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/outputs/release-rc1-20261027-build204/candidate-rejected.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/customer-onboarding-20261020/isolated-native204-snapshot-20261027-114808/local-asr204-native.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/customer-onboarding-20261020/isolated-native204-snapshot-20261027-114808/local-asr204-language-token-probe.json"
+      ],
+      "known_scope": "Actual existing203/204 same131MB Tiny and two nonsensitive fixtures; explicit en/zh content works. Omitted language and literalauto fail Chinese,204 rejected. Official SOT-only language logits probe on same cached ONNX predicts en99.39percent/zh99.87percent in0.25–0.35s with0 extra weights/cloud, not yet native/packaged. Daily/public203/FW38 preserved."
     }
   ],
   "feature_routes_updated_at": "2026-10-27T08:54:34.710494+08:00",
@@ -10349,6 +10371,26 @@
       },
       "known_failures": [
         "189 restored root WM_COMMAND did not close native chooser; retained as test-control failure, not a product read failure.202 actual button with stable native filename/control readback succeeded."
+      ]
+    },
+    {
+      "id": "local-asr-language",
+      "accepted_scope": "Explicit en/zh private model execution only; Auto204 is a retained failed candidate, not installed or accepted. Original optional-ASR qualification remains incomplete.",
+      "baseline_state": "failed204_preserve203_and_explicit_language_boundaries",
+      "guard_entries": [
+        "local_asr_auto_language204_actual_failure_and_existing_weight_probe"
+      ],
+      "paths": {
+        "type": [
+          "src-tauri/src/coordinator/dictation_asr_selection.rs",
+          "src-tauri/src/asr/local/foundry_runtime.rs",
+          "src-tauri/src/asr/local/foundry_provider.rs",
+          "src/pages/LocalAsr.tsx"
+        ]
+      },
+      "known_failures": [
+        "Same SDK None/literalauto Chinese becomes English and loses facts. Do not repeat it as a proposed fix.",
+        "Offline Python import first failed on an existing transformers/tokenizers version mismatch; no package upgrade. Reused installed pure NumPy audio code and cached tokenizerJSON; this was probe preparation, not product failure."
       ]
     }
   ]
