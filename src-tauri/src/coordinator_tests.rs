@@ -1024,6 +1024,7 @@ fn firmware_snapshot_for_auto_input_test(
 ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
     crate::embedded_ble::FirmwareOtaDeviceSnapshot {
         connected,
+        hardware_model: None,
         hardware_revision: connected.then(|| "keyboard-v2".to_string()),
         firmware_version: connected.then(|| "v-test".to_string()),
         capabilities: connected

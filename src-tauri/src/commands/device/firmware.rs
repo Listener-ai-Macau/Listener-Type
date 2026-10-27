@@ -40,6 +40,7 @@ pub fn firmware_ota_preflight_unavailable_snapshot(
 ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
     crate::embedded_ble::FirmwareOtaDeviceSnapshot {
         connected: false,
+        hardware_model: None,
         hardware_revision: None,
         firmware_version: None,
         capabilities: Vec::new(),
@@ -234,6 +235,7 @@ pub fn firmware_ota_snapshot_version(
 pub fn firmware_ota_active_preflight_snapshot() -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
     crate::embedded_ble::FirmwareOtaDeviceSnapshot {
         connected: true,
+        hardware_model: None,
         hardware_revision: None,
         firmware_version: None,
         capabilities: vec!["firmware_ota_transfer_active".to_string()],

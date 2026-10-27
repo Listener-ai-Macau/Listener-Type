@@ -664,6 +664,7 @@ pub fn listener_ota_v1_device_snapshot() -> crate::embedded_ble::FirmwareOtaDevi
         Err(err) => {
             return crate::embedded_ble::FirmwareOtaDeviceSnapshot {
                 connected: false,
+                hardware_model: None,
                 hardware_revision: None,
                 firmware_version: None,
                 capabilities: Vec::new(),
@@ -677,6 +678,7 @@ pub fn listener_ota_v1_device_snapshot() -> crate::embedded_ble::FirmwareOtaDevi
         Ok(target) => listener_ota_v1_device_snapshot_from_target(&target),
         Err(err) => crate::embedded_ble::FirmwareOtaDeviceSnapshot {
             connected: false,
+            hardware_model: None,
             hardware_revision: None,
             firmware_version: None,
             capabilities: Vec::new(),
@@ -695,6 +697,7 @@ pub fn listener_ota_v1_gatt_probe_snapshot(
         Err(err) => {
             return crate::embedded_ble::FirmwareOtaDeviceSnapshot {
                 connected: false,
+                hardware_model: None,
                 hardware_revision: None,
                 firmware_version: None,
                 capabilities: Vec::new(),
@@ -709,6 +712,7 @@ pub fn listener_ota_v1_gatt_probe_snapshot(
         Ok(target) => listener_ota_v1_gatt_probe_snapshot_from_target(&target),
         Err(err) => crate::embedded_ble::FirmwareOtaDeviceSnapshot {
             connected: false,
+            hardware_model: None,
             hardware_revision: None,
             firmware_version: None,
             capabilities: Vec::new(),
@@ -724,6 +728,7 @@ pub fn listener_ota_v1_gatt_probe_after_active_link_hint(
 ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
     let unavailable = |detail: String| crate::embedded_ble::FirmwareOtaDeviceSnapshot {
         connected: false,
+        hardware_model: None,
         hardware_revision: None,
         firmware_version: None,
         capabilities: Vec::new(),
@@ -751,6 +756,7 @@ pub fn listener_ota_v1_service_reachable_snapshot(
 ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
     let unavailable = |detail: String| crate::embedded_ble::FirmwareOtaDeviceSnapshot {
         connected: false,
+        hardware_model: None,
         hardware_revision: None,
         firmware_version: None,
         capabilities: Vec::new(),
@@ -842,6 +848,7 @@ pub fn listener_ota_v1_service_reachable_snapshot(
             hold_listener_ota_post_confirm_device(&device);
             let snapshot = crate::embedded_ble::FirmwareOtaDeviceSnapshot {
                 connected: true,
+                hardware_model: None,
                 hardware_revision: None,
                 firmware_version: None,
                 capabilities: vec![denzic_ota_core::PROTOCOL_NAME.to_string()],
@@ -872,6 +879,7 @@ fn listener_ota_v1_device_snapshot_from_target(
 ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
     let mut snapshot = crate::embedded_ble::FirmwareOtaDeviceSnapshot {
         connected: true,
+        hardware_model: None,
         hardware_revision: None,
         firmware_version: None,
         capabilities: vec![denzic_ota_core::PROTOCOL_NAME.to_string()],
@@ -892,6 +900,7 @@ fn listener_ota_v1_device_snapshot_from_target(
     }
     let (dis_model, dis_hardware, dis_firmware, dis_battery) =
         read_dis_metadata_from_discovered_services(target.bluetooth_address);
+    snapshot.hardware_model = dis_model.clone();
     snapshot.hardware_revision = normalize_listener_ota_hardware_revision(dis_model, dis_hardware);
     snapshot.firmware_version = dis_firmware;
     snapshot.battery_percent = dis_battery;
@@ -907,6 +916,9 @@ fn listener_ota_v1_device_snapshot_from_target(
                 DIS_SERVICE_UUID,
                 DIS_HARDWARE_REVISION_UUID,
             );
+            if model.is_some() {
+                snapshot.hardware_model = model.clone();
+            }
             snapshot.hardware_revision = normalize_listener_ota_hardware_revision(model, hardware);
         }
         if snapshot.firmware_version.is_none() {
@@ -959,20 +971,12 @@ fn listener_ota_v1_gatt_probe_snapshot_from_target(
             crate::embedded_ble::format_bluetooth_address(value)
         )
     });
-    let (dis_model, dis_hardware, dis_firmware, dis_battery) =
-        read_dis_metadata_from_discovered_services(target.bluetooth_address);
-    let snapshot = crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-        connected: true,
-        hardware_revision: normalize_listener_ota_hardware_revision(dis_model, dis_hardware),
-        firmware_version: dis_firmware,
-        capabilities: vec![denzic_ota_core::PROTOCOL_NAME.to_string()],
-        battery_percent: dis_battery,
-        usb_powered: None,
-        detail: Some(format!(
-            "Listener OTA v1 service is reachable{}; DIS metadata read on a best-effort basis.",
-            address.as_deref().unwrap_or("")
-        )),
-    };
+    // Version-query and transfer admission must use the same identity reader.
+    let mut snapshot = listener_ota_v1_device_snapshot_from_target(target);
+    snapshot.detail = Some(format!(
+        "Listener OTA v1 service is reachable{}; DIS metadata read on a best-effort basis.",
+        address.as_deref().unwrap_or("")
+    ));
     log::info!(
         "[embedded-ble] Listener OTA v1 GATT probe connected={} capabilities={:?} detail={:?}",
         snapshot.connected,
@@ -993,6 +997,7 @@ fn listener_ota_v1_transfer_ready_snapshot_from_target(
     });
     let snapshot = crate::embedded_ble::FirmwareOtaDeviceSnapshot {
         connected: true,
+        hardware_model: None,
         hardware_revision: None,
         firmware_version: None,
         capabilities: vec![denzic_ota_core::PROTOCOL_NAME.to_string()],

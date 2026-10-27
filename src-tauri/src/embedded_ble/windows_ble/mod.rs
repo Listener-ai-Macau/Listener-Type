@@ -3546,27 +3546,54 @@ include!("ota_transfer.rs");
 fn read_dis_metadata_from_discovered_services(
     bluetooth_address: Option<u64>,
 ) -> (Option<String>, Option<String>, Option<String>, Option<u8>) {
-    let model = read_optional_string_characteristic_from_discovered_service(
-        DIS_SERVICE_UUID,
-        DIS_MODEL_NUMBER_UUID,
-        bluetooth_address,
-    );
-    let hardware = read_optional_string_characteristic_from_discovered_service(
-        DIS_SERVICE_UUID,
-        DIS_HARDWARE_REVISION_UUID,
-        bluetooth_address,
-    );
-    let firmware = read_optional_string_characteristic_from_discovered_service(
-        DIS_SERVICE_UUID,
-        DIS_FIRMWARE_REVISION_UUID,
-        bluetooth_address,
-    );
+    // One exact-peer DIS service and one complete characteristic collection.
+    // Reopening/filtering the same service per UUID produced a model-only
+    // snapshot even when the on-air collection already contained 0x2A27.
+    let identity =
+        with_optional_discovered_service(DIS_SERVICE_UUID, bluetooth_address, |service| {
+            let timeout = BLE_DISCOVERY_TIMEOUT.min(Duration::from_secs(2));
+            let result = service
+                .GetCharacteristicsWithCacheModeAsync(BluetoothCacheMode::Uncached)
+                .ok()?
+                .wait_ble_result(timeout, "DIS identity characteristic collection")
+                .ok()?;
+            if result.Status().ok()? != GattCommunicationStatus::Success {
+                return None;
+            }
+            let characteristics = result.Characteristics().ok()?;
+            let read_string = |uuid: GUID| -> Option<String> {
+                for index in 0..characteristics.Size().ok()? {
+                    let characteristic = characteristics.GetAt(index).ok()?;
+                    if characteristic.Uuid().ok()? != uuid {
+                        continue;
+                    }
+                    let bytes = read_characteristic_bytes_with_timeout(
+                        &characteristic,
+                        BluetoothCacheMode::Uncached,
+                        "DIS identity metadata",
+                        timeout,
+                    )
+                    .ok()?;
+                    return String::from_utf8(bytes)
+                        .ok()
+                        .map(|value| value.trim_matches(char::from(0)).trim().to_string())
+                        .filter(|value| !value.is_empty());
+                }
+                None
+            };
+            Some((
+                read_string(DIS_MODEL_NUMBER_UUID),
+                read_string(DIS_HARDWARE_REVISION_UUID),
+                read_string(DIS_FIRMWARE_REVISION_UUID),
+            ))
+        })
+        .unwrap_or_default();
     let battery = read_optional_u8_characteristic_from_discovered_service(
         BATTERY_SERVICE_UUID,
         BATTERY_LEVEL_UUID,
         bluetooth_address,
     );
-    (model, hardware, firmware, battery)
+    (identity.0, identity.1, identity.2, battery)
 }
 
 fn remaining_ble_timeout(
@@ -4210,27 +4237,9 @@ fn readiness_hardware_revision(readiness: &str) -> Option<String> {
     None
 }
 
-fn normalize_optional_hardware_revision(value: Option<String>) -> Option<String> {
-    value.map(|raw| normalize_listener_hardware_revision(&raw).unwrap_or(raw))
-}
-
-fn normalize_listener_ota_hardware_revision(
-    model: Option<String>,
-    hardware: Option<String>,
-) -> Option<String> {
-    normalize_optional_hardware_revision(hardware)
-        .or_else(|| normalize_optional_hardware_revision(model))
-}
-
-fn normalize_listener_hardware_revision(value: &str) -> Option<String> {
-    let normalized = value.trim().to_ascii_lowercase();
-    match normalized.as_str() {
-        "keyboard-v2-n16r8" | "voice-keyboard-v2-n16r8" | "esp32s3-wroom-1-n16r8" => {
-            Some("keyboard-v2-n16r8".to_string())
-        }
-        _ => None,
-    }
-}
+use super::ota_hardware_identity::{
+    normalize_listener_hardware_revision, normalize_listener_ota_hardware_revision,
+};
 
 fn readiness_bool(readiness: &str, key: &str) -> Option<bool> {
     readiness_field(readiness, key).and_then(|value| match value.as_str() {
@@ -4301,6 +4310,20 @@ fn read_optional_characteristic_bytes_from_discovered_service(
     characteristic_uuid: GUID,
     bluetooth_address: Option<u64>,
 ) -> Option<Vec<u8>> {
+    with_optional_discovered_service(service_uuid, bluetooth_address, |service| {
+        read_optional_characteristic_from_service(
+            service,
+            characteristic_uuid,
+            BluetoothCacheMode::Uncached,
+        )
+    })
+}
+
+fn with_optional_discovered_service<T>(
+    service_uuid: GUID,
+    bluetooth_address: Option<u64>,
+    mut read: impl FnMut(&GattDeviceService) -> Option<T>,
+) -> Option<T> {
     let optional_timeout = BLE_DISCOVERY_TIMEOUT.min(Duration::from_secs(2));
     let selector = GattDeviceService::GetDeviceSelectorFromUuid(service_uuid).ok()?;
     let services = DeviceInformation::FindAllAsyncAqsFilter(&selector)
@@ -4344,11 +4367,7 @@ fn read_optional_characteristic_bytes_from_discovered_service(
             .ok()?
             .wait_ble_result(optional_timeout, "optional service open")
             .ok()?;
-        let result = read_optional_characteristic_from_service(
-            &service,
-            characteristic_uuid,
-            BluetoothCacheMode::Uncached,
-        );
+        let result = read(&service);
         release_winrt_bluetooth_object(service);
         if result.is_some() {
             return result;

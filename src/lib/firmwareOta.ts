@@ -82,6 +82,7 @@ export interface FirmwareOtaValidationResult {
 
 export interface FirmwareOtaDeviceSnapshot {
   connected: boolean;
+  hardwareModel?: string | null;
   hardwareRevision: string | null;
   firmwareVersion: string | null;
   capabilities: string[];
@@ -363,6 +364,13 @@ export function evaluateFirmwareOtaPreflight(input: FirmwareOtaPreflightInput): 
       'downgrade',
       'Firmware package is older than the connected device firmware.',
       'Use a same-version or newer OTA package, or use USB factory recovery for an intentional rollback.',
+    ));
+  }
+  if (listenerOtaV1 && !device.hardwareRevision && device.hardwareModel?.trim().toLowerCase() === 'keyboard-v2') {
+    blockers.push(blocker(
+      'deviceStatusUnknown',
+      'The device model was read, but its hardware revision is not confirmed.',
+      'Query the device firmware status again before updating.',
     ));
   }
   if (listenerOtaV1 && device.hardwareRevision && device.hardwareRevision !== manifest.hardwareRevision) {

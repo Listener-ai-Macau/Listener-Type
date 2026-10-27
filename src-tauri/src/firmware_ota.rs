@@ -352,6 +352,7 @@ fn run_listener_ota_v1_transfer_preflight_and_write(
 fn disconnected_ota_snapshot(detail: String) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
     crate::embedded_ble::FirmwareOtaDeviceSnapshot {
         connected: false,
+        hardware_model: None,
         hardware_revision: None,
         firmware_version: None,
         capabilities: Vec::new(),
@@ -407,6 +408,12 @@ fn preflight_blockers(
                 .map(|detail| format!("Device is not ready for OTA: {detail}"))
                 .unwrap_or_else(|| "Device is not connected.".to_string()),
         );
+    }
+    if crate::embedded_ble::ota_hardware_identity::hardware_revision_requires_refresh(
+        snapshot.hardware_model.as_deref(),
+        snapshot.hardware_revision.as_deref(),
+    ) {
+        blockers.push("Device model was read, but its hardware revision is not confirmed; query device status before OTA.".to_string());
     }
     match snapshot.hardware_revision.as_deref() {
         Some(hardware) if hardware != manifest.hardware_revision => blockers.push(format!(
@@ -853,6 +860,7 @@ mod tests {
     ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
         crate::embedded_ble::FirmwareOtaDeviceSnapshot {
             connected,
+            hardware_model: None,
             hardware_revision: hardware_revision.map(str::to_string),
             firmware_version: firmware_version.map(str::to_string),
             capabilities: capabilities.into_iter().map(str::to_string).collect(),
@@ -1148,6 +1156,27 @@ mod tests {
         let blockers = preflight_blockers(&manifest, &snapshot, false);
 
         assert!(blockers
+            .iter()
+            .any(|item| item.contains("Hardware revision mismatch")));
+    }
+
+    #[test]
+    fn model_only_hardware_identity_requires_refresh_without_weakening_revision_check() {
+        let manifest = validate_package(
+            &listener_ota_v1_manifest("keyboard-v1", "1.2.0"),
+            FIRMWARE_BYTES,
+            &context(),
+        )
+        .manifest
+        .expect("valid Listener OTA v1 manifest");
+        let mut snapshot =
+            ota_snapshot(true, None, None, vec![LISTENER_OTA_V1_FIRMWARE_CAPABILITY]);
+        snapshot.hardware_model = Some("keyboard-v2".to_string());
+        let blockers = preflight_blockers(&manifest, &snapshot, false);
+        assert_eq!(blockers.len(), 1);
+        assert!(blockers[0].contains("hardware revision is not confirmed"));
+        snapshot.hardware_revision = Some("keyboard-v2-n16r8".to_string());
+        assert!(preflight_blockers(&manifest, &snapshot, false)
             .iter()
             .any(|item| item.contains("Hardware revision mismatch")));
     }

@@ -1113,10 +1113,11 @@ function FirmwareOtaReadinessSummary({
   const device = snapshot?.device;
   const statusPending = refreshing && !snapshot;
   const otaServiceConfirmed = !!device?.connected && device.capabilities.includes(LISTENER_OTA_V1_TRANSPORT_BOUNDARY.protocolName);
+  const hardwareReadIncomplete = !device?.hardwareRevision && device?.hardwareModel?.trim().toLowerCase() === 'keyboard-v2';
   const rows: Array<[string, string]> = [
     [t('settings.recording.firmwareOtaDeviceFirmware', '固件'), statusPending ? t('settings.recording.firmwareOtaReading', '读取中') : device?.firmwareVersion ?? (otaServiceConfirmed ? t('settings.recording.firmwareOtaVersionNotReported', '版本未报告') : t('settings.recording.firmwareOtaUnavailable', '未获取'))],
     [t('settings.recording.firmwareOtaDeviceConnected', '连接'), statusPending ? t('settings.recording.firmwareOtaReading', '读取中') : device?.connected ? t('settings.recording.firmwareOtaConnected', '已连接') : t('settings.recording.firmwareOtaDisconnected', '未连接')],
-    [t('settings.recording.firmwareOtaDeviceHardware', '硬件'), statusPending ? t('settings.recording.firmwareOtaReading', '读取中') : device?.hardwareRevision ?? (otaServiceConfirmed ? t('settings.recording.firmwareOtaCompatibleHardware', '兼容') : t('settings.recording.firmwareOtaUnavailable', '未获取'))],
+    [t('settings.recording.firmwareOtaDeviceHardware', '硬件'), statusPending ? t('settings.recording.firmwareOtaReading', '读取中') : device?.hardwareRevision ?? (otaServiceConfirmed && !hardwareReadIncomplete ? t('settings.recording.firmwareOtaCompatibleHardware', '兼容') : t('settings.recording.firmwareOtaUnavailable', '未获取'))],
   ];
 
   return (

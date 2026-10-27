@@ -349,6 +349,7 @@ fn ota_result_separates_protocol_transfer_from_generation_recovery_time() {
 fn ota_snapshot_with_version(version: Option<&str>) -> FirmwareOtaDeviceSnapshot {
     FirmwareOtaDeviceSnapshot {
         connected: true,
+        hardware_model: None,
         hardware_revision: Some("keyboard-v1".to_string()),
         firmware_version: version.map(str::to_string),
         capabilities: vec![crate::firmware_ota::LISTENER_OTA_V1_FIRMWARE_CAPABILITY.to_string()],
@@ -2901,6 +2902,7 @@ fn diagnostic_package_includes_ble_wake_recovery_without_sensitive_text() {
             diagnostic_services: Vec::new(),
             firmware_snapshot: FirmwareOtaDeviceSnapshot {
                 connected: true,
+                hardware_model: None,
                 hardware_revision: Some("keyboard-v1".to_string()),
                 firmware_version: Some("v1.2.3".to_string()),
                 capabilities: vec![
@@ -2977,6 +2979,7 @@ fn diagnostic_export_test_package() -> super::DiagnosticPackage {
             }],
             firmware_snapshot: FirmwareOtaDeviceSnapshot {
                 connected: true,
+                hardware_model: None,
                 hardware_revision: Some("keyboard-v1".to_string()),
                 firmware_version: Some("v1.2.3".to_string()),
                 capabilities: vec![
@@ -3151,6 +3154,7 @@ fn diagnostic_ble_failure_taxonomy_deduplicates_sources() {
         diagnostic_services: Vec::new(),
         firmware_snapshot: FirmwareOtaDeviceSnapshot {
             connected: true,
+            hardware_model: None,
             hardware_revision: Some("keyboard-v1".to_string()),
             firmware_version: None,
             capabilities: vec![crate::firmware_ota::LISTENER_OTA_V1_FIRMWARE_CAPABILITY.to_string()],

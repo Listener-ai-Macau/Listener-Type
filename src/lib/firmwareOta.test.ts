@@ -426,6 +426,26 @@ const unknownDeviceStatus = evaluateFirmwareOtaPreflight({
 });
 assert.equal(unknownDeviceStatus.ok, true);
 
+// Actual201 failure: the DIS model was available while 0x2A27 was not read.
+// That is neither an incompatible board nor sufficient identity to proceed.
+const partialIdentityDevice = {
+  connected: true,
+  hardwareModel: 'keyboard-v2',
+  hardwareRevision: null,
+  firmwareVersion: '1.1.0',
+  capabilities: [LISTENER_OTA_V1_TRANSPORT_BOUNDARY.firmwareCapability],
+  batteryPercent: 93,
+  usbPowered: true,
+};
+const identityPreflight = (hardwareRevision: string | null) => evaluateFirmwareOtaPreflight({
+  manifest: parsedListenerOtaV1Manifest, desktopVersion: '1.0.0',
+  recordingActive: false, transferActive: false,
+  device: { ...partialIdentityDevice, hardwareRevision },
+});
+assert.deepEqual(identityPreflight(null).blockers.map(item => item.code), ['deviceStatusUnknown']);
+assert.equal(identityPreflight('keyboard-v2-n16r8').ok, true);
+assert.deepEqual(identityPreflight('keyboard-v2-n8r2').blockers.map(item => item.code), ['hardwareMismatch']);
+
 const unknownPowerStatus = evaluateFirmwareOtaPreflight({
   manifest: parsedV2Manifest,
   desktopVersion: '1.0.0',

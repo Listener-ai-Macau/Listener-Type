@@ -21,6 +21,7 @@ pub const LISTENER_OTA_V1_DATA_UUID_TEXT: &str = denzic_ota_core::GATT_DATA_UUID
 pub const LISTENER_OTA_V1_STATUS_UUID_TEXT: &str = denzic_ota_core::GATT_STATUS_UUID;
 pub mod settings_target;
 mod ota_target_identity;
+pub(crate) mod ota_hardware_identity;
 pub const DIAGNOSTIC_EVENT_BYTES: usize = denzic_observability_v1_core::DIAG_LOG_EVENT_WIRE_BYTES;
 pub const DIAGNOSTIC_CHUNK_HEADER_BYTES: usize =
     denzic_observability_v1_core::DIAG_LOG_CHUNK_HEADER_BYTES;
@@ -59,6 +60,7 @@ pub struct FirmwareOtaTransferStats {
 #[serde(rename_all = "camelCase")]
 pub struct FirmwareOtaDeviceSnapshot {
     pub connected: bool,
+    pub hardware_model: Option<String>,
     pub hardware_revision: Option<String>,
     pub firmware_version: Option<String>,
     pub capabilities: Vec<String>,
@@ -918,6 +920,7 @@ pub fn firmware_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
 pub fn stm32wb_st_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
     FirmwareOtaDeviceSnapshot {
         connected: false,
+        hardware_model: None,
         hardware_revision: None,
         firmware_version: None,
         capabilities: Vec::new(),
@@ -1495,6 +1498,7 @@ pub fn prepare_listener_ota_v1_transfer() -> Result<ListenerOtaV1PreparedTransfe
 pub fn firmware_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
     FirmwareOtaDeviceSnapshot {
         connected: false,
+        hardware_model: None,
         hardware_revision: None,
         firmware_version: None,
         capabilities: Vec::new(),
@@ -1508,6 +1512,7 @@ pub fn firmware_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
 pub fn listener_ota_v1_device_snapshot() -> FirmwareOtaDeviceSnapshot {
     FirmwareOtaDeviceSnapshot {
         connected: false,
+        hardware_model: None,
         hardware_revision: None,
         firmware_version: None,
         capabilities: Vec::new(),
@@ -1521,6 +1526,7 @@ pub fn listener_ota_v1_device_snapshot() -> FirmwareOtaDeviceSnapshot {
 pub fn listener_ota_v1_gatt_probe_snapshot(_timeout: Duration) -> FirmwareOtaDeviceSnapshot {
     FirmwareOtaDeviceSnapshot {
         connected: false,
+        hardware_model: None,
         hardware_revision: None,
         firmware_version: None,
         capabilities: Vec::new(),
@@ -1536,6 +1542,7 @@ pub fn listener_ota_v1_gatt_probe_after_active_link_hint(
 ) -> FirmwareOtaDeviceSnapshot {
     FirmwareOtaDeviceSnapshot {
         connected: false,
+        hardware_model: None,
         hardware_revision: None,
         firmware_version: None,
         capabilities: Vec::new(),
@@ -1549,6 +1556,7 @@ pub fn listener_ota_v1_gatt_probe_after_active_link_hint(
 pub fn listener_ota_v1_service_reachable_snapshot(_timeout: Duration) -> FirmwareOtaDeviceSnapshot {
     FirmwareOtaDeviceSnapshot {
         connected: false,
+        hardware_model: None,
         hardware_revision: None,
         firmware_version: None,
         capabilities: Vec::new(),
