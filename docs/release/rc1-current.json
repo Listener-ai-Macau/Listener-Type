@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-27T10:47:57.966046+08:00",
+  "updatedAt": "2026-10-27T12:36:36.712609+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 203,
-    "source": "394eb24266c9a9c68548d11a4e2a6c7d9b1599fa",
-    "sourceTag": "build-source/type203-20261027",
+    "build": 205,
+    "source": "63c0db7463a3754884b4856425ed23033f4bf84f",
+    "sourceTag": "build-source/type205-20261027",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "91657b1229af7fb072c51fb7ac5e1872f346898a3fca922114edf3bb20c079ea",
-    "sizeBytes": 299507712,
-    "exeSha256": "1da2154b9af98f0375e0770ba77a63eed3e4d1b3e941eff9e5706adf7f46d453",
+    "sha256": "cd2aadb8eb611b3da45af07d1c4851be5d7d42e76b054af89e8c4ca342a2223e",
+    "sizeBytes": 299778048,
+    "exeSha256": "494a79eaecb4ef6c2d1fec80fe5173d0c4f64c5045822283c0630ec685454161",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -533,7 +533,14 @@
     "native203Fw38WiredEvidence": "work/customer-onboarding-20261020/isolated-native203-snapshot-20261027-103846/wired203-ui-flash.json",
     "nativeS3ResetAndUsbStartupRecoveryThisBoardVerified": true,
     "originalBrownoutSourceFixed": false,
-    "remainingPhysicalAndGlobalScopesQualified": false
+    "remainingPhysicalAndGlobalScopesQualified": false,
+    "type205InstalledExeAndPreferencesVerified": true,
+    "localAsr205AutoEnglishChineseSameWeightsNativeVerified": true,
+    "localAsr205ExplicitLanguagePreserved": true,
+    "localAsr205AdditionalModelWeights": false,
+    "localAsr205LiveMicrophoneOrAllLanguagesQualified": false,
+    "wakePolicy205UnknownReportedHonestly": true,
+    "legacyPowerAlias205DerivedFromExistingFlags": true
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",

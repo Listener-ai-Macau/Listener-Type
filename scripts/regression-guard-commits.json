@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-27T12:01:09.002879+08:00",
+  "updated_at": "2026-10-27T12:36:36.712609+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -8813,6 +8813,37 @@
         "C:/Users/Billy/Documents/Codex/2026-10-04/listener-repair-handoff/work/customer-onboarding-20261020/isolated-native204-snapshot-20261027-114808/local-asr204-language-token-probe.json"
       ],
       "known_scope": "Actual existing203/204 same131MB Tiny and two nonsensitive fixtures; explicit en/zh content works. Omitted language and literalauto fail Chinese,204 rejected. Official SOT-only language logits probe on same cached ONNX predicts en99.39percent/zh99.87percent in0.25–0.35s with0 extra weights/cloud, not yet native/packaged. Daily/public203/FW38 preserved."
+    },
+    {
+      "id": "local_asr205_sot_language_detection_reuses_selected_weights",
+      "repo": "type",
+      "commit": "63c0db7463a3754884b4856425ed23033f4bf84f",
+      "commit_subject": "Detect local input language with the selected Whisper weights",
+      "state": "exact205_native_auto_and_explicit_en_zh_installed_not_all_language_or_live_qualified",
+      "subject": "Actual input-language detection before Foundry file transcription preserves both same English and Chinese recordings",
+      "humanAccepted": false,
+      "validation_kind": "unit_and_native",
+      "protects": [
+        "Automatic input language is independent of output preference, script and working languages.",
+        "Reuse selected SDK model.path encoder/decoder/tokenizer language tokens; no additional model or Python dependency.",
+        "Use true zero-length self-attention history through the ORT allocator; keep transient sessions and total time budget.",
+        "Retain explicit language bypass, ordinary model activation/release, daily preferences and service credentials.",
+        "Keep rejected204 None/literalauto Chinese failure; a nonempty transcript or English-only success cannot qualify Auto."
+      ],
+      "guards": [
+        "cargo test --target x86_64-pc-windows-msvc --lib foundry_language",
+        "cargo test --target x86_64-pc-windows-msvc --lib automatic_local_asr_preserves_both_fixture_languages -- --ignored --nocapture"
+      ],
+      "evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native205-snapshot-20261027-123157\\local-asr205-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native205-snapshot-20261027-123157\\setup-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261027-build205\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261027-build205\\type205-installed.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ble-ui202-20261027\\foundry-language-native-asr2.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\ble-ui202-20261027\\foundry-language-native-runtime124.log"
+      ],
+      "known_scope": "Exact205 ordinary private UI activation/release plus engineering production replay of the same two public fixtures; Tiny only. Explicit en/zh, ORT1.23/1.24 and Whisper frontend goldens passed. Installed205 and persistent state preserved. No new customer, all-language, actual microphone, BLE or physical qualification.",
+      "guard_environment": "Windows MSVC developer environment; ignored native case requires explicit private cached Foundry data root plus public EN/ZH fixture environment, as recorded in original receipt; no implicit downloads."
     }
   ],
   "feature_routes_updated_at": "2026-10-27T08:54:34.710494+08:00",
@@ -10375,22 +10406,27 @@
     },
     {
       "id": "local-asr-language",
-      "accepted_scope": "Explicit en/zh private model execution only; Auto204 is a retained failed candidate, not installed or accepted. Original optional-ASR qualification remains incomplete.",
-      "baseline_state": "failed204_preserve203_and_explicit_language_boundaries",
+      "accepted_scope": "Exact205 native Auto/explicit en/zh on the same existing Tiny and two public recordings; ordinary UI prepare/release and idle installation passed. Not all languages, variants, microphone or physical acceptance.",
+      "baseline_state": "exact205_auto_explicit_two_fixture_native_verified_installed",
       "guard_entries": [
-        "local_asr_auto_language204_actual_failure_and_existing_weight_probe"
+        "local_asr_auto_language204_actual_failure_and_existing_weight_probe",
+        "local_asr205_sot_language_detection_reuses_selected_weights"
       ],
       "paths": {
         "type": [
           "src-tauri/src/coordinator/dictation_asr_selection.rs",
           "src-tauri/src/asr/local/foundry_runtime.rs",
           "src-tauri/src/asr/local/foundry_provider.rs",
-          "src/pages/LocalAsr.tsx"
+          "src/pages/LocalAsr.tsx",
+          "src-tauri/src/asr/local/foundry_language.rs",
+          "src-tauri/Cargo.toml"
         ]
       },
       "known_failures": [
         "Same SDK None/literalauto Chinese becomes English and loses facts. Do not repeat it as a proposed fix.",
-        "Offline Python import first failed on an existing transformers/tokenizers version mismatch; no package upgrade. Reused installed pure NumPy audio code and cached tokenizerJSON; this was probe preparation, not product failure."
+        "Offline Python import first failed on an existing transformers/tokenizers version mismatch; no package upgrade. Reused installed pure NumPy audio code and cached tokenizerJSON; this was probe preparation, not product failure.",
+        "Native port first used a raw-data tensor constructor that rejects zero axes; allocator-based zero history fixed the actual error.",
+        "A simplified-only test assertion rejected correct traditional text; production script conversion and numeric equivalence now compare facts. This was a test defect, not lost content."
       ]
     }
   ]

@@ -1,11 +1,19 @@
-# Type build203 / Firmware38 · Listener v1.0.6-rc1
+# Type build205 / Firmware38 · Listener v1.0.6-rc1
 
 | Download | File |
 | --- | --- |
 | **Windows app** | **[Download MSI](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **ESP32-S3 firmware · USB flashing or Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
-## In this paired update
+## In this update
+
+- Optional Windows local recognition now detects the input language using the selected Whisper model's existing encoder, tokenizer language tokens and first decoder step, before passing that language to Foundry AudioClient. Output language and Chinese-script preferences cannot force the input language.
+- The exact MSI passed the same 11.48-second English and 9.81-second Chinese fixtures, with their names, meeting time and budget retained. Explicit English/Chinese also passed. No new weights, Python runtime or cloud service is added. Tiny is the measured model; this is not all-language or microphone qualification.
+- Transient detection sessions are released, inference has a time budget, and the existing explicit-language route skips detection. Uses the compatible ORT 1.23 API with both prepared 1.23 and existing 1.24 runtimes checked.
+- Device recovery metadata now reports an unreported wake capability as unknown, instead of fabricating a board-specific key policy. Legacy current-power aliases follow existing reported power flags; stored device settings are unchanged.
+- Retains Type203/Firmware38 recovery behavior below. No new firmware flash, RF speed test, interference qualification or physical acceptance is claimed for this app-only update.
+
+## Retained recovery behavior (Type203 / Firmware38)
 
 - Type confirms all firmware segment checksums before restarting. On native ESP32-S3 USB, it reads the boot state and uses a full reset when the sampled BOOT state requires it. A held BOOT pin remains an explicit error.
 - Startup success requires a normal application response from the same USB device. A reset request or a port appearing is insufficient.
@@ -22,8 +30,8 @@ US$49 is the hardware price. Type is free/open source; recognition and optional 
 
 ## File identity
 
-- Type source: `394eb24266c9a9c68548d11a4e2a6c7d9b1599fa` · `build-source/type203-20261027`
-- MSI: 299507712 bytes · SHA256 `91657b1229af7fb072c51fb7ac5e1872f346898a3fca922114edf3bb20c079ea`
+- Type source: `63c0db7463a3754884b4856425ed23033f4bf84f` · `build-source/type205-20261027`
+- MSI: 299778048 bytes · SHA256 `cd2aadb8eb611b3da45af07d1c4851be5d7d42e76b054af89e8c4ca342a2223e`
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · `build-source/firmware38-20261027` · runtime `094f5a60049f59f4`
 - ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`
 - Firmware binary: SHA256 `c16fba3faeb6c7998a9012cb85e639655f8c7c3f95e348081e810ea90eba4e98`
@@ -31,3 +39,6 @@ US$49 is the hardware price. Type is free/open source; recognition and optional 
 ## 中文说明
 
 本次配套更新处理刷完后未真正启动、USB复位后接口异常的问题。有线刷机先逐段校验，再依据真实启动状态选择复位，并等待同一设备的应用回包；固件在开机早期对USB执行一次明确断开和重新初始化。当前板的正常界面有线刷机、蓝牙OTA、重连和按键/设置保留已有实测。原欠压触发源仍在排查，未关闭保护，也未宣称长期或全部硬件验收完成。
+
+
+205另修可选本地识别自动语言判断：复用同一模型权重先识别输入语言，再正常转写。同中英文原件在实际MSI中通过；显式语言保留，未增加模型或云服务。设备未报告的唤醒能力如实标未知，不再代填固定旧板按键。此为应用更新，固件38及原恢复证据保留，其它实物、多语言和长期范围不据此算通过。
