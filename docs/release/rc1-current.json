@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-27T12:36:36.712609+08:00",
+  "updatedAt": "2026-10-27T17:16:40.942641+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 205,
-    "source": "63c0db7463a3754884b4856425ed23033f4bf84f",
-    "sourceTag": "build-source/type205-20261027",
+    "build": 208,
+    "source": "1d4e7978f52fd5fd0c1f4b0d57437cc91833d3c1",
+    "sourceTag": "build-source/type208-20261027",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "cd2aadb8eb611b3da45af07d1c4851be5d7d42e76b054af89e8c4ca342a2223e",
-    "sizeBytes": 299778048,
-    "exeSha256": "494a79eaecb4ef6c2d1fec80fe5173d0c4f64c5045822283c0630ec685454161",
+    "sha256": "3d4dc7ab0d337a0d7be7946ea6791c70674773c249830eea339f7e1eb25d1d56",
+    "sizeBytes": 299790336,
+    "exeSha256": "5ce4eb64a20bbe35f939cd6664659e481a84dda9df11819f6cbca188345f0786",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -511,7 +511,7 @@
     "navigationScope": "Exact189 private native sidebar/guide only; no recording/Bluetooth changes",
     "toolDisclosureQualified": true,
     "voiceQuestionExpectationFiveLocalesQualified": true,
-    "scope": "201 consolidated saved-draft continuation and first-save naming. Affected19 saved-draft and8 existing result-handoff headless checks, TypeScript, exact native ordinary UI/real private disk save/reopen/source retention passed. No201 natural customer, voice, external paste, physical/global or whole22 claim.",
+    "scope": "208 consolidates PC-question ready/preview, stable History refresh and in-app explicit clear confirmation, and narrow completed-native-answer draft save. Same-source nonshipping input build real existing services: first question history off, second on, explicit exact answer save, close QA and selected ID/name/full textarea reread passed. Default208 MSI rejected UI-forged answers. Reuses207 clear-protection native proof and206 ready/preview proof. No live microphone, hardware, universal answer-quality, external/global or whole22 qualification.",
     "qaStreamingDisplayControlledNativeQualified": true,
     "readyMadeStyleLibraryNativeQualified": true,
     "listenerQuestionPreviewAndAutoStopActual196": true,
@@ -540,7 +540,12 @@
     "localAsr205AdditionalModelWeights": false,
     "localAsr205LiveMicrophoneOrAllLanguagesQualified": false,
     "wakePolicy205UnknownReportedHonestly": true,
-    "legacyPowerAlias205DerivedFromExistingFlags": true
+    "legacyPowerAlias205DerivedFromExistingFlags": true,
+    "qa208CompletedNativeAnswerExactDraftSaveReread": true,
+    "qa208FrontendOnlyAnswerRejected": true,
+    "qa207StableHistoryRefreshAndExplicitClearReused": true,
+    "qa206ComputerQuestionReadyAndPreviewReused": true,
+    "acceptanceSyntheticInputAbsentFrom208Msi": true
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -558,6 +563,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build203-20261027"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build208-20261027"
   }
 }

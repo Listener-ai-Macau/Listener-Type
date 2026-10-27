@@ -1,44 +1,33 @@
-# Type build205 / Firmware38 · Listener v1.0.6-rc1
+# Type build208 / Firmware38 · Listener v1.0.6-rc1
 
 | Download | File |
 | --- | --- |
 | **Windows app** | **[Download MSI](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
-| **ESP32-S3 firmware · USB flashing or Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
+| **ESP32-S3 firmware · USB or Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
-## In this update
+## In this app update
 
-- Optional Windows local recognition now detects the input language using the selected Whisper model's existing encoder, tokenizer language tokens and first decoder step, before passing that language to Foundry AudioClient. Output language and Chinese-script preferences cannot force the input language.
-- The exact MSI passed the same 11.48-second English and 9.81-second Chinese fixtures, with their names, meeting time and budget retained. Explicit English/Chinese also passed. No new weights, Python runtime or cloud service is added. Tiny is the measured model; this is not all-language or microphone qualification.
-- Transient detection sessions are released, inference has a time budget, and the existing explicit-language route skips detection. Uses the compatible ORT 1.23 API with both prepared 1.23 and existing 1.24 runtimes checked.
-- Device recovery metadata now reports an unreported wake capability as unknown, instead of fabricating a board-specific key policy. Legacy current-power aliases follow existing reported power flags; stored device settings are unchanged.
-- Retains Type203/Firmware38 recovery behavior below. No new firmware flash, RF speed test, interference qualification or physical acceptance is claimed for this app-only update.
+- Computer-microphone questions now show a live question preview and mark audio ready after buffered audio is delivered. This removes a false finalization timeout/replay on an otherwise healthy connection; retained-audio recovery still handles actual transport failure.
+- History keeps Refresh in a stable position as records appear. Clear requires an explicit in-app confirmation with Cancel initially focused.
+- Save a completed question answer directly as a local text draft. The saved original and current text contain that answer; private selected context is not added to the draft. Find it later under History → Saved drafts and continue with the existing text tools.
+- The question window may save only a completed answer in its current native conversation. A frontend-only forged answer is rejected. Normal recording-history preferences and the other draft permissions stay in force.
+- Retains build205 automatic local ASR language detection and Firmware38. No firmware flash is required for these app changes. The synthetic-input adapter used in private engineering/customer sessions is excluded from this MSI.
 
-## Retained recovery behavior (Type203 / Firmware38)
+Engineering confirmation used synthetic speech through ordinary controls and existing configured ASR/text services. It does not establish live-microphone, physical Listener, arbitrary external-input or long-term qualification. Independent AI experiences and real orders remain separate. Review generated answers and translations before using them.
 
-- Type confirms all firmware segment checksums before restarting. On native ESP32-S3 USB, it reads the boot state and uses a full reset when the sampled BOOT state requires it. A held BOOT pin remains an explicit error.
-- Startup success requires a normal application response from the same USB device. A reset request or a port appearing is insufficient.
-- Firmware38 performs a clean USB detach and peripheral initialization once during boot, before the USB driver owns it. It preserves the power latch and skips an attached debugger or an already running driver. It adds a 500 ms startup detach interval, not a recurring interruption during dictation.
-- Includes the build202 fix for reading the hardware model and actual hardware revision independently during Bluetooth OTA preflight. Incompatible or unknown hardware remains blocked.
-- Real normal-UI Bluetooth OTA (installed202, unchanged OTA code in203) and normal-UI wired flashing (exact203 MSI) passed on the current board, including key/settings readback. Install both paired files for these fixes.
-- Retains build201 saved-draft continuation and first-save naming, earlier text safeguards and configured recognition services.
+An independent assumed-owned AI user actually saved and retrieved two self-edited bilingual drafts and a spoken-question answer, including renaming the answer draft. This was software use with synthetic speech and preconfigured services, without an order or physical receipt. Formal transformation can retain author-facing writing instructions as text; local translation and further polishing can retain incorrect or unnatural terms. Those limitations remain open, and the user's manually edited drafts are not proof of automatic writing quality.
 
-## Scope and remaining limits
-
-The original brownout/low boot-strap event is retained as an unresolved power/startup-source investigation. This update improves recovery and USB initialization; it does not establish that supply transients cannot recur. No brownout protection or application watchdog was disabled. One board's recovery is not long-term or all-board qualification.
-
-US$49 is the hardware price. Type is free/open source; recognition and optional text services need preparation and separate usage charges. This release supplies no ready-to-use official cloud account or allowance. RC1 remains a prerelease. Strong background-speech separation, remaining physical/global-input combinations and local-translation meaning quality retain their stated limits. AI software feedback is not a purchase or physical acceptance.
+US$49 is the hardware price. Type is free/open source; service preparation and usage charges are separate. No ready-to-use official cloud account or allowance is included. RC1 remains a prerelease. Strong background-speech isolation, remaining physical/global scopes and the original brownout trigger remain unresolved.
 
 ## File identity
 
-- Type source: `63c0db7463a3754884b4856425ed23033f4bf84f` · `build-source/type205-20261027`
-- MSI: 299778048 bytes · SHA256 `cd2aadb8eb611b3da45af07d1c4851be5d7d42e76b054af89e8c4ca342a2223e`
-- Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · `build-source/firmware38-20261027` · runtime `094f5a60049f59f4`
+- Type source: `1d4e7978f52fd5fd0c1f4b0d57437cc91833d3c1` · `build-source/type208-20261027`
+- MSI: 299790336 bytes · SHA256 `3d4dc7ab0d337a0d7be7946ea6791c70674773c249830eea339f7e1eb25d1d56`
+- Native EXE SHA256: `5ce4eb64a20bbe35f939cd6664659e481a84dda9df11819f6cbca188345f0786`
+- Native DLL SHA256: `c747a6d40dc762aae678e23a87b83ed565b8e374916f1c50d605eb2403aa731b`
+- Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`
 - ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`
-- Firmware binary: SHA256 `c16fba3faeb6c7998a9012cb85e639655f8c7c3f95e348081e810ea90eba4e98`
 
 ## 中文说明
 
-本次配套更新处理刷完后未真正启动、USB复位后接口异常的问题。有线刷机先逐段校验，再依据真实启动状态选择复位，并等待同一设备的应用回包；固件在开机早期对USB执行一次明确断开和重新初始化。当前板的正常界面有线刷机、蓝牙OTA、重连和按键/设置保留已有实测。原欠压触发源仍在排查，未关闭保护，也未宣称长期或全部硬件验收完成。
-
-
-205另修可选本地识别自动语言判断：复用同一模型权重先识别输入语言，再正常转写。同中英文原件在实际MSI中通过；显式语言保留，未增加模型或云服务。设备未报告的唤醒能力如实标未知，不再代填固定旧板按键。此为应用更新，固件38及原恢复证据保留，其它实物、多语言和长期范围不据此算通过。
+电脑麦克风提问会显示实时问题预览，并在前缀音频送达后正确标记就绪，避免健康连接在结束时误等待并重传。历史刷新按钮位置固定，清空须应用内明确确认且默认取消。完成的回答可直接保存为本机成稿，从「历史 → 已保存成稿」回找；原文和当前正文均为该回答，不额外带入私密选区。仅允许保存当前原生会话中已完成的回答，前端伪造内容会被拒绝。保留205本地识别修复和原固件38，无需重刷；普通MSI不包含隔离合成输入适配器。合成语音和AI体验不能代替真人收音、外部输入、实体长期或成交；答案与译义仍需核对，原22类剩余验收和欠压触发源继续保留。
