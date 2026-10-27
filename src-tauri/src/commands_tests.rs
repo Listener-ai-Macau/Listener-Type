@@ -2919,11 +2919,8 @@ fn diagnostic_package_includes_ble_wake_recovery_without_sensitive_text() {
     let value = serde_json::to_value(&package).expect("serialize diagnostic package");
 
     assert_eq!(value["schemaVersion"], 3);
-    assert_eq!(value["firmware"]["wakePolicy"]["policy"], "key4_only");
-    assert_eq!(
-        value["firmware"]["wakePolicy"]["voiceKeyDeepSleepWake"],
-        false
-    );
+    assert_eq!(value["firmware"]["wakePolicy"]["policy"], "not_reported");
+    assert!(value["firmware"]["wakePolicy"]["voiceKeyDeepSleepWake"].is_null());
     assert!(value["ble"]["reconnectAttempts"].is_number());
     assert!(value["ble"]["notifySubscriptionState"].is_string());
     assert!(value["ble"]["backgroundListenerGeneration"].is_number());
@@ -2948,7 +2945,7 @@ fn diagnostic_package_includes_ble_wake_recovery_without_sensitive_text() {
         value["ble"]["wakeRecovery"]["firmwareWakePolicy"]["readiness"]
             .as_str()
             .unwrap_or_default()
-            .contains("voice_key_cannot_wake")
+            .contains("board_wake_capability_not_reported")
     );
     assert_eq!(value["privacy"]["excludesRawTranscripts"], true);
     assert_eq!(value["privacy"]["excludesApiKeyValues"], true);

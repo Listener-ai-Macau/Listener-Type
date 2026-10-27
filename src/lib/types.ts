@@ -96,7 +96,7 @@ export interface FirmwareWakePolicySnapshot {
   policy: string;
   wakeCapableKeys: string;
   voiceKey: string;
-  voiceKeyDeepSleepWake: boolean;
+  voiceKeyDeepSleepWake: boolean | null;
   readiness: string;
   source: string;
 }

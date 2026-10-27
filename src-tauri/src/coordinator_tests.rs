@@ -2398,9 +2398,9 @@ fn embedded_ble_wake_recovery_snapshot_guides_idle_recovery() {
     );
     let failed = coordinator.embedded_ble_wake_recovery_snapshot();
     assert_eq!(failed.status, EmbeddedBleWakeRecoveryStatus::NeedsWakeKey);
-    assert!(failed.user_guidance.contains("KEY4"));
-    assert_eq!(failed.firmware_wake_policy.policy, "key4_only");
-    assert!(!failed.firmware_wake_policy.voice_key_deep_sleep_wake);
+    assert!(failed.user_guidance.contains("设备开机/唤醒键"));
+    assert_eq!(failed.firmware_wake_policy.policy, "not_reported");
+    assert_eq!(failed.firmware_wake_policy.voice_key_deep_sleep_wake, None);
 
     record_embedded_ble_notify_ready(&coordinator.inner);
     let ready = coordinator.embedded_ble_wake_recovery_snapshot();

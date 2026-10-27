@@ -1400,7 +1400,7 @@ fn record_embedded_ble_reconnect_attempt(inner: &Arc<Inner>, reason: &str) {
     let mut snapshot = inner.embedded_ble_wake_recovery.lock();
     snapshot.status = EmbeddedBleWakeRecoveryStatus::Reconnecting;
     snapshot.user_guidance =
-        "正在重连 Listener BLE 并恢复音频 notify；如果设备离线，请按 KEY4/唤醒键。".to_string();
+        "正在重连 Listener BLE 并恢复音频 notify；如果设备离线，请短按设备开机/唤醒键。".to_string();
     snapshot.reconnect_attempts = snapshot.reconnect_attempts.saturating_add(1);
     snapshot.consecutive_reconnect_failures =
         snapshot.consecutive_reconnect_failures.saturating_add(1);
@@ -1610,7 +1610,7 @@ fn embedded_ble_wake_guidance_for_error_with_power(err: &str, usb_powered: Optio
         crate::embedded_ble::BleFailureKind::LowPowerIdleDisconnect
             if embedded_ble_usb_power_allows_low_power_idle(usb_powered) =>
         {
-            return "Listener BLE 因离线状态断开，正在重连音频 notify；若设备离线，请按 KEY4/唤醒键。".to_string();
+            return "Listener BLE 因离线状态断开，正在重连音频 notify；若设备离线，请短按设备开机/唤醒键。".to_string();
         }
         crate::embedded_ble::BleFailureKind::LowPowerIdleDisconnect => {
             return "Listener BLE 正在重连音频 notify；当前未确认处于离线状态场景，若持续失败请重新连接或导出诊断。".to_string();
@@ -1637,7 +1637,7 @@ fn embedded_ble_wake_guidance_for_error_with_power(err: &str, usb_powered: Optio
     if is_embedded_ble_wake_or_sleep_error(err) {
         return EMBEDDED_BLE_WAKE_GUIDANCE_MESSAGE.to_string();
     }
-    "Listener BLE 暂时不可用。请重新连接设备，或按 KEY4/唤醒键后重试；仍失败可导出诊断。"
+    "Listener BLE 暂时不可用。请重新连接设备，或短按设备开机/唤醒键后重试；仍失败可导出诊断。"
         .to_string()
 }
 

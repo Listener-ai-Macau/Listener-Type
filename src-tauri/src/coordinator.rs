@@ -128,7 +128,7 @@ const EMBEDDED_BLE_POWER_CYCLE_AUDIO_RECOVERY_TARGET: Duration = Duration::from_
 const DEVICE_KEY_BLE_PENDING_ACTION_TTL: Duration = Duration::from_secs(15);
 const EXTRA_ASR_HOTWORDS_ENV: &str = "LISTENER_TYPE_EXTRA_ASR_HOTWORDS";
 const EMBEDDED_BLE_WAKE_GUIDANCE_MESSAGE: &str =
-    "Listener BLE 正在重连。若设备处于离线状态，请按 KEY4/唤醒键，再重试；仍失败可导出诊断。";
+    "Listener BLE 正在重连。若设备处于离线状态，请短按设备开机/唤醒键，再重试；仍失败可导出诊断。";
 
 #[cfg(test)]
 use dictation::dictation_error_code;
@@ -1048,7 +1048,7 @@ pub struct FirmwareWakePolicySnapshot {
     pub policy: &'static str,
     pub wake_capable_keys: &'static str,
     pub voice_key: &'static str,
-    pub voice_key_deep_sleep_wake: bool,
+    pub voice_key_deep_sleep_wake: Option<bool>,
     pub readiness: &'static str,
     pub source: &'static str,
 }
@@ -1058,7 +1058,7 @@ impl Default for EmbeddedBleWakeRecoverySnapshot {
         Self {
             status: EmbeddedBleWakeRecoveryStatus::Idle,
             user_guidance:
-                "Listener BLE 空闲。按设备语音键开始录音；若设备离线，请先按 KEY4/唤醒键。"
+                "Listener BLE 空闲。按设备语音键开始录音；若设备离线，请先短按设备开机/唤醒键。"
                     .to_string(),
             recent_disconnect_reason: None,
             reconnect_attempts: 0,
@@ -1066,7 +1066,7 @@ impl Default for EmbeddedBleWakeRecoverySnapshot {
             notify_subscription_state: EmbeddedBleNotifySubscriptionState::Unknown,
             usb_powered: None,
             battery_percent: None,
-            firmware_wake_policy: FirmwareWakePolicySnapshot::current_v1(),
+            firmware_wake_policy: FirmwareWakePolicySnapshot::unreported(),
             last_attempt_at: None,
             last_ready_at: None,
         }
@@ -1074,14 +1074,16 @@ impl Default for EmbeddedBleWakeRecoverySnapshot {
 }
 
 impl FirmwareWakePolicySnapshot {
-    fn current_v1() -> Self {
+    fn unreported() -> Self {
         Self {
-            policy: "key4_only",
-            wake_capable_keys: "KEY4/GPIO21",
-            voice_key: "GPIO35",
-            voice_key_deep_sleep_wake: false,
-            readiness: "voice_key_cannot_wake_from_deep_sleep_on_current_v1_board",
-            source: "Firmware 1.1 ~POWER:STATUS wake-policy contract",
+            // The BLE settings/OTA snapshots do not report a board wake-pin
+            // contract. A connected device is not evidence of the old V1 pins.
+            policy: "not_reported",
+            wake_capable_keys: "not_reported",
+            voice_key: "not_reported",
+            voice_key_deep_sleep_wake: None,
+            readiness: "board_wake_capability_not_reported_by_firmware",
+            source: "not_reported_by_current_ble_snapshot",
         }
     }
 }

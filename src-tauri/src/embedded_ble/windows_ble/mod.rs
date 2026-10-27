@@ -2090,13 +2090,20 @@ pub(super) fn parse_device_settings_status_line(
         ));
     }
     let fields = parse_device_settings_fields(line);
+    let external_power_present = parse_bool_field(&fields, "external_power_present")?;
+    let usb_power_present = parse_bool_field(&fields, "usb_power_present")?;
+    let charging = parse_bool_field(&fields, "charging")?;
+    let charge_full = parse_bool_field(&fields, "charge_full")?;
+    // Both serial and compact BLE snapshots carry these flags. Compact BLE
+    // intentionally omits the redundant active_power string.
+    let externally_powered = external_power_present || usb_power_present || charging || charge_full;
     let default_brightness = crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT;
     let plugged_brightness_percent =
         optional_u8_field(&fields, "plugged_brightness").unwrap_or(default_brightness);
     let battery_brightness_percent =
         optional_u8_field(&fields, "battery_brightness").unwrap_or(plugged_brightness_percent);
     let brightness_percent = optional_u8_field(&fields, "active_brightness").unwrap_or_else(|| {
-        if require_field(&fields, "active_power").unwrap_or("battery") == "external" {
+        if externally_powered {
             plugged_brightness_percent
         } else {
             battery_brightness_percent
@@ -2162,7 +2169,7 @@ pub(super) fn parse_device_settings_status_line(
         .map(auto_shutdown_minutes_from_ms)
         .unwrap_or(legacy_auto_shutdown_minutes);
     let low_power_idle_minutes =
-        if require_field(&fields, "active_power").unwrap_or("battery") == "external" {
+        if externally_powered {
             plugged_low_power_idle_minutes
         } else {
             battery_low_power_idle_minutes
@@ -2189,10 +2196,10 @@ pub(super) fn parse_device_settings_status_line(
         knob_rotation_action: require_field(&fields, "knob_rotation")?.to_string(),
         ble_name: require_field(&fields, "ble_name")?.to_string(),
         ble_name_pending_restart: parse_bool_field(&fields, "ble_name_pending")?,
-        external_power_present: parse_bool_field(&fields, "external_power_present")?,
-        usb_power_present: parse_bool_field(&fields, "usb_power_present")?,
-        charging: parse_bool_field(&fields, "charging")?,
-        charge_full: parse_bool_field(&fields, "charge_full")?,
+        external_power_present,
+        usb_power_present,
+        charging,
+        charge_full,
         raw_line: line.trim().to_string(),
     })
 }

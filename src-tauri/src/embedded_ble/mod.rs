@@ -417,13 +417,13 @@ fn listener_ble_failure_user_action(kind: BleFailureKind) -> &'static str {
             "Wake the Listener device, confirm it is paired, then retry or re-pair."
         }
         BleFailureKind::DeviceAsleep => {
-            "Press KEY4 or the wake key, wait for the device to return online, then retry."
+            "Briefly press the device power/wake button, wait for the device to return online, then retry."
         }
         BleFailureKind::MissingPairing => {
             "Pair the Listener device in Windows Bluetooth, then return and refresh Listener BLE."
         }
         BleFailureKind::LowPowerIdleDisconnect => {
-            "Listener BLE entered offline state; retrying will reconnect, or press KEY4 if it is offline."
+            "Listener BLE entered offline state; retrying will reconnect, or briefly press the device power/wake button if it is offline."
         }
         BleFailureKind::PairedButDisconnected => {
             "Wait for automatic reconnect; press the wake key if it stays disconnected."

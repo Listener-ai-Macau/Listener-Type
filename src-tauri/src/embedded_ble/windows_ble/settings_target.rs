@@ -507,7 +507,8 @@ mod selected_settings_tests {
     }
     #[test]
     fn complete_bluetooth_snapshot_matches_usb_fields() {
-        let s = parse_selected_ble_settings("schema=listener.device_settings.v1;settings_revision=7;snapshot=1;ls=80;lk=20;l11=50;le=0;pl=180000;bl=60000;pe=1;pa=0;ba=600000;vs=1;ve=1;kn=system_volume;bn=B;bp=0;ep=1;up=1;cg=0;cf=0").unwrap();
+        let wire = "schema=listener.device_settings.v1;settings_revision=7;snapshot=1;ls=80;lk=20;l11=50;le=0;pl=180000;bl=60000;pe=1;pa=0;ba=600000;vs=1;ve=1;kn=system_volume;bn=B;bp=0;ep=1;up=1;cg=0;cf=0";
+        let s = parse_selected_ble_settings(wire).unwrap();
         assert_eq!(
             (
                 s.ble_name.as_str(),
@@ -518,6 +519,22 @@ mod selected_settings_tests {
             ("B", 7, 3, 10)
         );
         assert!(s.voice_auto_start_enabled && s.usb_power_present);
+        assert_eq!(s.low_power_idle_minutes, 3);
+        let serial = parse_device_settings_status_line(
+            &format!("{} active_power=external", s.raw_line),
+        ).unwrap();
+        assert_eq!(s.low_power_idle_minutes, serial.low_power_idle_minutes);
+
+        let battery_wire = wire.replace(";ep=1;up=1;", ";ep=0;up=0;");
+        let battery = parse_selected_ble_settings(&battery_wire).unwrap();
+        assert_eq!(battery.low_power_idle_minutes, 1);
+        assert_eq!(battery.plugged_low_power_idle_minutes, 3);
+        assert_eq!(battery.battery_low_power_idle_minutes, 1);
+
+        let charging = parse_selected_ble_settings(
+            &battery_wire.replace(";cg=0;", ";cg=1;"),
+        ).unwrap();
+        assert_eq!(charging.low_power_idle_minutes, 3);
     }
 }
 
