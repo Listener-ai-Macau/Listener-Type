@@ -3,9 +3,10 @@ import { useTranslation } from 'react-i18next';
 import { saveTextDraft, type SavedTextDraft } from './ipc';
 
 /** Shared explicit-save ownership, including retries after an uncertain reply. */
-export function useTextDraftSave({ name, original, text, disabled, onBusy, onSaved, onSavedRecord, onUnsaved }: {
+export function useTextDraftSave({ name, original, text, disabled, onBusy, onSaved, onSavedRecord, onUnsaved, write = saveTextDraft }: {
   name: string; original: string; text: string; disabled: boolean; onBusy: (busy: boolean) => void;
   onSaved?: (text: string) => void; onSavedRecord?: (record: SavedTextDraft) => void; onUnsaved?: () => void;
+  write?: typeof saveTextDraft;
 }) {
   const { t } = useTranslation();
   const signature = JSON.stringify([name, original, text]);
@@ -20,7 +21,7 @@ export function useTextDraftSave({ name, original, text, disabled, onBusy, onSav
     if (request.current?.signature !== signature) request.current = { signature, id: crypto.randomUUID() };
     running.current = true; setSaving(true); setError(''); onBusy(true);
     try {
-      const value = await saveTextDraft(request.current.id, Array.from(name).slice(0, 80).join(''), original, text);
+      const value = await write(request.current.id, Array.from(name).slice(0, 80).join(''), original, text);
       if (alive.current) { setSaved(signature); setSavedId(value.id); onSaved?.(text); onSavedRecord?.(value); }
     } catch (cause) {
       if (alive.current) setError(t(String(cause).includes('saved_draft_limit') ? 'textDraft.full' : 'textDraft.failed'));

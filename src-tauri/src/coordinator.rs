@@ -1938,6 +1938,13 @@ impl Coordinator {
     pub fn prefs(&self) -> &PreferencesStore {
         &self.inner.prefs
     }
+    pub fn can_save_completed_question_answer(&self, answer: &str) -> bool {
+        let state = self.inner.qa_state.lock();
+        state.panel_visible && !answer.trim().is_empty()
+            && state.messages.iter().any(|message| {
+                message.role == "assistant" && message.content == answer
+            })
+    }
     pub fn style_packs(&self) -> &StylePackStore {
         &self.inner.style_packs
     }

@@ -1426,6 +1426,12 @@ export function saveTextDraft(id: string, name: string, original: string, text: 
     mockTextDrafts.unshift(value);return structuredClone(value);
   });
 }
+export function saveQuestionAnswerDraft(id: string, name: string, text: string): Promise<SavedTextDraft> {
+  if (!isTauri) return saveTextDraft(id, name, text, text);
+  return invokeOrMock<SavedTextDraft>('save_question_answer_draft', { id, name, text }, () => {
+    throw Error('saved_draft_native_required');
+  });
+}
 export function deleteSavedTextDraft(id: string): Promise<void> {
   return invokeOrMock('delete_saved_text_draft', {id}, () => {mockTextDrafts = mockTextDrafts.filter(d=>d.id!==id);});
 }

@@ -1053,6 +1053,7 @@ pub fn run() {
             commands::delete_local_device_layout,
             commands::list_saved_text_drafts,
             commands::save_text_draft,
+            commands::save_question_answer_draft,
             commands::delete_saved_text_draft,
             commands::rename_saved_text_draft,
             commands::insert_style_trial_result,

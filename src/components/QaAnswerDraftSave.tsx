@@ -1,9 +1,11 @@
 import { useTranslation } from 'react-i18next';
-import { isTauri } from '../lib/ipc';
+import { isTauri, saveQuestionAnswerDraft } from '../lib/ipc';
 import { useTextDraftSave } from '../lib/useTextDraftSave';
 import { Btn } from '../pages/_atoms';
 
 const noBusy = () => undefined;
+const saveAnswer = (id: string, name: string, _original: string, text: string) =>
+  saveQuestionAnswerDraft(id, name, text);
 
 /** A click saves this completed answer locally; no clipboard or service call.
  * Keep naming/editing in the ordinary main window, not in the nonactivating
@@ -16,7 +18,7 @@ export function QaAnswerDraftSave({ question, answer }: { question: string; answ
   // The draft's original is the answer before future edits, not a possibly
   // private selection embedded in the question's context.
   const saved = useTextDraftSave({ name, original: answer, text: answer,
-    disabled: !answer.trim(), onBusy: noBusy });
+    disabled: !answer.trim(), onBusy: noBusy, write: saveAnswer });
   return <div data-qa-save-draft style={{ display: 'grid', gap: 4, justifyItems: 'start' }}>
     <Btn size="sm" variant="ghost" disabled={saved.saving || saved.isSaved || !answer.trim()}
       onClick={() => void saved.save()}>

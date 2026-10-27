@@ -281,6 +281,30 @@ mod tests {
     use crate::coordinator::Coordinator;
 
     #[test]
+    fn answer_draft_requires_a_completed_answer_in_the_visible_conversation() {
+        let c = Coordinator::new();
+        assert!(!c.can_save_completed_question_answer("streaming fragment"));
+        {
+            let mut qa = c.inner.qa_state.lock();
+            qa.panel_visible = true;
+            qa.append_question("Do not save this private selection as an answer");
+        }
+        assert!(!c.can_save_completed_question_answer("Do not save this private selection as an answer"));
+        assert!(!c.can_save_completed_question_answer("streaming fragment"));
+        c.inner.qa_state.lock().append_answer("Completed answer\n**Keep formatting**");
+        assert!(c.can_save_completed_question_answer("Completed answer\n**Keep formatting**"));
+        assert!(!c.can_save_completed_question_answer("Completed answer"));
+        assert!(!c.can_save_completed_question_answer(" "));
+        c.inner.qa_state.lock().panel_visible = false;
+        assert!(!c.can_save_completed_question_answer("Completed answer\n**Keep formatting**"));
+        {
+            let mut qa = c.inner.qa_state.lock();
+            qa.panel_visible = true; qa.messages.clear();
+        }
+        assert!(!c.can_save_completed_question_answer("Completed answer\n**Keep formatting**"));
+    }
+
+    #[test]
     fn microphone_question_flushes_prefix_before_becoming_ready() {
         use crate::asr::volcengine::VolcengineCredentials;
         let bridge = super::super::DeferredAsrBridge::new();
