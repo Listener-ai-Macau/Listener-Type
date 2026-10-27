@@ -9,7 +9,7 @@ use crate::coordinator_state::{
 };
 use crate::correction::apply_correction_rules;
 use crate::types::{
-    ChineseScriptPreference, HotkeyMode, InsertStatus, OutputLanguagePreference, PostDictationKey,
+    HotkeyMode, InsertStatus, PostDictationKey,
     ShortcutBinding, UserPreferences,
 };
 

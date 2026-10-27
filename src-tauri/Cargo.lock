@@ -3379,6 +3379,7 @@ dependencies = [
  "raw-window-handle",
  "rdev",
  "reqwest 0.12.28",
+ "rustfft",
  "serde",
  "serde_json",
  "serialport",

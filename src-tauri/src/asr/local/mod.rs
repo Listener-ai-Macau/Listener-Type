@@ -9,6 +9,8 @@ pub mod foundry;
 pub mod foundry_native;
 pub mod foundry_provider;
 pub mod foundry_runtime;
+#[cfg(target_os = "windows")]
+mod foundry_language;
 mod local_provider;
 pub mod models;
 pub mod paraformer;

@@ -97,7 +97,9 @@ objc2-app-kit = "0.2"
 libc = "0.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "load-dynamic", "api-24"] }
+# Foundry ships ORT 1.23; the 1.23 C API also works with the newer speaker runtime.
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "load-dynamic", "api-23"] }
+rustfft = "=6.4.1"
 bzip2 = "0.4"
 foundry-local-sdk = { version = "1.1.0", features = ["winml"] }
 libloading = "0.8"

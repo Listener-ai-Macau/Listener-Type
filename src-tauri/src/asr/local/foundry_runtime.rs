@@ -155,20 +155,8 @@ mod imp {
                 .ensure_loaded_locked(alias, runtime_source, Arc::new(|_| {}))
                 .await?
                 .model;
-            let mut client = model.create_audio_client();
-            if let Some(language_hint) = normalized_language_hint(language_hint) {
-                client = client.language(language_hint);
-            }
-            let result = tokio::time::timeout(audio_timeout, client.transcribe(audio_path))
-                .await
-                .with_context(|| {
-                    format!(
-                        "transcribe audio with Foundry model {alias} timed out after {} seconds",
-                        audio_timeout.as_secs()
-                    )
-                })?
-                .with_context(|| format!("transcribe audio with Foundry model {alias}"))?;
-            Ok(result.text)
+            transcribe_loaded(&model, language_hint, audio_path, audio_timeout).await
+                .with_context(|| format!("transcribe audio with Foundry model {alias}"))
         }
 
         pub async fn ensure_cached_loaded(&self, alias: &str) -> Result<String> {
@@ -185,20 +173,8 @@ mod imp {
         ) -> Result<String> {
             let _lifecycle = self.lifecycle.lock().await;
             let model = self.ensure_cached_loaded_locked(alias).await?.model;
-            let mut client = model.create_audio_client();
-            if let Some(language_hint) = normalized_language_hint(language_hint) {
-                client = client.language(language_hint);
-            }
-            let result = tokio::time::timeout(audio_timeout, client.transcribe(audio_path))
-                .await
-                .with_context(|| {
-                    format!(
-                        "transcribe cached audio with Foundry model {alias} timed out after {} seconds",
-                        audio_timeout.as_secs()
-                    )
-                })?
-                .with_context(|| format!("transcribe cached audio with Foundry model {alias}"))?;
-            Ok(result.text)
+            transcribe_loaded(&model, language_hint, audio_path, audio_timeout).await
+                .with_context(|| format!("transcribe cached audio with Foundry model {alias}"))
         }
 
         pub async fn release_now(&self) -> Result<()> {
@@ -570,6 +546,30 @@ mod imp {
             }
             Ok(())
         }
+    }
+
+    async fn transcribe_loaded(model: &Model, language_hint: Option<&str>,
+        audio_path: &Path, audio_timeout: std::time::Duration) -> Result<String> {
+        tokio::time::timeout(audio_timeout, async {
+            let language = if let Some(explicit) = normalized_language_hint(language_hint) {
+                explicit
+            } else {
+                // Resolve the SDK's actual selected variant, never a guessed
+                // model name or output-language preference. Reuse its weights.
+                let root = model.path().await.context("resolve cached Whisper language assets")?;
+                let dll = foundry_native::runtime_dir()?.join("onnxruntime.dll");
+                let path = audio_path.to_path_buf();
+                let detected = tokio::task::spawn_blocking(move ||
+                    super::super::foundry_language::detect(&root, &dll, &path, audio_timeout))
+                    .await.context("join automatic Whisper language detection")??;
+                log::info!("[foundry-asr] detected input language={} probability={:.4}",
+                    detected.language, detected.probability);
+                detected.language
+            };
+            let result = model.create_audio_client().language(language).transcribe(audio_path).await?;
+            Ok(result.text)
+        }).await.with_context(|| format!("Foundry language detection/transcription timed out after {} seconds",
+            audio_timeout.as_secs()))?
     }
 
     fn model_display_label(alias: &str) -> String {

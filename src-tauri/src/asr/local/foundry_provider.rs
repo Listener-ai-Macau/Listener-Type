@@ -455,6 +455,39 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[tokio::test]
+    #[ignore = "requires explicitly configured private Foundry cache and public English/Chinese fixtures; no download"]
+    async fn automatic_local_asr_preserves_both_fixture_languages() {
+        let runtime = std::sync::Arc::new(super::FoundryLocalRuntime::new());
+        let mut completed = Vec::new();
+        for (var, expected, explicit) in [
+            ("LISTENER_FOUNDRY_LANGUAGE_EN", vec!["sam", "thursday", "budget", "50"], "en"),
+            ("LISTENER_FOUNDRY_LANGUAGE_ZH", vec!["明天", "九点", "会议资料", "50"], "zh"),
+        ] {
+            let wav = std::fs::read(std::env::var_os(var).expect("public fixture path")).unwrap();
+            let pcm = denzic_audio_v1_core::read_wav_pcm16le(&wav).unwrap();
+            for hint in [None, Some(explicit)] {
+                let started = std::time::Instant::now();
+                // Same production padding, selected SDK model, automatic
+                // detection and AudioClient used by normal local dictation.
+                let result = super::transcribe_cached_pcm(std::sync::Arc::clone(&runtime),
+                    "whisper-tiny", hint, &pcm, std::time::Duration::from_secs(30)).await.unwrap();
+                println!("local ASR {explicit} hint={hint:?} elapsed={:?}: {}", started.elapsed(), result.text);
+                completed.push((result.text, expected.clone()));
+            }
+        }
+        runtime.release_now().await.unwrap();
+        for (text, expected) in completed {
+            // Compare facts independently of equivalent script/digit rendering;
+            // the production coordinator applies this same script conversion.
+            let text = crate::coordinator::apply_chinese_script_preference(&text,
+                crate::types::ChineseScriptPreference::Simplified).to_lowercase()
+                .replace("fifty", "50").replace("五十", "50").replace("9点", "九点");
+            for fragment in expected { assert!(text.contains(fragment), "missing {fragment}: {text}"); }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[tokio::test]
     #[ignore = "requires cached Foundry Local Whisper and consented local WAV fixtures"]
     async fn cached_local_wake_confirmation_replays_positive_and_negative_fixtures() {
         let positive_path =
