@@ -8,6 +8,7 @@ import type { StylePack } from '../lib/types';
 import { Btn } from '../pages/_atoms';
 import { StyleTextTrial } from './StyleTextTrial';
 import { translationTrialPack } from '../lib/translationTrial';
+import { SavedTextDraftsDialog } from './SavedTextDraftsDialog';
 
 /** A text workspace, not a style activation or a shortcut to pack management. */
 export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTranslationTarget = '', inputOriginName }: {
@@ -21,6 +22,9 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTran
   const [packs, setPacks] = useState<StylePack[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [translationTarget, setTranslationTarget] = useState(initialTranslationTarget);
+  const [originName, setOriginName] = useState(inputOriginName);
+  const [library, setLibrary] = useState<{ id: string; onUnavailable: (id: string) => void } | null>(null);
+  const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [adding, setAdding] = useState<'list' | 'concise' | 'draft' | null>(null);
@@ -104,7 +108,7 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTran
   };
   const displayed = translationTarget ? translationTrialPack(translationTarget,
     t('translation.trialName', { language: translationTarget }), t('translation.tryTextHint')) : selected;
-  return <>{displayed ? <StyleTextTrial pack={displayed} packs={translationTarget ? undefined : packs}
+  return <>{displayed ? <StyleTextTrial key={workspaceRevision} pack={displayed} packs={translationTarget ? undefined : packs}
     onSelectPack={translationTarget ? undefined : setSelectedId} draft={draft} onDraftChange={onDraftChange}
     translationTarget={translationTarget || undefined} onTranslationTargetChange={setTranslationTarget}
     draftingChoice={!translationTarget && selected && !isMessageDraftStyle(selected) ? {
@@ -118,8 +122,13 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTran
       error: addFailed === 'list' ? t('style.everydayList.failed') : '', onChoose: () => void chooseEverydayList(),
     } : undefined}
     prepareShorter={translationTarget ? undefined : prepareConcise}
-    inputOriginName={inputOriginName} onClose={onClose} /> :
+    inputOriginName={originName} suspended={library !== null} onOpenSavedDraft={(id,onUnavailable)=>setLibrary({id,onUnavailable})} onClose={onClose} /> :
     <TrialLoading failed={failed} onRetry={() => setAttempt(value => value + 1)} onClose={onClose} title={t('overview.tryTypedText')} />}
+    {library !== null && <SavedTextDraftsDialog initialDraftId={library.id} onUnavailable={library.onUnavailable}
+      onClose={() => setLibrary(null)} onContinueDraft={value => {
+        setOriginName(value.name); onDraftChange(value.text); setTranslationTarget('');
+        setWorkspaceRevision(current => current + 1); setLibrary(null);
+      }} />}
   </>;
 }
 

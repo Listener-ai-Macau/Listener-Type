@@ -15,6 +15,7 @@ import { SUPPORTED_LANGUAGES } from '../lib/types';
 import { LocalTranslationSetup } from './LocalTranslationSetup';
 import { canSuggestChineseSource, localTranslationErrorKey, localTranslationKey, translationLanguageLabel } from '../lib/localTranslation';
 import type { TranslationEngine, LocalTranslationReadiness } from '../lib/localTranslation';
+import { SavedTextDraftsDialog } from './SavedTextDraftsDialog';
 
 function withDraftOriginName(origin: string, suffix: string): string {
   const room = Math.max(0, 80 - Array.from(suffix).length - 3);
@@ -22,7 +23,7 @@ function withDraftOriginName(origin: string, suffix: string): string {
   return prefix ? `${prefix} · ${suffix}` : suffix;
 }
 
-export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, draftingChoice, prepareShorter, translationTarget, onTranslationTargetChange, initialTranslationEngine, initialTranslationSource, inputOriginName, draft, onDraftChange, onClose }: {
+export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, draftingChoice, prepareShorter, translationTarget, onTranslationTargetChange, initialTranslationEngine, initialTranslationSource, inputOriginName, suspended = false, onOpenSavedDraft, draft, onDraftChange, onClose }: {
   pack: StylePack;
   packs?: StylePack[];
   onSelectPack?: (id: string) => void;
@@ -34,6 +35,8 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   initialTranslationEngine?: TranslationEngine;
   initialTranslationSource?: string;
   inputOriginName?: string;
+  suspended?: boolean;
+  onOpenSavedDraft?: (id: string, onUnavailable: (id: string) => void) => void;
   draft: string;
   onDraftChange: (text: string) => void;
   onClose: () => void;
@@ -41,6 +44,8 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const { t, i18n } = useTranslation();
   const workspaceId = useId();
   const [draftNameEdit, setDraftNameEdit] = useState<string | null>(null);
+  const [localLibrary, setLocalLibrary] = useState<{ id: string; onUnavailable: (id: string) => void } | null>(null);
+  const modalSuspended = suspended || localLibrary !== null;
   const [translationOriginName, setTranslationOriginName] = useState(inputOriginName ?? '');
   const [translationEngine, setTranslationEngine] = useState<TranslationEngine>(initialTranslationEngine ?? 'local');
   const [translationSource, setTranslationSource] = useState(initialTranslationSource ?? '');
@@ -58,6 +63,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
     .filter(example => example.input.trim() && example.output.trim())
     .map(example => stylePackExamplePresentation(pack, example, t));
   const dialog = useRef<HTMLDialogElement>(null);
+  const dialogScroll = useRef(0);
   const resultSection = useRef<HTMLElement>(null);
   const generation = useRef(0);
   const running = useRef(false);
@@ -164,11 +170,20 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
 
   useEffect(() => {
     const element = dialog.current;
-    element?.showModal();
+    if (!modalSuspended) {
+      element?.showModal();
+      if (element) element.scrollTop = dialogScroll.current;
+    }
+    return () => {
+      if (element?.open) dialogScroll.current = element.scrollTop;
+      element?.close();
+    };
+  }, [modalSuspended]);
+
+  useEffect(() => {
     return () => {
       generation.current += 1;
       if (deliveryRequest.current) void cancelStyleTrialInsert(deliveryRequest.current).catch(() => {});
-      element?.close();
     };
   }, []);
 
@@ -477,7 +492,8 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
             <Btn size="sm" variant="blue" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => void copyResult()}>
               {t(copying ? 'style.trial.copying' : copiedResult === result ? 'style.trial.copied' : 'style.trial.copyResult')}
             </Btn>
-            <SaveTextDraft compact name={savedDraftName} original={draft} text={resultOutput} disabled={copying || delivering || draftNameInvalid} onBusy={setDraftSaving}
+            <SaveTextDraft compact name={savedDraftName} original={draft} text={resultOutput} disabled={pending || copying || delivering || draftNameInvalid || styleChangePending || translationPreparing} onBusy={setDraftSaving}
+              onOpenSaved={(id,onUnavailable)=>{if(onOpenSavedDraft)onOpenSavedDraft(id,onUnavailable);else setLocalLibrary({id,onUnavailable});}}
               onUnsaved={() => setSavedDraftSignature('')}
               onSaved={text => setSavedDraftSignature(JSON.stringify([savedDraftName, draft, text]))} />
             {onTranslationTargetChange && <Btn size="sm" variant="ghost"
@@ -571,6 +587,8 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
     </dialog>
     {providersOpen && <ProviderSettingsDialog kind="text" onClose={() => {
       setProvidersOpen(false); setReadinessAttempt(value => value + 1);
-    }} />}</>
+    }} />}
+    {localLibrary && <SavedTextDraftsDialog initialDraftId={localLibrary.id} onUnavailable={localLibrary.onUnavailable}
+      onClose={()=>setLocalLibrary(null)} />}</>
   );
 }
