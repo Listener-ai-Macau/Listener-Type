@@ -4,7 +4,7 @@ use super::super::CoordinatorState;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -1558,12 +1558,9 @@ pub fn run_wired_firmware_flash_with_progress(
         log.push_str(&format!("Verified {} at 0x{:x}, {} bytes (MD5).\n",
             artifact.file, artifact.offset, artifact.bytes.len()));
     }
-    let usb_pid = flasher.connection().get_usb_pid()
-        .map_err(|err| wired_firmware_error("Failed to identify flash reset transport", &err))?;
-    let mut serial_port = flasher.into_serial();
-    espflash::connection::reset::hard_reset(&mut serial_port, usb_pid)
-        .map_err(|err| wired_firmware_error("Firmware verified but the device did not restart", &err))?;
-    log.push_str("Issued explicit application reset after all written segments verified.\n");
+    // Use the identity of the port actually connected, not an earlier hint.
+    // Keep every checksum above this point: an unverified image must not boot.
+    log.push_str(&restart_verified_wired_application(flasher, &usb_port_info_for(&port))?);
     for artifact in &prepared {
         log.push_str(&format!(
             "Wrote {} ({}) at 0x{:x}, {} bytes",
@@ -1609,6 +1606,104 @@ pub fn run_wired_firmware_flash_with_progress(
         version: loaded.version,
         log: trim_command_output(&log, 24_000),
     })
+}
+
+fn restart_verified_wired_application(
+    mut flasher: Flasher,
+    usb: &UsbPortInfo,
+) -> Result<String, String> {
+    use super::wired_boot_reset::{self, BootReset, RegisterOperation};
+    let native_s3 = flasher.chip() == Chip::Esp32s3 && usb.vid == 0x303a && usb.pid == 0x1001;
+    if !native_s3 {
+        let pid = flasher.connection().get_usb_pid()
+            .map_err(|err| wired_firmware_error("Failed to identify flash reset transport", &err))?;
+        let mut port = flasher.into_serial();
+        espflash::connection::reset::hard_reset(&mut port, pid)
+            .map_err(|err| wired_firmware_error("Firmware verified but the device did not restart", &err))?;
+        return Ok("Issued application reset after all written segments verified.\n".into());
+    }
+    let serial = usb.serial_number.as_deref().filter(|s| !s.is_empty())
+        .ok_or("Firmware verified, but the native USB identity is unavailable; restart was not issued.")?;
+    let mut io = |operation| match operation {
+        RegisterOperation::Read(address) => flasher.connection().read_reg(address)
+            .map_err(|e| wired_firmware_error("Failed to read native S3 boot state", &e)),
+        RegisterOperation::Write { address, value, mask } => flasher.connection().write_reg(address, value, Some(mask))
+            .map(|_| 0).map_err(|e| wired_firmware_error("Native S3 reset register request failed", &e)),
+    };
+    let reset = wired_boot_reset::prepare_native_s3_reset(&mut io)?;
+    let control_error = match reset {
+        BootReset::RtcSystem => wired_boot_reset::request_rtc_system_reset(&mut io)?,
+        BootReset::UsbCore => {
+            let mut port = flasher.into_serial();
+            let result = espflash::connection::reset::hard_reset(&mut port, usb.pid).err()
+                .map(|e| wired_firmware_error("Native USB reset response unavailable", &e));
+            drop(port);
+            // Application proof below is required even if the control call succeeded.
+            return confirm_verified_native_boot(serial, reset, result);
+        }
+    };
+    drop(flasher);
+    confirm_verified_native_boot(serial, reset, control_error)
+}
+
+fn confirm_verified_native_boot(
+    serial: &str,
+    reset: super::wired_boot_reset::BootReset,
+    control_error: Option<String>,
+) -> Result<String, String> {
+    use super::wired_boot_reset::application_boot_receipt;
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut last_error = String::new();
+    while Instant::now() < deadline {
+        let candidate = serialport::available_ports().unwrap_or_default().into_iter().find(|p| {
+            matches!(&p.port_type, SerialPortType::UsbPort(info)
+                if info.vid == 0x303a && info.pid == 0x1001 && info.serial_number.as_deref() == Some(serial))
+        });
+        if let Some(candidate) = candidate {
+            match serialport::new(&candidate.port_name, 115_200)
+                .dtr_on_open(false).flow_control(FlowControl::None)
+                .timeout(Duration::from_millis(120)).open() {
+                Ok(mut port) => {
+                    // Setting both lines low never selects download mode. All
+                    // application probes retain this exact OS handle/identity.
+                    let probe = (|| -> Result<bool, String> {
+                        port.write_data_terminal_ready(false).map_err(|e| e.to_string())?;
+                        port.write_request_to_send(false).map_err(|e| e.to_string())?;
+                        port.clear(serialport::ClearBuffer::Input).map_err(|e| e.to_string())?;
+                        port.write_all(b"~BOOT:STATUS\n").map_err(|e| e.to_string())?;
+                        let read_until = (Instant::now() + Duration::from_millis(900)).min(deadline);
+                        let mut pending = Vec::new();
+                        let mut bytes = [0u8; 1024];
+                        while Instant::now() < read_until {
+                            match port.read(&mut bytes) {
+                                Ok(0) => std::thread::sleep(Duration::from_millis(10)),
+                                Ok(count) => for byte in &bytes[..count] {
+                                    if *byte == b'\n' {
+                                        if application_boot_receipt(&String::from_utf8_lossy(&pending)) { return Ok(true); }
+                                        pending.clear();
+                                    } else if pending.len() < 4096 { pending.push(*byte); }
+                                },
+                                Err(e) if matches!(e.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) => {},
+                                Err(e) => return Err(e.to_string()),
+                            }
+                        }
+                        Ok(false)
+                    })();
+                    match probe {
+                        Ok(true) => return Ok(format!(
+                            "Issued {reset:?} reset; same-identity Listener application replied ready.{}\n",
+                            if control_error.is_some() { " USB control response was interrupted by reset; application readiness was independently confirmed." } else { "" })),
+                        Ok(false) => last_error = "no normal-mode application response".into(),
+                        Err(e) => last_error = e,
+                    }
+                }
+                Err(e) => last_error = e.to_string(),
+            }
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Err(format!("Firmware verified, but Listener application startup could not be confirmed on the same USB device. {last_error}{}",
+        control_error.map(|e| format!(" Reset response: {e}")).unwrap_or_default()))
 }
 
 pub fn run_wired_bootloader_repair(
@@ -1868,6 +1963,32 @@ mod boot_probe_tests {
             std::time::Duration::from_millis(3000)
         );
         assert!(FIRMWARE_OTA_POST_READY_FAST_PATH_TIMEOUT < FIRMWARE_OTA_POST_READY_TIMEOUT);
+    }
+
+    #[test]
+    #[ignore = "requires explicit USB serial identity and an idle Listener maintenance window"]
+    fn native_s3_rtc_reset_reaches_same_device_application_without_flash() {
+        use super::*;
+        use crate::commands::device::wired_boot_reset::{self, BootReset, RegisterOperation};
+        let port = std::env::var("LISTENER_WIRED_RESET_TEST_PORT").expect("explicit port required");
+        let serial = std::env::var("LISTENER_WIRED_RESET_TEST_SERIAL").expect("explicit identity required");
+        let usb = usb_port_info_for(&port);
+        assert_eq!((usb.vid, usb.pid), (0x303a, 0x1001));
+        assert_eq!(usb.serial_number.as_deref(), Some(serial.as_str()));
+        let mut flasher = connect_builtin_esp_flasher(&port, 115_200, Chip::Esp32s3,
+            false, true, ResetBeforeOperation::DefaultReset, ResetAfterOperation::NoResetNoStub).unwrap();
+        assert_eq!(flasher.chip(), Chip::Esp32s3);
+        let mut io = |op| match op {
+            RegisterOperation::Read(address) => flasher.connection().read_reg(address).map_err(|e| e.to_string()),
+            RegisterOperation::Write { address, value, mask } => flasher.connection().write_reg(address, value, Some(mask)).map(|_| 0).map_err(|e| e.to_string()),
+        };
+        let sampled_plan = wired_boot_reset::prepare_native_s3_reset(&mut io).unwrap();
+        // Exercise the same full-reset writer on a healthy native S3. This
+        // does not recreate the earlier low strap sample or claim its cause.
+        let control_error = wired_boot_reset::request_rtc_system_reset(&mut io).unwrap();
+        drop(flasher);
+        let receipt = confirm_verified_native_boot(&serial, BootReset::RtcSystem, control_error).unwrap();
+        println!("sampled_plan={sampled_plan:?}; {receipt}");
     }
 }
 
