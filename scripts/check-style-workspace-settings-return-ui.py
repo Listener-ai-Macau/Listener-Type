@@ -54,7 +54,7 @@ with sync_playwright() as pw:
             page.route(re.compile(r'/src/lib/ipc\.ts(?:\?.*)?$'), fixture)
             page.goto(a.url, wait_until='networkidle')
             if entry == 'overview':
-                page.get_by_role('button', name='Try typed text', exact=True).click()
+                page.get_by_role('button', name='Open text workspace', exact=True).click()
             else:
                 page.locator('aside nav').get_by_role('button', name='Tools', exact=True).click()
                 page.locator('[data-tool="style"]').click()
@@ -90,7 +90,7 @@ with sync_playwright() as pw:
                 expect(settings).not_to_be_visible()
                 expect(workspace.get_by_label('Your text', exact=True)).to_have_value(original)
                 expect(workspace.get_by_label('Result text', exact=True)).to_have_value('Processed: '+original if pending else reviewed)
-                assert workspace.get_by_role('combobox').input_value() == 'builtin.light'
+                assert workspace.get_by_role('combobox', name='Trial style', exact=True).input_value() == 'builtin.light'
                 page.wait_for_function('(n)=>window.__returnCalls.filter(x=>x.cmd==="get_style_text_trial_readiness").length>n', arg=before)
                 report['cases'].append({'entry':entry,'pending':pending,'workspaceUnmounted':False,
                     'originalAndSelectedStyleRetained':True,'reviewedResultRetained':True,

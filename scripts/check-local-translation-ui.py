@@ -129,7 +129,7 @@ with sync_playwright() as pw:
   expect(options.locator('summary')).to_contain_text('no translation API fee')
   for width,height in [(1180,900),(900,700)]:
    page.set_viewport_size({'width':width,'height':height})
-   page.locator('dialog[open]').evaluate('(e)=>e.scrollTop=0')
+   page.locator('[data-workspace-scroll]').evaluate('(e)=>e.scrollTop=0')
    expect(page.get_by_role('button',name='Save draft',exact=True)).to_be_in_viewport()
   page.set_viewport_size({'width':520,'height':760})
   assert page.locator('dialog[open]').evaluate('(e)=>e.scrollWidth<=e.clientWidth+1')

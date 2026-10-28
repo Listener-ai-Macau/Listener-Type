@@ -66,6 +66,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
     .filter(example => example.input.trim() && example.output.trim())
     .map(example => stylePackExamplePresentation(pack, example, t));
   const dialog = useRef<HTMLDialogElement>(null);
+  const workspaceScroll = useRef<HTMLDivElement>(null);
   const dialogScroll = useRef(0);
   const resultSection = useRef<HTMLElement>(null);
   const generation = useRef(0);
@@ -130,6 +131,8 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const draftNameInvalid = !savedDraftName || Array.from(savedDraftName).length > 80;
   const savedCurrentDraft = savedDraftSignature === JSON.stringify([savedDraftName, draft, resultOutput]);
   const canProcess = offline ? offlineReady : !!readiness?.available && (!readiness.requiresTextService || readiness.textServiceConfigured);
+  const cloudRetranslationPrepared = !!translationTarget && translationEngine === 'cloud' &&
+    previousStep?.translated && !previousStep.continued && !result && !pending;
 
   useEffect(() => {
     if (localRequest.current) { void cancelLocalTranslation(localRequest.current).catch(() => {}); localRequest.current = null; }
@@ -176,10 +179,10 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
     const element = dialog.current;
     if (!modalSuspended) {
       element?.showModal();
-      if (element) element.scrollTop = dialogScroll.current;
+      if (workspaceScroll.current) workspaceScroll.current.scrollTop = dialogScroll.current;
     }
     return () => {
-      if (element?.open) dialogScroll.current = element.scrollTop;
+      if (element?.open && workspaceScroll.current) dialogScroll.current = workspaceScroll.current.scrollTop;
       element?.close();
     };
   }, [modalSuspended]);
@@ -295,6 +298,9 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
     setDraftNameEdit(null);
     setTranslationEngine('cloud');
     setOptionsOpen(true);
+    // Show the selected service settings while keeping explicit submission in
+    // the fixed action area. Switching routes must not submit a paid request.
+    workspaceScroll.current?.scrollTo({ top: 0 });
   };
 
   const copyResult = async () => {
@@ -367,6 +373,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         <h2 id={`${workspaceId}-title`} data-style-trial-title style={{ margin: 0, fontSize: 21 }}>{translationTarget ? t('offlineTranslation.title', { language: translationLanguageLabel(translationTarget, i18n.resolvedLanguage ?? i18n.language) }) : onTranslationTargetChange ? t('textWorkspace.title') : t('style.trial.title', { name: presentation.name })}</h2>
         <Btn size="sm" variant="ghost" disabled={draftSaving} onClick={() => { if (!draftSaving) onClose(); }}>{t('common.close')}</Btn>
       </div>
+      <div ref={workspaceScroll} className="ol-style-trial-scroll ol-thinscroll" data-workspace-scroll>
       <p id={`${workspaceId}-description`} className="ol-style-trial-hint" data-style-trial-service-notice>{t(offline ? 'offlineTranslation.localNotice' : readiness?.requiresTextService === false ? prepareShorter ? 'textWorkspace.localWithShorterNotice' : 'textWorkspace.localNotice' : 'textWorkspace.cloudNotice')}</p>
       {draftingChoice && <div className="ol-style-trial-drafting-choice" data-drafting-entry>
         <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || draftSaving || translationPreparing || styleChangePending}
@@ -453,20 +460,6 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || draftSaving || translationPreparing}
           onClick={() => setTranslationSource('zh')}>{t('textWorkspace.confirmChinese')}</Btn>
       </div>}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginTop: 12 }}>
-        <Btn variant="blue" disabled={pending || copying || delivering || draftSaving || styleChangePending || !canProcess || !draft.trim()} onClick={() => void runTrial()}>
-          {t(pending ? 'style.trial.running' : translationTarget ? 'offlineTranslation.run' : 'style.trial.run')}
-        </Btn>
-        {prepareShorter && <Btn variant="ghost" disabled={pending || copying || delivering || draftSaving || styleChangePending || !canProcess || !readiness?.textServiceConfigured || !draft.trim()}
-          onClick={() => void runTrial(prepareShorter)}>{t(shortening ? 'conciseDraft.running' : 'conciseDraft.run')}</Btn>}
-        {!offline && readiness?.available && <Btn variant="ghost" disabled={draftSaving} onClick={() => setProvidersOpen(true)}>{t('style.trial.providers')}</Btn>}
-        {readiness?.available === false && <a href="https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1" target="_blank" rel="noreferrer noopener" style={{ color: 'var(--ol-blue)', fontSize: 13 }}>{t('style.trial.download')}</a>}
-      </div>
-      {pending && <p role="status" className="ol-style-trial-hint" data-style-trial-pending>
-        {t(offline ? 'offlineTranslation.pending' : !shortening && readiness?.requiresTextService === false ? 'textWorkspace.pendingLocal' : 'style.trial.pending')}
-        {offline && <Btn size="sm" variant="ghost" onClick={() => { if (localRequest.current) void cancelLocalTranslation(localRequest.current).catch(() => {}); }}>{t('common.cancel')}</Btn>}
-      </p>}
-      {error && <p role="alert" style={{ color: 'var(--ol-err)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.6 }}>{error}</p>}
       </div>
       <div className="ol-style-trial-outputs">
       {result && (
@@ -592,6 +585,24 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
           ))}
         </details>
       )}
+      </div>
+      <div className="ol-style-trial-submit" data-workspace-submit>
+        {cloudRetranslationPrepared && <p role="status" className="ol-style-trial-hint" data-cloud-retranslation-ready>{t('textWorkspace.retranslationReferenceHint')}</p>}
+        <div className="ol-style-trial-submit-actions">
+          <Btn variant="blue" disabled={pending || copying || delivering || draftSaving || styleChangePending || !canProcess || !draft.trim()} onClick={() => void runTrial()}>
+            {t(pending ? 'style.trial.running' : translationTarget ? 'offlineTranslation.run' : 'style.trial.run')}
+          </Btn>
+          {prepareShorter && <Btn variant="ghost" disabled={pending || copying || delivering || draftSaving || styleChangePending || !canProcess || !readiness?.textServiceConfigured || !draft.trim()}
+            onClick={() => void runTrial(prepareShorter)}>{t(shortening ? 'conciseDraft.running' : 'conciseDraft.run')}</Btn>}
+          {!offline && readiness?.available && <Btn variant="ghost" disabled={draftSaving} onClick={() => setProvidersOpen(true)}>{t('style.trial.providers')}</Btn>}
+          {readiness?.available === false && <a href="https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1" target="_blank" rel="noreferrer noopener" style={{ color: 'var(--ol-blue)', fontSize: 13 }}>{t('style.trial.download')}</a>}
+        </div>
+        {pending && <p role="status" className="ol-style-trial-hint" data-style-trial-pending>
+          {t(offline ? 'offlineTranslation.pending' : !shortening && readiness?.requiresTextService === false ? 'textWorkspace.pendingLocal' : 'style.trial.pending')}
+          {offline && <Btn size="sm" variant="ghost" onClick={() => { if (localRequest.current) void cancelLocalTranslation(localRequest.current).catch(() => {}); }}>{t('common.cancel')}</Btn>}
+        </p>}
+        {error && <p role="alert" className="ol-style-trial-submit-error">{error}</p>}
+      </div>
       {keyPhrase !== null && <DeviceLayoutsDialog rememberSelection initialProfile={writingDeviceKeyProfile()} incomingText={keyPhrase} onLeaveForPage={onClose} onClose={() => setKeyPhrase(null)} />}
     </dialog>
     {providersOpen && <ProviderSettingsDialog kind="text" onClose={() => {
