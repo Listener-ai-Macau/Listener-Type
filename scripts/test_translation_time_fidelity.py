@@ -81,6 +81,19 @@ class ClockFacts(unittest.TestCase):
         self.check('晚上十一点到凌晨一点工作。', 'Work between 11 a.m. and 1 p.m.',
                    'Work between 11 p.m. and 1 a.m.')
 
+    def test_negated_boundary_is_never_silently_reversed(self):
+        with self.assertRaises(TimeFidelityError):
+            preserve_explicit_times('Do not arrive before 3 p.m.', '下午3点之后到。', 'en')
+        with self.assertRaises(TimeFidelityError):
+            preserve_explicit_times('不要在下午三点之前到。', 'Arrive after 3 p.m.', 'zh')
+        self.check('Do not arrive before 3 p.m.', '不要在上午3点之前到。', '不要在下午3点之前到。', 'en')
+        self.check('Do not arrive before 3 p.m.', '下午3点之前不要来。', '下午3点之前不要来。', 'en')
+
+    def test_explicit_no_earlier_than_and_not_after(self):
+        self.check('Arrive no earlier than 3 p.m.', '下午3点之前来。', '不早于下午3点来。', 'en')
+        self.check('不要取消。下午三点以后来。', 'Do not cancel. Arrive after 3 p.m.',
+                   'Do not cancel. Arrive after 3 p.m.')
+
 
 if __name__ == '__main__':
     unittest.main()

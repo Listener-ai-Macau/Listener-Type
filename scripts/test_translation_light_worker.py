@@ -49,6 +49,11 @@ class LightWorker(unittest.TestCase):
         self.assertEqual(self.run_worker('下午三点开会。', {'下午三点开会。': 'Meet tomorrow.'}),
                          (1, {'error': 'local_translation_time_fidelity'}))
 
+    def test_negation_scope_cannot_be_changed_by_clock_repair(self):
+        self.assertEqual(self.run_worker('Do not arrive before 3 p.m.',
+                         {'Do not arrive before 3 p.m.': '下午3点之后到。'}, 'en'),
+                         (1, {'error': 'local_translation_time_fidelity'}))
+
     def test_light_route_restores_years_and_exact_source_layout(self):
         self.assertEqual(self.run_worker('  2026年10月29日开会。  \r\n\r\n谢谢。\n',
                          {'2026年10月29日开会。': 'Meet October 29.', '谢谢。': 'Thank you.'}),

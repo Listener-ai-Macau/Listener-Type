@@ -31,12 +31,21 @@ def _en_clock(prefix):
 
 
 _ZH_RANGE = re.compile(_zh_clock('a') + r'\s*(?:到|至|[—–~～-])\s*' + _zh_clock('b'))
-_ZH_POINT = re.compile(r'(?P<relation>不晚于|最迟在?)?' + _zh_clock('a') +
+_ZH_POINT = re.compile(r'(?P<relation>不早于|不晚于|最迟在?)?' + _zh_clock('a') +
                        r'\s*(?P<suffix>以前|之前|以后|之后|前|后)?')
 _EN_RANGE = re.compile(r'(?<![\w:.])(?:(?:between|from)\s+)?' + _en_clock('a') +
                        r'\s*(?:to|and|[—–~～-])\s*' + _en_clock('b') + r'(?![\w:]|\.\d)', re.I)
-_EN_POINT = re.compile(r'(?<![\w:.])(?:(?P<relation>before|after|by|at|to)\s+)?' +
+_EN_POINT = re.compile(r'(?<![\w:.])(?:(?P<relation>no\s+(?:earlier|later)\s+than|not\s+(?:before|after)|before|after|by|at|to)\s+)?' +
                        _en_clock('a') + r'(?![\w:]|\.\d)', re.I)
+
+
+def _negated_clause(text, start, end, language):
+    # A negated verb can change the meaning of a nearby before/after phrase.
+    # Do not silently rewrite that scope or drop the negation while repairing
+    # a clock. Explicit "not before" / 不早于 are part of the clock relation.
+    clause = re.split(r'[。！？!?.,，;；\r\n]', text[:start])[-1] + re.split(r'[。！？!?.,，;；\r\n]', text[end:])[0]
+    return bool(re.search(r'不要|不能|不得|禁止|不许|不|未|无|没有', clause) if language == 'zh'
+                else re.search(r"\b(?:not|no|never|cannot|can[’']t|don[’']t|mustn[’']t)\b", clause, re.I))
 
 
 def _number(value):
@@ -120,11 +129,16 @@ def _mentions(text, language, target_anchors=False):
                 relation = (match.groupdict().get('relation') or '').lower()
                 suffix = match.groupdict().get('suffix') or ''
                 if language == 'zh':
-                    relation = 'by' if relation else 'before' if suffix in {'以前', '之前', '前'} else 'after' if suffix else ''
+                    relation = 'not_before' if relation == '不早于' else 'by' if relation else 'before' if suffix in {'以前', '之前', '前'} else 'after' if suffix else ''
+                elif re.fullmatch(r'no\s+earlier\s+than|not\s+before', relation):
+                    relation = 'not_before'
+                elif re.fullmatch(r'no\s+later\s+than|not\s+after', relation):
+                    relation = 'by'
                 elif relation in {'at', 'to'}:
                     relation = ''
                 found.append({'start': match.start(), 'end': match.end(), 'clocks': clocks,
                               'shape': shape, 'relation': relation,
+                              'negated': _negated_clause(text, match.start(), match.end(), language),
                               'preposition': (match.groupdict().get('relation') or '').lower()})
             except ValueError:
                 continue
@@ -139,7 +153,7 @@ def _facts(value):
     # Chinese 前/之前 commonly renders either an English "before" or "by"
     # deadline. Preserve that translation; this is not an inclusivity proof.
     relation = 'before' if value['relation'] == 'by' else value['relation']
-    return tuple(clock['period'] for clock in value['clocks']), relation
+    return tuple(clock['period'] for clock in value['clocks']), relation, value['negated']
 
 
 def _render(source, target, language):
@@ -157,10 +171,10 @@ def _render(source, target, language):
         return 'between ' + ' and '.join(rendered) if language == 'en' else '到'.join(rendered)
     relation = source['relation']
     if language == 'en':
-        prep = relation or (target['preposition'] if target['preposition'] in {'at', 'to'} else '')
+        prep = ('no earlier than' if relation == 'not_before' else relation) or (target['preposition'] if target['preposition'] in {'at', 'to'} else '')
         return (prep + ' ' if prep else '') + rendered[0]
-    if relation == 'by':
-        return '不晚于' + rendered[0]
+    if relation in {'by', 'not_before'}:
+        return ('不晚于' if relation == 'by' else '不早于') + rendered[0]
     return rendered[0] + {'before': '之前', 'after': '之后', '': ''}[relation]
 
 
@@ -193,6 +207,8 @@ def preserve_explicit_times(source, translated, source_language):
         for candidate in candidates:
             if _facts(candidate) == _facts(facts[0]):
                 continue
+            if candidate['negated'] != facts[0]['negated'] or (candidate['negated'] and _facts(candidate)[1] != _facts(facts[0])[1]):
+                raise TimeFidelityError('local_translation_time_fidelity')
             replacement = _render(facts[0], candidate, language)
             end = candidate['end']
             following = translated[end:].lstrip()
