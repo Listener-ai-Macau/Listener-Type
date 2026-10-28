@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build214 / Firmware38
+# Listener v1.0.6-rc1 · Type build215 / Firmware38
 
 | Download | File |
 | --- | --- |
@@ -7,7 +7,7 @@
 
 ## In this app update
 
-Keep the existing light local model as the default. Its prepared components remain usable. Cancel or Close ends only the owned translation request; a later request can start normally. Edit a result, save it with its original and retrieve the exact draft. Save and Copy now appear before secondary review help at laptop sizes. Model quality is part of readiness and session-result identity, so changing it cannot show another model’s old result. Enhanced CPU resources are optional, explicitly downloaded, require more memory and do not silently invoke cloud translation.
+Translation and text-processing actions stay visible while settings, drafts and comparisons scroll. Close and the local task Cancel stay reachable. Switching from a local result to cloud translation keeps the original input and edited local comparison, then asks you to review your service and fees before explicitly pressing Translate. Switching back to local restores its manual edits. Exact named save/retrieval and settings return remain protected. This batch uses the same default light CPU model and unchanged Firmware38.
 
 ## Before using
 
@@ -17,11 +17,11 @@ Light offline translation is a useful editable draft, not guaranteed exact trans
 
 ## File identity
 
-- Type source: `c01ab7d2ebb21ddc9f17892df1b9943cb2ef1c44` · `build-source/type214-20261028`
-- MSI: 299917312 bytes · SHA256 `3469b8ce938a9251db525d6bfb98bd604cb534e4aba1c3b0b44d6c1173171458`
+- Type source: `f2c6453f800c125345c33ef943fe0fde04a1701f` · `build-source/type215-20261028`
+- MSI: 299921408 bytes · SHA256 `ee6a307d3655b3ad5da031aaeb53d9d2bc1bd6a0c62ebda3feac92969b0976f2`
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`
 - ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`
 
 ## 中文说明
 
-本机中英翻译仍默认使用原轻量组件；取消或关闭会结束所属任务，修改稿可保存、回找，小窗口的保存／复制先于辅助说明显示。增强CPU组件仅在明确选择后下载。译文作为可修改初稿，重要事实请核对。固件38不变。 本批同时保留原213的时间缩写与关闭按钮保护。语音识别仍使用原选择的服务与费用，49美元为硬件价格，不新增云账户或额度承诺。
+文字工作区滚动内容时，翻译和文字处理的主操作保持可见。切换云端后会明确提示核对服务和费用、再提交翻译，本机修订稿保留供对照；已保存成稿可准确找回。默认仍为轻量CPU翻译，固件38不变。 关闭及本机任务的取消按钮保留可见；切换回本机可继续原修订稿。服务仍按实际配置和用量收费，49美元为硬件价格，不新增账户或额度承诺。
