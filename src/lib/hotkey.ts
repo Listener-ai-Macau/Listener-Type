@@ -24,6 +24,7 @@ export function getHotkeyStartStopLabel(
   shortcutBinding?: ShortcutBinding | null,
 ): string {
   if (shortcutBinding) {
+    if (!shortcutBinding.primary.trim()) return i18n.t('shortcutDefaults.unassigned');
     return `${formatComboLabel(shortcutBinding)}${i18n.t('hotkey.modeToggleSuffix')}`;
   }
   if (binding?.trigger === 'custom' && comboBinding) {
@@ -40,6 +41,7 @@ export function getHotkeyUsageHint(
   shortcutBinding?: ShortcutBinding | null,
 ): string {
   if (shortcutBinding) {
+    if (!shortcutBinding.primary.trim()) return i18n.t('shortcutDefaults.usageUnbound');
     const combo = formatComboLabel(shortcutBinding);
     return i18n.t('hotkey.usageToggle', { trigger: combo });
   }
@@ -157,6 +159,7 @@ function legacyTriggerCode(trigger: HotkeyTrigger | null | undefined): string | 
 
 /** 把 ComboBinding 或 QaHotkeyBinding 格式化为可读标签，如 "⌘⇧D" / "Ctrl+Shift+D"。 */
 export function formatComboLabel(binding: ComboBinding | QaHotkeyBinding | ShortcutBinding): string {
+  if (!binding.primary.trim() && binding.modifiers.length === 0) return i18n.t('shortcutDefaults.unassigned');
   const parts: string[] = [];
   const platform = currentPlatform();
 

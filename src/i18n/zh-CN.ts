@@ -1,3 +1,4 @@
+import { shortcutDefaultsTranslations } from './shortcutDefaults.ts';
 import { textWorkspaceTranslations } from './textWorkspace.ts';
 import { firstUseTranslations } from './firstUse.ts';
 import { textDraftTranslations } from './textDraft.ts';
@@ -19,6 +20,7 @@ export const zhCN = {
   conciseDraft: conciseDraftTranslations['zh-CN'],
   messageDraft: messageDraftTranslations['zh-CN'],
   offlineHelp: offlineHelpTranslations['zh-CN'],
+  shortcutDefaults: shortcutDefaultsTranslations['zh-CN'],
   textWorkspace: textWorkspaceTranslations['zh-CN'],
   textDraft: textDraftTranslations['zh-CN'],
   hardwareLayout: hardwareLayoutTranslations['zh-CN'],

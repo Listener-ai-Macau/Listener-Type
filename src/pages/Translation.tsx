@@ -207,7 +207,7 @@ export function Translation() {
             </span>
           </div>
           <div style={{ fontSize: 12, color: 'var(--ol-ink-3)', lineHeight: 1.6, marginBottom: 10 }}>
-            {t('translation.target.desc', { shortcut: translationHotkeyLabel })}
+            {prefs.translationHotkey.primary.trim() ? t('translation.target.desc', { shortcut: translationHotkeyLabel }) : t('shortcutDefaults.translationUnbound')}
           </div>
           <SelectLite
             value={prefs.translationTargetLanguage}
@@ -241,8 +241,8 @@ export function Translation() {
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{t('translation.howto.title')}</div>
             <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: 'var(--ol-ink-2)', lineHeight: 1.7 }}>
               <li>{t('translation.howto.step1')}</li>
-              <li>{t('translation.howto.step2', { trigger: triggerLabel })}</li>
-              <li>{t('translation.howto.step3', { shortcut: translationHotkeyLabel })}</li>
+              <li>{prefs.dictationHotkey.primary.trim() ? t('translation.howto.step2', { trigger: triggerLabel }) : t('shortcutDefaults.usageUnbound')}</li>
+              <li>{prefs.translationHotkey.primary.trim() ? t('translation.howto.step3', { shortcut: translationHotkeyLabel }) : t('shortcutDefaults.translationUnbound')}</li>
               <li>{t('translation.howto.step4')}</li>
               <li>{t('translation.howto.step5')}</li>
             </ol>

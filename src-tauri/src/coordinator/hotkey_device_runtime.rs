@@ -82,7 +82,7 @@ fn qa_hotkey_supervisor_loop(inner: Arc<Inner>) {
             return;
         }
         // 用户已将 QA 关闭时会先进入待激活状态，prefs 改动通过 update_qa_hotkey_binding 唤醒逻辑恢复。
-        let binding = match inner.prefs.get().qa_hotkey.clone() {
+        let binding = match inner.prefs.get().qa_hotkey.clone().filter(|binding| !is_unconfigured_shortcut(binding)) {
             Some(b) => b,
             None => {
                 inner.qa_hotkey.lock().take();
@@ -293,7 +293,8 @@ fn translation_hotkey_supervisor_loop(inner: Arc<Inner>) {
             return;
         }
         let binding = inner.prefs.get().translation_hotkey;
-        if is_builtin_translation_shift(&binding)
+        if is_unconfigured_shortcut(&binding)
+            || is_builtin_translation_shift(&binding)
             || crate::shortcut_binding::legacy_modifier_trigger(&binding).is_some()
         {
             take_translation_hotkey_on_main_thread(&inner);
@@ -363,6 +364,10 @@ fn update_translation_hotkey_on_main_thread(
     inner: Arc<Inner>,
     binding: crate::types::ShortcutBinding,
 ) -> Result<(), ComboHotkeyError> {
+    if is_unconfigured_shortcut(&binding) {
+        inner.translation_hotkey.lock().take();
+        return Ok(());
+    }
     if let Some(monitor) = inner.translation_hotkey.lock().as_ref() {
         return monitor.update_binding(binding);
     }

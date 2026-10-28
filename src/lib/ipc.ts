@@ -66,7 +66,7 @@ import {
   LEGACY_DEVICE_STATUS_KEY_LED_BRIGHTNESS_DEFAULT_PERCENT,
 } from './deviceSettingsDefaults';
 import { OL_DATA } from './mockData';
-import { defaultAppShortcutModifiers, defaultQaShortcut, formatComboLabel } from './hotkey';
+import { formatComboLabel } from './hotkey';
 
 declare global {
   interface Window {
@@ -194,8 +194,8 @@ const defaultDeviceKeyboardKey = (
 
 // ── Mock fixtures ──────────────────────────────────────────────────────
 let mockSettings: UserPreferences = {
-  hotkey: { trigger: 'rightControl', mode: 'toggle', keys: [{ code: 'ControlRight' }] },
-  dictationHotkey: { primary: 'RightControl', modifiers: [] },
+  hotkey: { trigger: 'custom', mode: 'toggle', keys: [] },
+  dictationHotkey: { primary: '', modifiers: [] },
   defaultMode: 'raw',
   enabledModes: ['raw', 'light', 'structured', 'formal'],
   activeStylePackId: 'builtin.raw',
@@ -232,14 +232,14 @@ let mockSettings: UserPreferences = {
   translationEngine: 'local',
   localTranslationQuality: 'standard',
   translationSourceLanguage: '',
-  qaHotkey: defaultQaShortcut(),
+  qaHotkey: null,
   chineseScriptPreference: 'auto',
   outputLanguagePreference: 'auto',
   qaSaveHistory: false,
   customComboHotkey: null,
-  translationHotkey: { primary: 'Shift', modifiers: [] },
-  switchStyleHotkey: { primary: 'S', modifiers: defaultAppShortcutModifiers() },
-  openAppHotkey: { primary: 'O', modifiers: defaultAppShortcutModifiers() },
+  translationHotkey: { primary: '', modifiers: [] },
+  switchStyleHotkey: { primary: '', modifiers: [] },
+  openAppHotkey: { primary: '', modifiers: [] },
   deviceCustomKeys: {
     key1: defaultDeviceKeyboardKey('RightControl'),
     key2: defaultDeviceKeyboardKey('C', ['ctrl']),
@@ -2031,7 +2031,7 @@ export function restartApp(): Promise<void> {
 // 详见 issue #118。后端会发 `qa:state` / `qa:dismiss` 事件；前端通过下面四个
 // 命令查询与控制 QA 浮窗。
 export function getQaHotkeyLabel(): Promise<string> {
-  return invokeOrMock('get_qa_hotkey_label', undefined, () => formatComboLabel(defaultQaShortcut()));
+  return invokeOrMock('get_qa_hotkey_label', undefined, () => mockSettings.qaHotkey ? formatComboLabel(mockSettings.qaHotkey) : '');
 }
 
 export function setQaHotkey(binding: QaHotkeyBinding | null): Promise<void> {

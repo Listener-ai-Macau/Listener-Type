@@ -314,8 +314,8 @@ export function Overview({ showFirstUseGuide = true, onDismissOverview, onOpenPr
         </div>
         <ol style={{ margin: '0 0 12px', paddingLeft: 20, fontSize: 12.5, lineHeight: 1.8, color: 'var(--ol-ink-2)' }}>
           <li>{t('overview.firstDictationFocus')}</li>
-          <li>{!prefs ? t('common.loading') : t((prefs.dictationInputSource ?? 'embeddedBle') === 'embeddedBle' ? 'overview.firstDictationDeviceStart' : 'overview.firstDictationStart', { trigger: formatComboLabel(prefs.dictationHotkey) })}</li>
-          <li>{!prefs ? t('common.loading') : t((prefs.dictationInputSource ?? 'embeddedBle') === 'embeddedBle' ? 'overview.firstDictationDeviceFinish' : 'overview.firstDictationFinish', { trigger: formatComboLabel(prefs.dictationHotkey) })}</li>
+          <li>{!prefs ? t('common.loading') : t((prefs.dictationInputSource ?? 'embeddedBle') === 'embeddedBle' ? 'overview.firstDictationDeviceStart' : prefs.dictationHotkey.primary.trim() ? 'overview.firstDictationStart' : 'shortcutDefaults.microphoneStartUnbound', { trigger: formatComboLabel(prefs.dictationHotkey), action: t('overview.quickStartTest') })}</li>
+          <li>{!prefs ? t('common.loading') : t((prefs.dictationInputSource ?? 'embeddedBle') === 'embeddedBle' ? 'overview.firstDictationDeviceFinish' : prefs.dictationHotkey.primary.trim() ? 'overview.firstDictationFinish' : 'shortcutDefaults.microphoneFinishUnbound', { trigger: formatComboLabel(prefs.dictationHotkey) })}</li>
         </ol>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           {!credsError && !creds.asrConfigured && onOpenProvidersSettings && (
@@ -393,7 +393,7 @@ export function Overview({ showFirstUseGuide = true, onDismissOverview, onOpenPr
       </div>
 
       {/* Quick start guidance when providers aren't configured */}
-      {(!creds.asrConfigured || !creds.llmConfigured) && (
+      {(!creds.asrConfigured || !creds.llmConfigured || (prefs && prefs.dictationInputSource !== 'embeddedBle' && !prefs.dictationHotkey.primary.trim())) && (
         <QuickStartCard
           asrConfigured={creds.asrConfigured}
           llmConfigured={creds.llmConfigured}

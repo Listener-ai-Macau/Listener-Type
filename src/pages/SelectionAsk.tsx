@@ -11,7 +11,7 @@ import { Btn, Card, PageHeader } from './_atoms';
 import { qaWindowOpen } from '../lib/ipc';
 import { SavedToast } from '../components/SavedToast';
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
-import { defaultQaShortcut, formatComboLabel } from '../lib/hotkey';
+import { formatComboLabel } from '../lib/hotkey';
 import type { UserPreferences } from '../lib/types';
 import { QaPreparation, useQaPreparation } from '../components/QaPreparation';
 
@@ -33,7 +33,6 @@ export function SelectionAsk() {
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveMessage, setSaveMessage] = useState('');
   const statusTimer = useRef<number | null>(null);
-  const defaultHotkeyLabel = formatComboLabel(defaultQaShortcut());
   const recordHotkeyLabel = prefs ? formatComboLabel(prefs.dictationHotkey) : '快捷键';
 
   useEffect(() => () => {
@@ -93,8 +92,8 @@ export function SelectionAsk() {
     );
   };
 
-  const enabled = prefs.qaHotkey !== null;
-  const currentLabel = prefs.qaHotkey ? formatComboLabel(prefs.qaHotkey) : defaultHotkeyLabel;
+  const enabled = !!prefs.qaHotkey?.primary.trim();
+  const currentLabel = prefs.qaHotkey ? formatComboLabel(prefs.qaHotkey) : t('shortcutDefaults.unassigned');
   const saving = saveState === 'saving';
 
   return (
@@ -167,9 +166,9 @@ export function SelectionAsk() {
         <Card>
           <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{t('selectionAsk.howto.title')}</div>
           <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: 'var(--ol-ink-2)', lineHeight: 1.7 }}>
-            <li>{t('selectionAsk.howto.step1', { hotkey: enabled ? currentLabel : defaultHotkeyLabel })}</li>
+            <li>{enabled ? t('selectionAsk.howto.step1', { hotkey: currentLabel }) : t('shortcutDefaults.qaStartUnbound')}</li>
             <li>{t('selectionAsk.howto.step2')}</li>
-            <li>{t('selectionAsk.howto.step3', { recordHotkey: recordHotkeyLabel })}</li>
+            <li>{prefs.dictationHotkey.primary.trim() ? t('selectionAsk.howto.step3', { recordHotkey: recordHotkeyLabel }) : t('shortcutDefaults.qaFinishUnbound')}</li>
           </ol>
         </Card>
       </div>

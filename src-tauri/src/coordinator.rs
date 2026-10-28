@@ -1723,7 +1723,7 @@ impl Coordinator {
     /// 在下一次循环里读到新的 prefs。
     pub fn update_qa_hotkey_binding(&self) {
         let prefs = self.inner.prefs.get();
-        let Some(binding) = prefs.qa_hotkey.clone() else {
+        let Some(binding) = prefs.qa_hotkey.clone().filter(|binding| !is_unconfigured_shortcut(binding)) else {
             // 用户把功能关了 → 直接 drop monitor。drop 也得在主线程，否则 Carbon
             // unregister 会失败/UB。
             let app = self.inner.app.lock().clone();
@@ -1799,12 +1799,13 @@ impl Coordinator {
 
     pub fn try_update_translation_hotkey_binding(&self) -> Result<(), String> {
         let prefs = self.inner.prefs.get();
-        if is_builtin_translation_shift(&prefs.translation_hotkey)
+        if is_unconfigured_shortcut(&prefs.translation_hotkey)
+            || is_builtin_translation_shift(&prefs.translation_hotkey)
             || crate::shortcut_binding::legacy_modifier_trigger(&prefs.translation_hotkey).is_some()
         {
             take_translation_hotkey_on_main_thread(&self.inner);
             self.update_modifier_shortcut_bindings();
-            log::info!("[coord] translation hotkey uses modifier-only listener");
+            log::info!("[coord] translation combo hotkey is unassigned or uses its configured modifier listener");
             return Ok(());
         }
         self.update_modifier_shortcut_bindings();

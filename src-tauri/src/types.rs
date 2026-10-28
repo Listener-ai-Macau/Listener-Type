@@ -2033,39 +2033,19 @@ impl<'de> Deserialize<'de> for UserPreferences {
 }
 
 fn default_qa_hotkey() -> Option<ShortcutBinding> {
-    Some(ShortcutBinding::default_qa())
+    None
 }
 
 fn default_translation_hotkey() -> ShortcutBinding {
-    ShortcutBinding {
-        primary: "Shift".into(),
-        modifiers: Vec::new(),
-    }
+    ShortcutBinding::unconfigured()
 }
 
 fn default_switch_style_hotkey() -> ShortcutBinding {
-    ShortcutBinding {
-        primary: "S".into(),
-        modifiers: default_app_shortcut_modifiers(),
-    }
+    ShortcutBinding::unconfigured()
 }
 
 fn default_open_app_hotkey() -> ShortcutBinding {
-    ShortcutBinding {
-        primary: "O".into(),
-        modifiers: default_app_shortcut_modifiers(),
-    }
-}
-
-fn default_app_shortcut_modifiers() -> Vec<String> {
-    #[cfg(target_os = "macos")]
-    {
-        vec!["cmd".into(), "shift".into()]
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        vec!["ctrl".into(), "shift".into()]
-    }
+    ShortcutBinding::unconfigured()
 }
 
 fn default_dictation_hotkey_from_legacy(
@@ -2078,6 +2058,11 @@ fn default_dictation_hotkey_from_legacy(
                 primary: combo.primary.clone(),
                 modifiers: combo.modifiers.clone(),
             });
+        }
+        // A fresh, explicitly empty configuration is distinct from a malformed
+        // historical Custom binding that lost its required key information.
+        if hotkey.keys.as_ref().is_some_and(Vec::is_empty) {
+            return Ok(ShortcutBinding::unconfigured());
         }
         return Err(
             "hotkey.trigger is custom but dictationHotkey/customComboHotkey is missing".into(),
@@ -2365,12 +2350,12 @@ fn default_formal_style_system_prompt() -> String {
 impl Default for UserPreferences {
     fn default() -> Self {
         Self {
-            hotkey: HotkeyBinding::default(),
-            dictation_hotkey: default_dictation_hotkey_from_legacy(
-                &HotkeyBinding::default(),
-                &None,
-            )
-            .expect("default legacy hotkey is not custom"),
+            hotkey: HotkeyBinding {
+                trigger: HotkeyTrigger::Custom,
+                keys: Some(Vec::new()),
+                ..HotkeyBinding::default()
+            },
+            dictation_hotkey: ShortcutBinding::unconfigured(),
             default_mode: PolishMode::Raw,
             enabled_modes: vec![
                 PolishMode::Raw,
@@ -2468,6 +2453,10 @@ pub struct ShortcutBinding {
 }
 
 impl ShortcutBinding {
+    pub fn unconfigured() -> Self {
+        Self { primary: String::new(), modifiers: Vec::new() }
+    }
+
     pub fn default_qa() -> Self {
         #[cfg(target_os = "macos")]
         {
@@ -2495,6 +2484,75 @@ impl ShortcutBinding {
         }
         parts.push(display_primary(&self.primary));
         parts.join("+")
+    }
+}
+
+#[cfg(test)]
+mod shortcut_default_tests {
+    use super::*;
+
+    fn assert_unassigned(prefs: &UserPreferences) {
+        for binding in [&prefs.dictation_hotkey, &prefs.translation_hotkey,
+            &prefs.switch_style_hotkey, &prefs.open_app_hotkey] {
+            assert!(binding.primary.is_empty());
+            assert!(binding.modifiers.is_empty());
+            assert!(crate::shortcut_binding::legacy_modifier_trigger(binding).is_none());
+        }
+        assert!(prefs.qa_hotkey.is_none());
+    }
+
+    #[test]
+    fn fresh_and_missing_preferences_leave_all_computer_shortcuts_unassigned() {
+        assert_unassigned(&UserPreferences::default());
+        for input in [serde_json::json!({}), serde_json::json!({"defaultMode":"raw"})] {
+            let prefs: UserPreferences = serde_json::from_value(input).unwrap();
+            assert_unassigned(&prefs);
+        }
+    }
+
+    #[test]
+    fn unassigned_shortcuts_remain_empty_after_persistence_roundtrip() {
+        let prefs = UserPreferences::default();
+        let saved = serde_json::to_value(&prefs).unwrap();
+        assert_eq!(saved["dictationHotkey"]["primary"], "");
+        assert!(saved["qaHotkey"].is_null());
+        let loaded: UserPreferences = serde_json::from_value(saved).unwrap();
+        assert_unassigned(&loaded);
+    }
+
+    #[test]
+    fn existing_explicit_bindings_survive_updated_defaults() {
+        let input = serde_json::json!({
+            "dictationHotkey":{"primary":"K","modifiers":["ctrl","alt"]},
+            "translationHotkey":{"primary":"T","modifiers":["ctrl","shift"]},
+            "qaHotkey":{"primary":";","modifiers":["ctrl","shift"]},
+            "switchStyleHotkey":{"primary":"S","modifiers":["ctrl","shift"]},
+            "openAppHotkey":{"primary":"O","modifiers":["ctrl","shift"]}
+        });
+        let prefs: UserPreferences = serde_json::from_value(input.clone()).unwrap();
+        let saved = serde_json::to_value(prefs).unwrap();
+        for field in ["dictationHotkey", "translationHotkey", "qaHotkey", "switchStyleHotkey", "openAppHotkey"] {
+            assert_eq!(saved[field], input[field], "saved user binding changed: {field}");
+        }
+    }
+
+    #[test]
+    fn legacy_explicit_dictation_is_retained_without_inventing_other_bindings() {
+        let prefs: UserPreferences = serde_json::from_value(serde_json::json!({
+            "hotkey":{"trigger":"rightControl","mode":"toggle"}
+        })).unwrap();
+        assert_eq!(prefs.dictation_hotkey.primary, "RightControl");
+        assert!(prefs.qa_hotkey.is_none());
+        assert!(prefs.translation_hotkey.primary.is_empty());
+        let custom: UserPreferences = serde_json::from_value(serde_json::json!({
+            "hotkey":{"trigger":"custom","mode":"toggle"},
+            "customComboHotkey":{"primary":"F9","modifiers":["ctrl"]}
+        })).unwrap();
+        assert_eq!(custom.dictation_hotkey.primary, "F9");
+        assert_eq!(custom.dictation_hotkey.modifiers, vec!["ctrl"]);
+        assert!(serde_json::from_value::<UserPreferences>(serde_json::json!({
+            "hotkey":{"trigger":"custom","mode":"toggle"}
+        })).is_err(), "an old malformed binding must not be silently reinterpreted");
     }
 }
 

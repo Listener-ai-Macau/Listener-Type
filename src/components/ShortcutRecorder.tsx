@@ -9,15 +9,19 @@ export function ShortcutRecorder({
   onSave,
   alignRecordButton = false,
   disabled = false,
+  allowClear = false,
 }: {
   value: ShortcutBinding;
   onSave: (binding: ShortcutBinding) => Promise<void>;
   alignRecordButton?: boolean;
   disabled?: boolean;
+  allowClear?: boolean;
 }) {
   const { t } = useTranslation();
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const saveRunning = useRef(false);
   const pendingModifier = useRef<ShortcutBinding | null>(null);
   const pendingTimer = useRef<number | null>(null);
 
@@ -48,14 +52,22 @@ export function ShortcutRecorder({
   }, [disabled, recording]);
 
   const finish = async (binding: ShortcutBinding) => {
+    if (disabled || saveRunning.current) return;
+    saveRunning.current = true;
+    setSaving(true);
+    let validated = false;
     try {
       await validateShortcutBinding(binding);
+      validated = true;
       await onSave(binding);
       clearPendingModifier();
       setRecording(false);
       setError(null);
     } catch {
-      setError(t('settings.recording.comboConflict'));
+      setError(t(validated || !binding.primary.trim() ? 'shortcutDefaults.saveFailed' : 'settings.recording.comboConflict'));
+    } finally {
+      saveRunning.current = false;
+      setSaving(false);
     }
   };
 
@@ -145,23 +157,29 @@ export function ShortcutRecorder({
   };
 
   return (
-    <div style={rootStyle}>
+    <div style={rootStyle} data-shortcut-recorder>
       <div style={recorderRowStyle}>
         <span style={{ padding: '4px 10px', borderRadius: 6, background: 'var(--ol-control-track)', fontSize: 13, fontFamily: 'var(--ol-font-mono)', fontWeight: 500, color: 'var(--ol-ink)' }}>
           {formatComboLabel(value)}
         </span>
         <button
+          data-shortcut-record
           onClick={() => {
             if (disabled) return;
             setRecording(true);
             setError(null);
             clearPendingModifier();
           }}
-          disabled={recording || disabled}
+          disabled={recording || disabled || saving}
           style={recordButtonStyle}
         >
           {recording ? t('settings.recording.comboRecordHint') : t('settings.recording.comboRecordBtn')}
         </button>
+        {allowClear && value.primary.trim() && <button type="button" data-shortcut-clear disabled={recording || disabled || saving}
+          onClick={() => void finish({ primary: '', modifiers: [] })}
+          style={{ ...recordButtonStyle, marginLeft: 0, background: 'var(--ol-control-track)', color: 'var(--ol-ink-2)' }}>
+          {t('shortcutDefaults.clear')}
+        </button>}
       </div>
       {recording && (
         <div

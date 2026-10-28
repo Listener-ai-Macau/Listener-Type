@@ -1,3 +1,4 @@
+import { shortcutDefaultsTranslations } from './shortcutDefaults.ts';
 import { textWorkspaceTranslations } from './textWorkspace.ts';
 import { firstUseTranslations } from './firstUse.ts';
 import { textDraftTranslations } from './textDraft.ts';
@@ -23,6 +24,7 @@ export const ja: typeof zhCN = {
   conciseDraft: conciseDraftTranslations.ja,
   messageDraft: messageDraftTranslations.ja,
   offlineHelp: offlineHelpTranslations.ja,
+  shortcutDefaults: shortcutDefaultsTranslations['ja'],
   textWorkspace: textWorkspaceTranslations['ja'],
   textDraft: textDraftTranslations['ja'],
   hardwareLayout: hardwareLayoutTranslations['ja'],

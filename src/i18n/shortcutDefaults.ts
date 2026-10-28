@@ -1,0 +1,62 @@
+const en = {
+  unassigned: 'Not set',
+  description: 'Computer shortcuts start unassigned. Record only the shortcuts you want; saved personal bindings are kept when updating.',
+  clear: 'Clear shortcut',
+  saveFailed: 'Could not confirm the shortcut was saved. Check its current value and try again.',
+  qaStartUnbound: 'Open the voice-question window and use its microphone controls. You can assign an optional global shortcut in Settings → Shortcuts.',
+  qaFinishUnbound: 'Use the question window’s microphone button to finish your question, then read the answer.',
+  usageUnbound: 'No computer recording shortcut is set. Assign one in Settings → Shortcuts when you need it.',
+  microphoneStartUnbound: 'After speech setup, click “{{action}}” below to start. Assign a computer shortcut in Settings → Shortcuts only if you want one.',
+  microphoneFinishUnbound: 'When finished, click Stop in the recording capsule.',
+  translationUnbound: 'No computer translation shortcut is assigned. Choose a target language; set a shortcut in Settings → Shortcuts only when you need one.',
+};
+type Copy = typeof en;
+const zhCN: Copy = {
+  unassigned: '未设置',
+  description: '电脑快捷键首次默认不绑定。需要哪项，再自行录入；更新会保留你已保存的个人绑定。',
+  clear: '清除绑定',
+  saveFailed: '未能确认快捷键已保存。请检查当前绑定后重试。',
+  qaStartUnbound: '打开语音提问窗口，使用窗口内的麦克风操作。需要全局快捷键时，可到「设置 → 快捷键」自行录入。',
+  qaFinishUnbound: '在问答窗口点击麦克风按钮结束提问，再阅读回答。',
+  usageUnbound: '尚未设置电脑录音快捷键。需要时可到「设置 → 快捷键」自行录入。',
+  microphoneStartUnbound: '完成语音配置后，点击下方「{{action}}」开始。需要电脑快捷键时，再到「设置 → 快捷键」自行录入。',
+  microphoneFinishUnbound: '说完点击录音胶囊中的停止按钮。',
+  translationUnbound: '尚未绑定电脑翻译快捷键。先选择目标语言；需要快捷键时，再到「设置 → 快捷键」自行录入。',
+};
+const zhTW: Copy = {
+  unassigned: '未設定',
+  description: '電腦快捷鍵首次預設不綁定。需要哪項，再自行錄入；更新會保留你已儲存的個人綁定。',
+  clear: '清除綁定',
+  saveFailed: '未能確認快捷鍵已儲存。請檢查目前綁定後重試。',
+  qaStartUnbound: '開啟語音提問視窗，使用視窗內的麥克風操作。需要全域快捷鍵時，可到「設定 → 快捷鍵」自行錄入。',
+  qaFinishUnbound: '在問答視窗點擊麥克風按鈕結束提問，再閱讀回答。',
+  usageUnbound: '尚未設定電腦錄音快捷鍵。需要時可到「設定 → 快捷鍵」自行錄入。',
+  microphoneStartUnbound: '完成語音設定後，點擊下方「{{action}}」開始。需要電腦快捷鍵時，再到「設定 → 快捷鍵」自行錄入。',
+  microphoneFinishUnbound: '說完點擊錄音膠囊中的停止按鈕。',
+  translationUnbound: '尚未綁定電腦翻譯快捷鍵。先選擇目標語言；需要快捷鍵時，再到「設定 → 快捷鍵」自行錄入。',
+};
+const ja: Copy = {
+  unassigned: '未設定',
+  description: 'パソコンのショートカットは最初は未設定です。必要なものだけ登録してください。更新時は保存済みの設定を保持します。',
+  clear: '割り当てを解除',
+  saveFailed: '保存を確認できませんでした。現在の設定を確認して再試行してください。',
+  qaStartUnbound: '音声質問ウィンドウを開き、マイク操作を使ってください。必要なら「設定 → ショートカット」でグローバルキーを登録できます。',
+  qaFinishUnbound: '質問ウィンドウのマイクボタンで質問を終了し、回答を読んでください。',
+  usageUnbound: '録音用のパソコンショートカットは未設定です。必要なら「設定 → ショートカット」で登録してください。',
+  microphoneStartUnbound: '音声設定後、下の「{{action}}」で開始します。必要な場合だけ「設定 → ショートカット」でキーを登録してください。',
+  microphoneFinishUnbound: '話し終えたら録音カプセルの停止ボタンを押してください。',
+  translationUnbound: '翻訳用のパソコンショートカットは未設定です。翻訳先の言語を選び、必要な場合だけ「設定 → ショートカット」で登録してください。',
+};
+const ko: Copy = {
+  unassigned: '미설정',
+  description: '컴퓨터 단축키는 처음에는 지정되지 않습니다. 필요한 항목만 직접 등록하세요. 업데이트할 때 저장한 개인 설정은 유지됩니다.',
+  clear: '단축키 해제',
+  saveFailed: '단축키 저장을 확인하지 못했습니다. 현재 설정을 확인한 뒤 다시 시도하세요.',
+  qaStartUnbound: '음성 질문 창을 열고 창 안의 마이크 버튼을 사용하세요. 필요하면 설정 → 단축키에서 전역 단축키를 등록할 수 있습니다.',
+  qaFinishUnbound: '질문 창의 마이크 버튼으로 질문을 마친 뒤 답변을 읽으세요.',
+  usageUnbound: '컴퓨터 녹음 단축키가 지정되지 않았습니다. 필요하면 설정 → 단축키에서 등록하세요.',
+  microphoneStartUnbound: '음성 설정을 마친 뒤 아래의 “{{action}}”을 눌러 시작하세요. 단축키가 필요할 때만 설정 → 단축키에서 등록하세요.',
+  microphoneFinishUnbound: '말을 마치면 녹음 캡슐의 중지 버튼을 누르세요.',
+  translationUnbound: '컴퓨터 번역 단축키가 지정되지 않았습니다. 출력 언어를 고르고 필요할 때만 설정 → 단축키에서 등록하세요.',
+};
+export const shortcutDefaultsTranslations = { en, 'zh-CN': zhCN, 'zh-TW': zhTW, ja, ko };

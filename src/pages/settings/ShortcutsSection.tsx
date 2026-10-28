@@ -2,7 +2,6 @@
 
 import { useTranslation } from 'react-i18next';
 import { ShortcutRecorder } from '../../components/ShortcutRecorder';
-import { defaultQaShortcut } from '../../lib/hotkey';
 import {
   setDictationHotkey,
   setOpenAppHotkey,
@@ -13,6 +12,8 @@ import {
 import { useHotkeySettings } from '../../state/HotkeySettingsContext';
 import { Card } from '../_atoms';
 import { SettingRow } from './shared';
+
+const UNBOUND_SHORTCUT = { primary: '', modifiers: [] as string[] };
 
 export function ShortcutsSection() {
   const { t } = useTranslation();
@@ -36,6 +37,7 @@ export function ShortcutsSection() {
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
         {t('settings.shortcuts.title')}
       </div>
+      <p data-shortcut-defaults-note style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--ol-ink-3)' }}>{t('shortcutDefaults.description')}</p>
       <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, marginBottom: 6 }}>
         {capability.requiresAccessibilityPermission
           ? t('settings.shortcuts.descAcc')
@@ -45,7 +47,7 @@ export function ShortcutsSection() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
           <ShortcutRecorder
             value={prefs.dictationHotkey}
-            alignRecordButton
+            alignRecordButton allowClear
             onSave={async binding => {
               await setDictationHotkey(binding);
               await savePrefs({ ...prefs, dictationHotkey: binding });
@@ -59,7 +61,7 @@ export function ShortcutsSection() {
       <SettingRow label={t('translation.hotkey.title', 'Translation shortcut')}>
         <ShortcutRecorder
           value={prefs.translationHotkey}
-          alignRecordButton
+          alignRecordButton allowClear
           onSave={async binding => {
             await setTranslationHotkey(binding);
             await savePrefs({ ...prefs, translationHotkey: binding });
@@ -67,32 +69,20 @@ export function ShortcutsSection() {
         />
       </SettingRow>
       <SettingRow label={t('selectionAsk.hotkey.title')}>
-        {prefs.qaHotkey ? (
           <ShortcutRecorder
-            value={prefs.qaHotkey}
-            alignRecordButton
+            value={prefs.qaHotkey ?? UNBOUND_SHORTCUT}
+            alignRecordButton allowClear
             onSave={async binding => {
-              await setQaHotkey(binding);
-              await savePrefs({ ...prefs, qaHotkey: binding });
+              const configured = binding.primary.trim() ? binding : null;
+              await setQaHotkey(configured);
+              await savePrefs({ ...prefs, qaHotkey: configured });
             }}
           />
-        ) : (
-          <button
-            onClick={async () => {
-              const binding = defaultQaShortcut();
-              await setQaHotkey(binding);
-              await savePrefs({ ...prefs, qaHotkey: binding });
-            }}
-            style={{ fontSize: 12, padding: '5px 14px', background: 'var(--ol-blue)', color: '#fff', border: 0, borderRadius: 6, fontFamily: 'inherit', fontWeight: 500, cursor: 'default' }}
-          >
-            {t('selectionAsk.hotkey.enable', 'Enable')}
-          </button>
-        )}
       </SettingRow>
       <SettingRow label={t('settings.shortcuts.switchStyle')}>
         <ShortcutRecorder
           value={prefs.switchStyleHotkey}
-          alignRecordButton
+          alignRecordButton allowClear
           onSave={async binding => {
             await setSwitchStyleHotkey(binding);
             await savePrefs({ ...prefs, switchStyleHotkey: binding });
@@ -102,7 +92,7 @@ export function ShortcutsSection() {
       <SettingRow label={t('settings.shortcuts.openApp')}>
         <ShortcutRecorder
           value={prefs.openAppHotkey}
-          alignRecordButton
+          alignRecordButton allowClear
           onSave={async binding => {
             await setOpenAppHotkey(binding);
             await savePrefs({ ...prefs, openAppHotkey: binding });

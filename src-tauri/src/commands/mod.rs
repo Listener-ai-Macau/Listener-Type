@@ -1982,14 +1982,13 @@ pub fn get_qa_hotkey_label(coord: CoordinatorState<'_>) -> String {
     coord.qa_hotkey_label()
 }
 
-/// 设置 QA 快捷键并热更新 monitor。
-/// 传入 `None` 形式的字段不在这里支持——前端用 `binding == null` 时调下面的
-/// "disable" 写法（写 prefs.qa_hotkey = None）即可。
+/// Set an explicit QA shortcut, or disable it with null/an entirely empty binding.
 #[tauri::command]
 pub fn set_qa_hotkey(
     coord: CoordinatorState<'_>,
     binding: Option<ShortcutBinding>,
 ) -> Result<(), String> {
+    let binding = binding.filter(|value| !value.primary.trim().is_empty() || !value.modifiers.is_empty());
     if let Some(binding) = binding.as_ref() {
         crate::shortcut_binding::validate_binding(binding).map_err(|e| e.to_string())?;
         reject_device_fallback_reserved_hotkey(binding)?;
@@ -2251,6 +2250,9 @@ fn sync_dictation_hotkey_legacy_fields(prefs: &mut UserPreferences) {
         return;
     }
     prefs.hotkey.trigger = crate::types::HotkeyTrigger::Custom;
+    if prefs.dictation_hotkey.primary.trim().is_empty() {
+        prefs.hotkey.keys = Some(Vec::new());
+    }
     prefs.custom_combo_hotkey = if prefs.dictation_hotkey.primary.trim().is_empty() {
         None
     } else {

@@ -1,3 +1,4 @@
+import { shortcutDefaultsTranslations } from './shortcutDefaults.ts';
 import { textWorkspaceTranslations } from './textWorkspace.ts';
 import { firstUseTranslations } from './firstUse.ts';
 import { textDraftTranslations } from './textDraft.ts';
@@ -23,6 +24,7 @@ export const ko: typeof zhCN = {
   conciseDraft: conciseDraftTranslations.ko,
   messageDraft: messageDraftTranslations.ko,
   offlineHelp: offlineHelpTranslations.ko,
+  shortcutDefaults: shortcutDefaultsTranslations['ko'],
   textWorkspace: textWorkspaceTranslations['ko'],
   textDraft: textDraftTranslations['ko'],
   hardwareLayout: hardwareLayoutTranslations['ko'],

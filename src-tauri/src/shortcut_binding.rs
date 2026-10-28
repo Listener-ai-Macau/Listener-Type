@@ -13,6 +13,10 @@ pub enum ShortcutBindingError {
 }
 
 pub fn validate_binding(binding: &ShortcutBinding) -> Result<(), ShortcutBindingError> {
+    // Empty is an explicit opt-out, not a global shortcut to register.
+    if binding.primary.trim().is_empty() && binding.modifiers.is_empty() {
+        return Ok(());
+    }
     if legacy_modifier_trigger(binding).is_some() {
         return Ok(());
     }
@@ -230,6 +234,15 @@ fn char_to_code(ch: char) -> Option<Code> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unassigned_binding_is_valid_to_save_but_never_a_global_hotkey() {
+        let empty = ShortcutBinding::unconfigured();
+        assert!(validate_binding(&empty).is_ok());
+        assert!(legacy_modifier_trigger(&empty).is_none());
+        assert!(parse_global_hotkey(&empty).is_err());
+        assert!(validate_binding(&ShortcutBinding { primary: String::new(), modifiers: vec!["ctrl".into()] }).is_err());
+    }
 
     #[test]
     fn parses_combo_and_single_key() {

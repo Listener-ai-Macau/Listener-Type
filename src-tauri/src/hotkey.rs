@@ -1218,6 +1218,26 @@ mod platform {
         }
 
         #[test]
+        fn windows_unassigned_shortcuts_do_not_dispatch_recording_or_question_actions() {
+            let prefs = crate::types::UserPreferences::default();
+            assert_eq!(prefs.hotkey.trigger, HotkeyTrigger::Custom);
+            let (ctx, rx) = callback_context(shared(prefs.hotkey.trigger));
+            for key in [VK_RCONTROL, VK_LCONTROL, VK_RMENU, VK_LMENU, VK_RWIN] {
+                assert!(!dispatch_keyboard_event(&ctx, key, WM_KEYDOWN));
+                assert!(!dispatch_keyboard_event(&ctx, key, WM_KEYUP));
+            }
+            assert!(drain(&rx).is_empty());
+            // Shift observation is retained for device recording, but is not a
+            // recording/question shortcut and the coordinator gates translation
+            // on the explicitly configured translation binding.
+            assert!(!dispatch_keyboard_event(&ctx, VK_SHIFT, WM_KEYDOWN));
+            assert!(!dispatch_keyboard_event(&ctx, VK_SHIFT, WM_KEYUP));
+            assert_eq!(drain(&rx), vec![HotkeyEvent::TranslationModifierPressed]);
+            assert!(crate::shortcut_binding::legacy_modifier_trigger(&prefs.translation_hotkey).is_none());
+            assert!(prefs.translation_hotkey.primary.is_empty());
+        }
+
+        #[test]
         fn windows_modifier_edges_ignore_unrelated_keys_and_reemit_after_release() {
             let shared = shared(HotkeyTrigger::RightControl);
             let (ctx, rx) = callback_context(shared);
