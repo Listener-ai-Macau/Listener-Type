@@ -13,10 +13,10 @@ import { PoliteEditSuggestions } from './PoliteEditSuggestions';
 import { ProviderSettingsDialog } from './ProviderSettingsDialog';
 import { SUPPORTED_LANGUAGES } from '../lib/types';
 import { LocalTranslationSetup } from './LocalTranslationSetup';
-import { canSuggestChineseSource, localTranslationErrorKey, localTranslationKey, translationLanguageLabel } from '../lib/localTranslation';
+import { canSuggestChineseSource, localTargetCode, localTranslationErrorKey, localTranslationKey, translationLanguageLabel } from '../lib/localTranslation';
 import type { TranslationEngine, LocalTranslationReadiness, LocalTranslationQuality } from '../lib/localTranslation';
 import { SavedTextDraftsDialog } from './SavedTextDraftsDialog';
-import { preserveBufferedSourceFacts } from '../lib/bufferedSourceFacts';
+import { preserveBufferedSourceFacts, preserveTranslatedSourceFacts } from '../lib/bufferedSourceFacts';
 import { isMessageDraftStyle } from '../lib/messageDraftStyle';
 
 function withDraftOriginName(origin: string, suffix: string): string {
@@ -242,9 +242,11 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         // caching/display/save, never by rewriting later manual edits or by
         // secretly sending an earlier workflow original back to a service.
         const baseValue = offline ? { ...returned, packId: target.id, packName: target.name } : returned;
-        const value = !matching && !translationTarget && returned.usedTextService && target.baseMode !== 'raw' && !isMessageDraftStyle(target)
-          ? { ...baseValue, outputText: preserveBufferedSourceFacts(draft, returned.outputText).outputText }
-          : baseValue;
+        const review = !matching && returned.usedTextService
+          ? translationTarget && localTargetCode(translationTarget) ? preserveTranslatedSourceFacts
+            : !translationTarget && target.baseMode !== 'raw' && !isMessageDraftStyle(target) ? preserveBufferedSourceFacts : null
+          : null;
+        const value = review ? { ...baseValue, outputText: review(draft, returned.outputText).outputText } : baseValue;
         if (translationTarget) setOptionsOpen(false);
         completed.current.delete(cacheKey(target.id));
         completed.current.set(cacheKey(target.id), { signature: targetSignature, input: draft, result: value, edited: matching?.edited ?? null });
@@ -538,7 +540,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
               {t(editedOutput !== null ? 'textWorkspace.editedResult' : offline ? 'offlineTranslation.result' : result.usedTextService ? 'textWorkspace.serviceResult' : 'textWorkspace.localResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}
             </span>
           </div>
-          {result.usedTextService && result.outputText === draft && editedOutput === null && <p role="note" className="ol-style-trial-hint">{t('politeEdits.unchangedResult')}</p>}
+          {result.usedTextService && result.outputText === draft && editedOutput === null && <p role="note" className="ol-style-trial-hint">{t('politeEdits.unchangedResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}</p>}
           <textarea className="ol-style-trial-result-body ol-style-trial-result-editor ol-thinscroll"
             aria-label={t('style.trial.resultInput')} value={resultOutput} rows={8} maxLength={100000}
             disabled={copying || delivering || draftSaving}

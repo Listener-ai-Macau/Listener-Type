@@ -9,7 +9,7 @@ type Bound = '' | 'upper' | 'under' | 'lower' | 'over' | 'exact' | 'approx';
 type Qualifier = Span & { am?: string; pm?: string };
 type Clock = Span & { key: string; period: Period; relation: string; negated: boolean; qualifier?: Qualifier;
   insertAt: number; language: 'en' | 'zh'; implicitPeriod: boolean; rawHour: number; rangeStart: boolean };
-type Quantity = Span & { key: string; family: string; bound: Bound; qualifiers: Span[] };
+type Quantity = Span & { key: string; family: string; bound: Bound; qualifiers: Span[]; genericCounter?: boolean };
 type Edit = Span & { value: string };
 
 export interface BufferedFactReview { outputText: string; correctedFacts: number }
@@ -90,7 +90,13 @@ function clocks(text: string): Clock[] {
     if (!match[1] && !match[2] && !match[4] && !match[5] && !match[6] && !/[时時]/u.test(match[0])) {
       const before=text.slice(0,match.index!),after=text.slice(match.index!+match[0].length);
       const standalone=!before.trim() && /^[。.!\s]*$/u.test(after);
-      const timeBefore=/(?:星期[一二三四五六日天]|[周週][一二三四五六日天]|今天|明天|后天|後天|时间|時間|时刻|時刻|约在?|約在?|定于|定於|安排在|安排於)(?:的)?[：: \t]*$/u.test(before);
+      const localBefore=before.split(/[。！？!?.,，;；\r\n]/).slice(-1)[0];
+      const contextualPoint=/(?:星期[一二三四五六日天]|[周週][一二三四五六日天]|今天|明天|后天|後天|会议|會議|演示|预约|預約|闹钟|鬧鐘|日程)/u.test(localBefore)
+        && /^\s*(?:[，,。.;；！？!?]|$)/u.test(after);
+      const previous=found[found.length-1];
+      const correction=previous && /^\s*[,，]\s*(?:而?不是|并非|並非)\s*$/u.test(text.slice(previous.end,match.index!))
+        && /^\s*(?:[，,。.;；！？!?]|$)/u.test(after);
+      const timeBefore=contextualPoint || correction || /(?:星期[一二三四五六日天]|[周週][一二三四五六日天]|今天|明天|后天|後天|时间|時間|时刻|時刻|约在?|約在?|定于|定於|安排在|安排於)(?:的)?[：: \t]*$/u.test(before);
       const timeAfter=/^\s*(?:见|見|开会|開會|开始|開始|结束|結束|到达|到達|出发|出發|抵达|抵達|来|來|举行|舉行)/u.test(after);
       if(!standalone && !timeBefore && !timeAfter)continue;
     }
@@ -114,7 +120,8 @@ function clocks(text: string): Clock[] {
       || /^\s*(?:ratio|scale|比例|比率)(?:\b|[。,.，])/iu.test(text.slice(end))))continue;
     const previous = found.filter(old=>old.language==='en' && old.end<=match.index!).slice(-1)[0];
     const rangeContinuation = previous && previous.rangeStart && /^\s*(?:and|to|[-–—])\s*$/i.test(text.slice(previous.end,match.index!));
-    if (!match[3] && !match[4] && !match[6] && !((/^(?:at|before|after|by|from|between|to)$/i.test(match[1] ?? '') || rangeContinuation) && clockContext.test(clause(text,match.index!,end)))) continue;
+    const correction=previous && /^\s*[,;]?\s*(?:not|rather than|instead of)\s*$/i.test(text.slice(previous.end,match.index!));
+    if (!match[3] && !match[4] && !match[6] && !correction && !((/^(?:at|before|after|by|from|between|to)$/i.test(match[1] ?? '') || rangeContinuation) && clockContext.test(clause(text,match.index!,end)))) continue;
     if (quantityAfter.test(text.slice(end))) continue;
     let period: Period = rawPeriod ? periodValue(rawPeriod) : hour > 12 ? 'pm' : hour===0 ? 'am' : '';
     const partStart = rawPeriod ? match.index! + match[0].lastIndexOf(rawPeriod) : -1;
@@ -142,8 +149,10 @@ const unitAliases: [RegExp,string][] = [
   [/^(?:%|percent|百分之)$/iu,'percent'],[/^(?:people|persons?|attendees?|participants?|人|位)$/iu,'people'],
   [/^(?:items?|pieces?|units?|个|個|件|项|項)$/iu,'items'],[/^(?:kg|kilograms?|公斤|千克)$/iu,'kg'],
   [/^(?:km|kilomet(?:er|re)s?|公里|千米)$/iu,'km'],
+  [/^(?:seconds?|秒钟|秒鐘|秒)$/iu,'seconds'],[/^(?:minutes?|分钟|分鐘)$/iu,'minutes'],
+  [/^(?:hours?|小时|小時)$/iu,'hours'],[/^(?:days?|天)$/iu,'days'],[/^(?:weeks?|周|週)$/iu,'weeks'],
 ];
-const unitPattern = '(?:U\\.?S\\.? dollars?|USD|US\\$|dollars?|美元|美金|EUR|euros?|欧元|歐元|CNY|RMB|人民币|人民幣|GBP|pounds?|英镑|英鎊|percent|%|people|persons?|attendees?|participants?|items?|pieces?|units?|kilograms?|kg|kilomet(?:er|re)s?|km|公斤|千克|公里|千米|个|個|件|项|項|人|位|元)';
+const unitPattern = '(?:U\\.?S\\.? dollars?|USD|US\\$|dollars?|美元|美金|EUR|euros?|欧元|歐元|CNY|RMB|人民币|人民幣|GBP|pounds?|英镑|英鎊|percent|%|people|persons?|attendees?|participants?|items?|pieces?|units?|kilograms?|kg|kilomet(?:er|re)s?|km|seconds?|minutes?|hours?|days?|weeks?|秒钟|秒鐘|秒|分钟|分鐘|小时|小時|天|周|週|公斤|千克|公里|千米|个|個|件|项|項|人|位|元)';
 function bounds(text: string, start: number, end: number): {bound:Bound;qualifiers:Span[]} {
   const candidates: {bound:Bound;span:Span}[]=[];
   const patterns: [Bound,string][] = [
@@ -191,10 +200,52 @@ function quantities(text: string): Quantity[] {
         if(overlap.key!==key)fail();
         overlap.start=Math.min(start,overlap.start);overlap.end=Math.max(end,overlap.end);
         Object.assign(overlap,bounds(text,overlap.start,overlap.end));
-      } else found.push({start,end,key,family,...bounds(text,start,end)});
+      } else found.push({start,end,key,family,genericCounter:/^(?:个|個)$/u.test(match[unitIndex]),...bounds(text,start,end)});
     }
   }
   return found.sort((a,b)=>a.start-b.start);
+}
+/** A translated count can name the object directly (one/a button), without
+ * translating the Chinese classifier as "one item". Match only explicit
+ * count counterparts; money, duration, dates and clocks never supply them.
+ * Ambiguous matches fail rather than choosing a noun or changing a number.
+ */
+function translatedQuantities(source:string,target:string): [Quantity[],Quantity[]] {
+  const left=quantities(source),right=quantities(target);
+  const count=(q:Quantity)=>q.family==='items'||q.family==='people';
+  const value=(q:Quantity)=>q.key.slice(q.key.indexOf(':')+1);
+  for(const [items,others] of [[left,right],[right,left]])for(const item of items)if(item.genericCounter) {
+    const families=new Set(others.filter(q=>count(q)&&value(q)===value(item)).map(q=>q.family));
+    if(families.size>1)fail();
+    if(families.size===1){item.family=[...families][0];item.key=item.family+':'+value(item);}
+  }
+  for(const [text,items,others] of [[target,right,left],[source,left,right]] as const) {
+    const clockSpans=clocks(text);
+    for(const [key,wanted] of groups(others.filter(count))) {
+      const missing=wanted.length-items.filter(q=>q.key===key).length;
+      if(missing<=0)continue;
+      const number=value(wanted[0]);
+      const candidates:Quantity[]=[];
+      const pattern=new RegExp(`(?<![A-Za-z\\d])(${numberPattern})(?![A-Za-z\\d])`,'giu');
+      const collect=(start:number,end:number,raw:string)=>{
+        if(quantityValue(raw)!==number || [...items,...clockSpans].some(q=>start<q.end&&q.start<end))return;
+        const after=text.slice(end);
+        if(!/^[ -]+[A-Za-z]/u.test(after))return;
+        if(/\b(?:January|February|March|April|May|June|July|August|September|October|November|December)[ \t]+$/iu.test(text.slice(0,start)))return;
+        const next=/^[ -]+([A-Za-z]+)/u.exec(after)?.[1]??'';
+        const known=unitAliases.find(([unit])=>unit.test(next))?.[1];
+        if(known && known!==wanted[0].family)return;
+        candidates.push({start,end,key,family:wanted[0].family,...bounds(text,start,end)});
+      };
+      for(const match of text.matchAll(pattern))collect(match.index!,match.index!+match[0].length,match[1]);
+      if(!candidates.length && number==='1')for(const match of text.matchAll(/\b(?:a|an)(?=[ \t]+(?!few\b|lot\b|couple\b|number\b|bit\b|half\b|quarter\b)[A-Za-z])/giu)) {
+        collect(match.index!,match.index!+match[0].length,'1');
+      }
+      if(candidates.length!==missing)fail();
+      items.push(...candidates);
+    }
+  }
+  return [left,right];
 }
 function groups<T extends {key:string}>(items:T[]): Map<string,T[]> {
   const map=new Map<string,T[]>();
@@ -238,12 +289,12 @@ function addEdit(edits:Edit[], edit:Edit): void {
   if(edits.some(old=>edit.start<old.end && old.start<edit.end)) fail();
   edits.push(edit);
 }
-export function preserveBufferedSourceFacts(source: string, outputText: string): BufferedFactReview {
+function preserveFacts(source: string, outputText: string, translation:boolean): BufferedFactReview {
   if (source===outputText) return {outputText,correctedFacts:0};
   const edits:Edit[]=[];
   const sourceClocks=groups(clocks(source)),targetClocks=groups(clocks(outputText));
+  if(sourceClocks.size!==targetClocks.size) fail();
   if(sourceClocks.size) {
-    if(sourceClocks.size!==targetClocks.size) fail();
     for(const [key,originals] of sourceClocks) {
       const targets=targetClocks.get(key);
       if(!targets || targets.length!==originals.length || new Set(originals.map(x=>x.period+'|'+x.relation+'|'+x.negated)).size!==1) fail();
@@ -252,14 +303,20 @@ export function preserveBufferedSourceFacts(source: string, outputText: string):
         if(original.relation!==target.relation || original.negated!==target.negated) fail();
         if(original.period===target.period) continue;
         if(target.implicitPeriod) fail();
-        if(target.qualifier) addEdit(edits,{...target.qualifier,value:original.period ? target.qualifier[original.period]! : ''});
+        if(target.qualifier) {
+          // AM./p.m. can also own the sentence's final dot. Removing an
+          // unsupported daypart must not join sentences or remove that stop.
+          const keepStop=/\.$/.test(outputText.slice(target.qualifier.start,target.qualifier.end))
+            && /^(?:\s*$|\s+[A-Z])/u.test(outputText.slice(target.qualifier.end));
+          addEdit(edits,{...target.qualifier,value:original.period ? target.qualifier[original.period]! : keepStop?'.':''});
+        }
         else if(original.period) addEdit(edits,{start:target.insertAt,end:target.insertAt,
           value:target.language==='zh' ? original.period==='am'?'上午':'下午' : original.period==='am'?' a.m.':' p.m.'});
       }
     }
   }
-  const sourceQuantities=groups(quantities(source)),targetQuantities=groups(quantities(outputText));
-  const families=new Set([...sourceQuantities.values()].flat().map(x=>x.family));
+  const [sourceNumbers,targetNumbers]=translation?translatedQuantities(source,outputText):[quantities(source),quantities(outputText)];
+  const sourceQuantities=groups(sourceNumbers),targetQuantities=groups(targetNumbers);
   for(const [key,originals] of sourceQuantities) {
     const targets=targetQuantities.get(key);
     if(!targets || targets.length!==originals.length || new Set(originals.map(x=>x.bound)).size!==1) fail();
@@ -270,15 +327,19 @@ export function preserveBufferedSourceFacts(source: string, outputText: string):
       for(const qualifier of target.qualifiers) addEdit(edits,{...qualifier,value:''});
     }
   }
-  for(const [key,targets] of targetQuantities) if(families.has(targets[0].family) && !sourceQuantities.has(key)) fail();
+  for(const key of targetQuantities.keys()) if(!sourceQuantities.has(key)) fail();
   const sourceCalendar=calendarFacts(source),targetCalendar=calendarFacts(outputText);
   for(const category of ['weekday:','date:','year:']) {
     const wanted=sourceCalendar.filter(x=>x.startsWith(category)).sort();
-    if(wanted.length) {
-      const actual=targetCalendar.filter(x=>x.startsWith(category)).sort();
-      if(wanted.length!==actual.length || wanted.some((x,index)=>x!==actual[index]))fail();
-    }
+    const actual=targetCalendar.filter(x=>x.startsWith(category)).sort();
+    if(wanted.length!==actual.length || wanted.some((x,index)=>x!==actual[index]))fail();
   }
   const corrected=edits.sort((a,b)=>b.start-a.start).reduce((text,edit)=>text.slice(0,edit.start)+edit.value+text.slice(edit.end),outputText);
   return {outputText:corrected,correctedFacts:edits.length};
+}
+export function preserveBufferedSourceFacts(source:string,output:string):BufferedFactReview {
+  return preserveFacts(source,output,false);
+}
+export function preserveTranslatedSourceFacts(source:string,output:string):BufferedFactReview {
+  return preserveFacts(source,output,true);
 }
