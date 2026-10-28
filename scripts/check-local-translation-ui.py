@@ -28,7 +28,7 @@ with sync_playwright() as pw:
       window.__offlineStatus.preparing=false;window.__preparePending.reject('local_translation_cancelled');window.__preparePending=null;return;
     }
     if(cmd==='try_local_translation_text'){
-      if(window.__offlineFail)return Promise.reject('local_translation_not_ready');
+      if(window.__offlineFail)return Promise.reject(typeof window.__offlineFail==='string'?window.__offlineFail:'local_translation_not_ready');
       return new Promise((resolve,reject)=>{const complete=()=>resolve({packId:'local_translation:'+args.sourceLanguage+':'+args.targetLanguage,packName:'fixture',outputText:args.quality==='enhanced'?'Enhanced fixture result':'Do not send the email; save the draft only.',usedTextService:false,elapsedMs:410});complete.requestId=args.requestId;complete.cancel=()=>reject('local_translation_cancelled');window.__offlinePending.push(complete);});
     }
     if(cmd==='cancel_local_translation'){const i=window.__offlinePending.findIndex(x=>x.requestId===args.requestId);if(i>=0)window.__offlinePending.splice(i,1)[0].cancel();return;}
@@ -194,6 +194,13 @@ with sync_playwright() as pw:
   expect(page.locator('.ol-style-trial-input')).to_have_value('另一份原文，不要丢失。')
   expect(page.locator('.ol-style-trial-result-editor')).to_have_count(0);assert calls('try_translation_text')==[]
   checks.append('Source change immediately fences readiness/results; local failure keeps source with no paid retry')
+  for failure in ['local_translation_time_fidelity','local_translation_date_fidelity']:
+   page.evaluate('(failure)=>window.__offlineFail=failure',failure);run.click()
+   expect(page.locator('dialog[open] [role=alert]')).to_contain_text('date, time or paragraph structure')
+   expect(page.locator('.ol-style-trial-input')).to_have_value('另一份原文，不要丢失。')
+   expect(page.locator('.ol-style-trial-result-editor')).to_have_count(0)
+   expect(engine).to_have_value('local');assert calls('try_translation_text')==[]
+  checks.append('Time/year fidelity rejection retains the exact source, accepts no partial result and never silently uploads or selects cloud; the existing explicit method selector remains available')
   page.get_by_role('combobox',name='Translate output to',exact=True).select_option('日本語')
   expect(run).to_be_disabled();expect(setup).to_contain_text('Chinese ↔ English')
   expect(engine).to_have_value('local');assert calls('try_translation_text')==[]

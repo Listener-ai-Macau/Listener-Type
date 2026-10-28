@@ -367,14 +367,17 @@ impl Preparation {
     }
 }
 
-fn worker_request_owned(runtime: &Path, model: &Path, text: &str, timeout: Duration, owner: &supervised::Request) -> Result<String, String> {
-    supervised::run(runtime, WORKER, serde_json::json!({"text": text, "model": model.join("model"), "tokenizer": model.join("sentencepiece.model")}), timeout, owner)
+fn worker_request_owned(runtime: &Path, model: &Path, source: &str, text: &str, timeout: Duration, owner: &supervised::Request) -> Result<String, String> {
+    let script = format!("{}\n{}\n{WORKER}",
+        include_str!("../resources/translation/date_fidelity.py"),
+        include_str!("../resources/translation/time_fidelity.py"));
+    supervised::run(runtime, &script, serde_json::json!({"text": text, "source": source, "model": model.join("model"), "tokenizer": model.join("sentencepiece.model")}), timeout, owner)
 }
 
 #[cfg(test)]
 fn worker_request(runtime: &Path, model: &Path, text: &str, timeout: Duration) -> Result<String, String> {
     let owner = supervised::Request::reserve(None)?;
-    worker_request_owned(runtime, model, text, timeout, &owner)
+    worker_request_owned(runtime, model, "zh", text, timeout, &owner)
 }
 
 fn translate_owned(source: &str, target: &str, text: &str, quality: LocalTranslationQuality, owner: &supervised::Request) -> Result<String, String> {
@@ -386,7 +389,7 @@ fn translate_owned(source: &str, target: &str, text: &str, quality: LocalTransla
     let runtime = root.join(RUNTIME);
     let model = root.join(pair.asset.id);
     if !manifest_ready(&runtime, true) || !manifest_ready(&model, true) { return Err("local_translation_not_ready".into()); }
-    worker_request_owned(&runtime, &model, text, Duration::from_secs(45), owner)
+    worker_request_owned(&runtime, &model, source, text, Duration::from_secs(45), owner)
 }
 
 #[cfg(test)]
@@ -515,6 +518,29 @@ mod tests {
         assert_eq!(reservation.run().err().unwrap(), "local_translation_cancelled");
         assert!(!PREPARING.load(Ordering::Acquire));
         CANCEL.store(false, Ordering::Release);
+    }
+
+    #[test]
+    #[ignore = "requires explicitly supplied prepared CPU assets; no download or daily data"]
+    fn light_worker_keeps_source_clock_facts_through_the_owned_host() {
+        let root = PathBuf::from(std::env::var_os("LISTENER_TRANSLATION_PREPARED_ROOT").expect("explicit prepared assets"));
+        let runtime = root.join(RUNTIME);
+        let model = root.join(pair_for("zh", "en").unwrap().asset.id);
+        assert!(manifest_ready(&runtime, true));
+        assert!(manifest_ready(&model, true));
+        let owner = supervised::Request::reserve(None).unwrap();
+        let text = "师傅原来说上午十点到，但我们十点到十一点有客户会议，麻烦改到下午两点以后。";
+        let result = worker_request_owned(&runtime, &model, "zh", text, Duration::from_secs(45), &owner).unwrap();
+        assert!(result.contains("10 a.m."), "{result}");
+        assert!(result.contains("between 10 and 11"), "{result}");
+        assert!(!result.contains("11 p.m."), "{result}");
+        assert!(result.contains("after 2 p.m."), "{result}");
+        // The host must preserve the worker's recoverable fact error instead
+        // of disguising it as a missing runtime or accepting partial output.
+        let error = supervised::run(&runtime,
+            "import json; print(json.dumps({'error':'local_translation_time_fidelity'}))",
+            serde_json::json!({}), Duration::from_secs(10), &owner).unwrap_err();
+        assert_eq!(error, "local_translation_time_fidelity");
     }
 
     #[test]

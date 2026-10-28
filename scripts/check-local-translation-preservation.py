@@ -21,6 +21,9 @@ def main():
     args = parser.parse_args()
     worker = args.worker or Path(__file__).resolve().parents[1] / 'src-tauri/resources/translation/worker.py'
     code = worker.read_text(encoding='utf8')
+    if args.worker is None:
+        code = '\n'.join((worker.with_name(name).read_text(encoding='utf8') for name in
+                          ['date_fidelity.py', 'time_fidelity.py'])) + '\n' + code
     cases = [
         ('zh', '明天下午三点开会，请带上产品样品。', [('3:00',), ('sample',)]),
         ('en', 'Do not send the email. Save the draft only.', [('不',), ('存',), ('草',)]),
@@ -47,7 +50,7 @@ def main():
     rows = []
     for language, text, meaning_groups in cases:
         pair_root = args.zh_en if language == 'zh' else args.en_zh
-        request = {'text': text, 'model': str(pair_root / 'model'),
+        request = {'text': text, 'source': language, 'model': str(pair_root / 'model'),
                    'tokenizer': str(pair_root / 'sentencepiece.model')}
         started = time.perf_counter()
         process = subprocess.run([str(args.runtime / 'python.exe'), '-I', '-S', '-X', 'utf8', '-c', code],

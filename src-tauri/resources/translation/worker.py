@@ -60,6 +60,9 @@ def translate(request):
     text = request['text']
     if not isinstance(text, str) or not text.strip() or len(text) > 4000:
         raise ValueError('local_translation_invalid_text')
+    source = request['source']
+    if source not in {'zh', 'en'}:
+        raise ValueError('local_translation_unsupported_pair')
     model = Path(request['model'])
     # Native model readers receive short relative paths. Python's wide-char
     # filesystem bridge owns the customer-specific absolute directory.
@@ -106,8 +109,15 @@ def translate(request):
 
     # Preserve paragraph boundaries, including empty lines, without uploading
     # any draft or recording. Ordinary ASCII underscores are left intact.
-    return ''.join(value if re.fullmatch(r'\r\n|\r|\n', value) else paragraph(value)
-                   for value in re.split(r'(\r\n|\r|\n)', text))
+    output = []
+    for value in re.split(r'(\r\n|\r|\n)', text):
+        if not value.strip():
+            output.append(value)
+            continue
+        translated, _ = preserve_explicit_years(value, paragraph(value), source)
+        translated, _ = preserve_explicit_times(value, translated, source)
+        output.append(value[:len(value) - len(value.lstrip())] + translated + value[len(value.rstrip()):])
+    return ''.join(output)
 
 
 if __name__ == '__main__':
@@ -120,5 +130,12 @@ if __name__ == '__main__':
         sys.stdout.buffer.flush()
     except Exception as error:
         # No request text or model contents are printed in failure diagnostics.
+        known = str(error)
+        if known not in {'local_translation_invalid_text', 'local_translation_unsupported_pair',
+                         'local_translation_output_limit', 'local_translation_empty_output',
+                         'local_translation_date_fidelity', 'local_translation_time_fidelity'}:
+            known = 'local_translation_runtime_failed'
+        sys.stdout.buffer.write(json.dumps({'error': known}).encode('utf8'))
+        sys.stdout.buffer.flush()
         sys.stderr.write(type(error).__name__ + ': ' + str(error)[:600])
         sys.exit(1)
