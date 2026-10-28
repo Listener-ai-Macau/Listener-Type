@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-29T00:38:53.104936+08:00",
+  "updatedAt": "2026-10-29T01:34:47.400667+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 222,
-    "source": "b7b624aff1256a648af936efdcaa18fe297229ca",
-    "sourceTag": "build-source/type222-20261029",
+    "build": 223,
+    "source": "b9fc00849c82544598b2a981c461951b94ca9483",
+    "sourceTag": "build-source/type223-20261029",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "30d95c0a57005c518c2f6cc364f6da40ceb1c182828beb99d511d0b0238cdaae",
+    "sha256": "e84002a1336cce3d4c5a7b9e12eb26570ceddd659670c920bdeaac82d1f74311",
     "sizeBytes": 299868160,
-    "exeSha256": "87208130dc24dec1ffd1d0507c95ba7f7bcb5e1f5dd56785d012bdd2db805174",
+    "exeSha256": "440cc2df4dc23c388a3d66d04300134794c04a55426586070a0abae0636def70",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -599,7 +599,13 @@
     "manualEditsAndImmutableNativeV1Saves222": true,
     "audioActionsNativeExpandedEditedSavedNarrowReread222": true,
     "actualPublicSampleAsrAndLocalTextProtocolFixture222": true,
-    "noNewLiveHardwareGlobalOrCrossPCQualification222": true
+    "noNewLiveHardwareGlobalOrCrossPCQualification222": true,
+    "bufferedCloudRecognizedFacts223": true,
+    "nativeCloudProtocolCurrentInputV1Saves223": true,
+    "manualEditsAndErrorRecovery223": true,
+    "unchangedElapsedInterpolation223": true,
+    "prior222AudioAnd221AsrSourceUnchanged223": true,
+    "noNewLiveHardwareGlobalCrossPCQualification223": true
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -617,6 +623,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build222-20261029"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build223-20261029"
   }
 }
