@@ -6,14 +6,14 @@ Listener Type converts speech to text at your cursor. It can use a computer micr
 
 | Need | Feature and entry point |
 | --- | --- |
-| Start and stop recording | Right Ctrl on Windows, or the keyboard knob; Esc cancels |
+| Start and stop recording | Recording button, keyboard knob or a shortcut you configure; Esc cancels |
 | See progress | Recording capsule; text there is a preview until insertion is confirmed |
 | Preserve wording | Raw, the default output mode |
 | Polish text | Light, Structured or Formal with a configured text provider |
 | Customize expression | Editable local styles; ZIP import/export |
-| Translate | Target language selection and Shift during recording |
+| Translate | Target language selection and an optional configured shortcut during recording |
 | Improve terminology | Vocabulary terms, notes, presets and literal correction rules |
-| Ask about a selection | Ctrl+Shift+; opens Ask; check the captured passage |
+| Ask about a selection | Configure a question shortcut, then use it on a selection; check the captured passage |
 | Recover recent text | History, copying, deletion and retention preferences |
 | Start by voice | Configurable wake phrase and optional three-sample voiceprint enrollment in Device settings |
 | Customize the hardware | Four key mappings and knob click; independent light-zone brightness |
@@ -21,6 +21,8 @@ Listener Type converts speech to text at your cursor. It can use a computer micr
 | Maintain the product | App updates, matching keyboard OTA, pairing recovery and diagnostics |
 
 The app is free and open source. Cloud services bill separately and use your credentials. Windows local recognition can start without a cloud ASR key after its runtime and model have been downloaded. Styles, translation and voice questions have additional provider requirements.
+
+All five computer global shortcuts start unassigned from Type build217. Record only those you need in Settings → Shortcuts, or clear them individually. Updates preserve existing saved bindings; hardware mappings remain separate.
 
 Voice questions specifically require Volcengine streaming App Key / Access Key and a text provider. A local dictation model does not replace that requirement.
 

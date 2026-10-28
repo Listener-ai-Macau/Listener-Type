@@ -88,20 +88,23 @@ With Listener connected and both speech and answer services configured, say the 
 
 The button route remains available through **Tools → Selection questions**: open the card, click **Start asking**, speak into the computer microphone, then click **Finish and ask**. This route keeps the computer microphone source without changing the everyday Listener input setting.
 
-To ask about selected text, select it in another application and press Ctrl+Shift+; to open Ask. Check that the intended selection has been captured before asking. Selected text is sent to the configured text provider; long selections are bounded. The card supports follow-up questions. Closing it clears this conversation. Question history has a separate preference.
+To ask about selected text, first record your question shortcut in **Settings → Shortcuts**. Select text in another application and use that configured shortcut to open Ask. Check that the intended selection has been captured before asking. Selected text is sent to the configured text provider; long selections are bounded. The card supports follow-up questions. Closing it clears this conversation. Question history has a separate preference.
 
 Speech recognition and answers use your configured services and their usage charges. Each answer request includes one current local timestamp as context; review important facts. Saved configuration alone does not establish network access, valid credentials or available quota.
 
 ## Shortcuts and preferences
 
-| Action | Windows default |
+From Type build217, all five computer global shortcuts start **Not set**. Record only the shortcuts you need in **Settings → Shortcuts**, or clear them individually. Updates preserve existing saved bindings.
+
+| Action | First-use state |
 | --- | --- |
-| Start / stop dictation | Right Ctrl |
-| Cancel recording | Esc |
-| Open selection questions | Ctrl+Shift+; |
-| Restyle the previous result | Ctrl+Shift+S |
-| Open Listener Type | Ctrl+Shift+O |
-| Mark the session for translation | Shift while recording, with a target selected |
+| Start / stop dictation | Not set |
+| Mark the session for translation | Not set |
+| Open question window | Not set |
+| Restyle the previous result | Not set |
+| Open Listener Type | Not set |
+
+Configured recording shortcuts use Toggle by default: press once to start and again to stop. You can also use the recording button or Listener knob without configuring a computer shortcut. Esc still cancels an active recording. A configured translation shortcut also requires a target language selected on the Translation page. Check shortcut monitoring in **Settings → Permissions** if your configured binding does not respond. Hardware mappings are separate.
 
 Settings include shortcut customization, language, theme, autostart, recording capsule, mute, clipboard and streaming insertion. Automatic clause insertion continues while speaking; after completion, the clipboard retains the whole submitted session body once the last paste is consumed. A user copy cancels pending retention. Editors without readback keep the safe paste payload, and the whole body remains available in History. Auto-send is off by default; optional send actions are Enter or Ctrl+Enter. Closing the main window can hide the app to the tray; choose Quit from the tray to exit fully. App autostart and keyboard automatic shutdown are separate settings.
 
