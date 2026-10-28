@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-28T19:32:02.779482+08:00",
+  "updated_at": "2026-10-28T20:33:52.794509+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9385,9 +9385,45 @@
         "installed": true,
         "publicPrepared": true
       }
+    },
+    {
+      "id": "light_cpu_translation_source_clock_facts_and_explicit_years",
+      "repo": "type",
+      "commit": "8de658fd39e43edbbfb082e38cec6be5fa73ca81",
+      "commit_subject": "Preserve source clock facts and explicit years in light CPU translation",
+      "subject": "Recognized time ranges/dayparts and before/after facts are protected in the actual light worker, with explicit-year checks and recoverable errors",
+      "state": "source_checkpoint_actual_saved_CPU_and_controlled_UI_passed_native_host_and_delivery_pending",
+      "humanAccepted": false,
+      "protects": [
+        "The light route receives the selected source language and embeds date/time helpers rather than silently relying on enhanced-only guards.",
+        "Only equal hour/minute point/range anchors can receive explicit source dayparts or relations; omitted source dayparts stay unspecified. Duplicate conflicting or absent anchors reject the result, retaining the source.",
+        "Clock parsing distinguishes dates/quantities/decimal ratios, dotted minutes, weekday-adjacent Chinese numerals and 24-hour equivalence; recognized scope does not certify all temporal language or general semantics.",
+        "Worker fidelity errors reach the existing UI as recoverable source-retaining errors, without a partial result, automatic upload or cloud fallback.",
+        "Paragraph delimiters and edge whitespace survive; existing CPU beam/model, optional service conditions, owned cancellation and saved-draft schema stay intact."
+      ],
+      "guards": [
+        "python -m unittest discover -s scripts -p 'test_translation_*.py'",
+        "python scripts/check-local-translation-preservation.py --runtime <saved-runtime> --zh-en <saved-pair> --en-zh <saved-pair> --report <result>",
+        "python scripts/check-local-translation-ui.py --url <controlled-ui> --report <result>",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib local_translation:: -- --test-threads=1",
+        "local_translation::tests::light_worker_keeps_source_clock_facts_through_the_owned_host with explicit prepared CPU assets",
+        "npm run build"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\time-fidelity220-cpu-attempt1.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\time-fidelity220-cpu-attempt2.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\translation-preservation220-attempt1.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\translation-preservation220-attempt2.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\translation-ui220-attempt1.json"
+      ],
+      "delivery": {
+        "installed": false,
+        "publicPrepared": false,
+        "dailyBuild": 219
+      }
     }
   ],
-  "feature_routes_updated_at": "2026-10-28T19:32:02.779482+08:00",
+  "feature_routes_updated_at": "2026-10-28T20:33:52.794509+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -10718,7 +10754,7 @@
     },
     {
       "id": "offline-text-translation",
-      "accepted_scope": "Existing213 ordinary native scope remains. Optional818ed43 CPU candidate has19 worker inputs,13 affected native controls and React quality/cancellation/save checks; new matching MSI/whole-app native use/independent feedback pending. Ordinary214 private native default-light preparation/translation/edit/save/reread/return and owned Cancel/Close source-retention proof added; original evidence and remaining physical/global/other-model limits retained.",
+      "accepted_scope": "Existing213 ordinary native scope remains. Optional818ed43 CPU candidate has19 worker inputs,13 affected native controls and React quality/cancellation/save checks; new matching MSI/whole-app native use/independent feedback pending. Ordinary214 private native default-light preparation/translation/edit/save/reread/return and owned Cancel/Close source-retention proof added; original evidence and remaining physical/global/other-model limits retained. 8de658fd source checkpoint adds recognized time/year checks to the actual light CPU route; matching native host/package and natural feedback pending. All old semantic and original22 limits remain.",
       "baseline_state": "214_installed_exact_light_workflow_passed_public_prepared",
       "guard_entries": [
         "offline_translation_optional_verified_worker_no_cloud_fallback",
@@ -10727,7 +10763,8 @@
         "local_translation_actual_route_notice_and_exact_saved_draft_navigation",
         "local_saved_draft_deleted_or_missing_record_never_becomes_another_draft",
         "local_translation_abbreviation_boundaries_and_reachable_workspace_exit",
-        "optional_cpu_translation_source_fidelity_and_owned_worker_lifecycle"
+        "optional_cpu_translation_source_fidelity_and_owned_worker_lifecycle",
+        "light_cpu_translation_source_clock_facts_and_explicit_years"
       ],
       "paths": {
         "type": [
@@ -10760,7 +10797,10 @@
           "src-tauri/resources/translation/enhanced_worker.py",
           "src-tauri/resources/translation/enhanced-catalog.json",
           "scripts/test_translation_date_fidelity.py",
-          "scripts/test_translation_result_fidelity.py"
+          "scripts/test_translation_result_fidelity.py",
+          "src-tauri/resources/translation/time_fidelity.py",
+          "scripts/test_translation_time_fidelity.py",
+          "scripts/test_translation_light_worker.py"
         ]
       }
     },
