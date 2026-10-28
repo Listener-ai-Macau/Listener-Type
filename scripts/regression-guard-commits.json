@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-28T20:33:52.794509+08:00",
+  "updated_at": "2026-10-28T20:45:05.821268+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9389,8 +9389,8 @@
     {
       "id": "light_cpu_translation_source_clock_facts_and_explicit_years",
       "repo": "type",
-      "commit": "8de658fd39e43edbbfb082e38cec6be5fa73ca81",
-      "commit_subject": "Preserve source clock facts and explicit years in light CPU translation",
+      "commit": "a21f16ddc25a028e40033898e594a298c9ca2c09",
+      "commit_subject": "Keep negated time boundaries from being reversed by clock repair",
       "subject": "Recognized time ranges/dayparts and before/after facts are protected in the actual light worker, with explicit-year checks and recoverable errors",
       "state": "source_checkpoint_actual_saved_CPU_and_controlled_UI_passed_native_host_and_delivery_pending",
       "humanAccepted": false,
@@ -9399,7 +9399,8 @@
         "Only equal hour/minute point/range anchors can receive explicit source dayparts or relations; omitted source dayparts stay unspecified. Duplicate conflicting or absent anchors reject the result, retaining the source.",
         "Clock parsing distinguishes dates/quantities/decimal ratios, dotted minutes, weekday-adjacent Chinese numerals and 24-hour equivalence; recognized scope does not certify all temporal language or general semantics.",
         "Worker fidelity errors reach the existing UI as recoverable source-retaining errors, without a partial result, automatic upload or cloud fallback.",
-        "Paragraph delimiters and edge whitespace survive; existing CPU beam/model, optional service conditions, owned cancellation and saved-draft schema stay intact."
+        "Paragraph delimiters and edge whitespace survive; existing CPU beam/model, optional service conditions, owned cancellation and saved-draft schema stay intact.",
+        "Clock repair must never reverse a negated before/after constraint; mismatched or uncertain local negation returns a recoverable fidelity error. Explicit no-earlier/no-later relations are represented separately."
       ],
       "guards": [
         "python -m unittest discover -s scripts -p 'test_translation_*.py'",
@@ -9414,13 +9415,18 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\time-fidelity220-cpu-attempt2.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\translation-preservation220-attempt1.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\translation-preservation220-attempt2.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\translation-ui220-attempt1.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\translation-ui220-attempt1.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/time-fidelity220-negation-cpu.json"
       ],
       "delivery": {
         "installed": false,
         "publicPrepared": false,
         "dailyBuild": 219
-      }
+      },
+      "source_commits": [
+        "8de658fd39e43edbbfb082e38cec6be5fa73ca81",
+        "a21f16ddc25a028e40033898e594a298c9ca2c09"
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-28T20:33:52.794509+08:00",
