@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-28T23:05:28.859522+08:00",
+  "updated_at": "2026-10-29T00:38:53.104936+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9475,9 +9475,47 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261028-build221\\type-artifact-verification.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261028-build221\\type221-installed.json"
       ]
+    },
+    {
+      "id": "buffered_current_input_facts_and_audio_result_action_reachability",
+      "subject": "Keep recognized facts tied to the current buffered rewrite input and retain accessible audio result actions through editing, saving and rereading",
+      "state": "source_UI_exact_MSI_protocol_real_sample_native_v1_store_verified_customer_stages_pending",
+      "protects": [
+        "Only the exact current submitted draft owns buffered rewrite fact checks; the first workflow original, cache identity and later explicit manual edits remain independent.",
+        "Recognized same-value EN/ZH clocks keep stated dayparts or remove unsupported ones. Conflicting, missing or ambiguously repeated anchors and negated clock relations retain input rather than silently guessing.",
+        "Recognized calendar anchors, quantities and amount bounds cannot silently change or disappear; explicit neutral amounts do not acquire a new upper/lower bound or an invented exactly qualifier. Decimal/large numeric comparison avoids floating-point loss.",
+        "Validation runs before cache/display/save; a rejected response starts no automatic paid retry, translation, original upload or target insertion.",
+        "Audio import title and primary actions/retention remain outside scrollable reference/result content, including edited/saved/library-return states and narrow viewports.",
+        "Real native v1 storage retains source plus exact edit, immutable later copies and reread. Existing221 ASR sources and five unassigned factory computer shortcuts remain intact."
+      ],
+      "guards": [
+        "node --experimental-strip-types src/lib/bufferedSourceFacts.test.ts",
+        "python scripts/check-buffered-source-facts-ui.py --url <controlled-ui> --report <result>",
+        "python scripts/check-audio-file-result-reachability-ui.py --url <controlled-ui> --report <result>",
+        "python scripts/check-audio-file-trial-ui.py --url <controlled-ui> --report <result>",
+        "python scripts/check-workspace-source-continuation-ui.py --url <controlled-ui> --report <result>",
+        "Existing comparison/concise lifecycle checks and matching MSI private native ordinary protocol/file/store probe; explicit real-service/model scope stays separate",
+        "npm run build"
+      ],
+      "repo": "type",
+      "commit": "b7b624aff1256a648af936efdcaa18fe297229ca",
+      "commit_subject": "Preserve buffered rewrite facts and keep audio result actions reachable",
+      "humanAccepted": false,
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/outputs/Listener-source-facts222-source.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/buffered-facts222-after2.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/audio-lifecycle222-after-navigation-fix.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/audio-result221-after1.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/workspace-source222-after2.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/style-comparison222-after1.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/concise-source222-after3.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native222-snapshot-20261029-002221\\source-facts222-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build222\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build222\\type222-installed.json"
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-28T23:05:28.859522+08:00",
+  "feature_routes_updated_at": "2026-10-29T00:38:53.104936+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -10661,7 +10699,7 @@
     },
     {
       "id": "text-workspace-clarity",
-      "accepted_scope": "Text workspace visual hierarchy and content-first saved-draft discovery only; speech/BLE/firmware unchanged. Type142 binds processing notice/eligibility to selected style/revision/retry; exact private MSI verifies actual policy/labels and separate actual-React fixtures cover delays, not a real unauthorized cloud request or visible-duration measurement. Exact ordinary215 private native submit/Close hit testing at both content scroll ends, real light translation and Cancel, keyless cloud-switch fee/confirmation visibility and exact edited-save/library-return proof added; no original22/global/physical/cross-PC closure. Fresh result Copy/Save/Continue/cloud actions are mouse-hit-testable after output without manual scrolling in desktop/narrow/zoomed views; native source/cache/v1 save checks match the exact candidate. No interactive global/hardware/cross-PC acceptance change. Full219 result lifecycle direct mouse checks cover named/saved-expanded states, library return, content top/bottom and private narrow viewport; original/source/cache/v1 saves and optional-shortcut guidance retained. Not a new speech/hardware/global/cross-PC qualification.",
+      "accepted_scope": "Text workspace visual hierarchy and content-first saved-draft discovery only; speech/BLE/firmware unchanged. Type142 binds processing notice/eligibility to selected style/revision/retry; exact private MSI verifies actual policy/labels and separate actual-React fixtures cover delays, not a real unauthorized cloud request or visible-duration measurement. Exact ordinary215 private native submit/Close hit testing at both content scroll ends, real light translation and Cancel, keyless cloud-switch fee/confirmation visibility and exact edited-save/library-return proof added; no original22/global/physical/cross-PC closure. Fresh result Copy/Save/Continue/cloud actions are mouse-hit-testable after output without manual scrolling in desktop/narrow/zoomed views; native source/cache/v1 save checks match the exact candidate. No interactive global/hardware/cross-PC acceptance change. Full219 result lifecycle direct mouse checks cover named/saved-expanded states, library return, content top/bottom and private narrow viewport; original/source/cache/v1 saves and optional-shortcut guidance retained. Not a new speech/hardware/global/cross-PC qualification. Type222 current-input buffered rewrite fact matching and fixed audio result action/retention areas passed controlled source/failure/cache/save workflows and exact ordinary MSI native UI/storage. The native probe used the real public-sample speech service and an explicitly controlled loopback compatible text service; it does not qualify all language/model meaning, live speech, hardware, global or cross-PC behavior. Original scopes and separate translation/generation contracts remain.",
       "baseline_state": "affected_ui_exact_native_installed_verified_not_customer_or_physical_qualified",
       "guard_entries": [
         "ui135_text_workspace_focus_and_content_first_saved_drafts",
@@ -10669,7 +10707,8 @@
         "workspace_fixed_submit_close_and_explicit_cloud_confirmation",
         "workspace_first_input_survives_translation_refinement_and_saved_continuation",
         "fresh_workspace_result_actions_revealed_without_losing_submit_or_cached_edits",
-        "workspace_result_toolbar_survives_name_save_return_and_resize"
+        "workspace_result_toolbar_survives_name_save_return_and_resize",
+        "buffered_current_input_facts_and_audio_result_action_reachability"
       ],
       "paths": {
         "type": [
@@ -10697,7 +10736,11 @@
           "src/i18n/settingsFeedback.ts",
           "src/lib/types.ts",
           "src/i18n/shortcutDefaults.ts",
-          "src/pages/History.tsx"
+          "src/pages/History.tsx",
+          "src/lib/bufferedSourceFacts.ts",
+          "src/lib/bufferedSourceFacts.test.ts",
+          "src/components/AudioFileTrial.tsx",
+          "src/i18n/sourceFacts.ts"
         ]
       }
     },

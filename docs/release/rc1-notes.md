@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build221 / Firmware38
+# Listener v1.0.6-rc1 · Type build222 / Firmware38
 
 | Download | File |
 | --- | --- |
@@ -7,21 +7,21 @@
 
 ## In this app update
 
-An empty second-pass revision could erase a previously displayed, timed ending even when local audio evidence still supported owner speech in that occurrence. Ordinary recognition now reconciles this conflict using only the accepted prior occurrence, then applies the existing speaker/source projection. The recovered row is not promoted to confirmed recognition or a new speaker identity. Genuine nonempty corrections use the current validated source rendering instead of an older partial cache. Existing light translation, source-retaining drafts, optional computer shortcuts and Firmware38 remain available.
+Ordinary buffered rewriting in the text workspace now checks recognized time, calendar and numeric quantity details against the current submitted input. It keeps the source's supported qualifiers rather than inventing a missing afternoon or an amount bound. Unmatched or ambiguous anchors keep the input available instead of adopting the unsafe result. This check starts no additional service request and never rewrites a later explicit manual edit. Recorded-file result Copy/Save/Continue and retention feedback remain outside scrolling content, including long/expanded results, saved state and library return. Existing immutable saved copies, original-source retention, light translation, optional computer shortcuts and the221 owner-tail repair are retained. Firmware38 is unchanged.
 
 ## Before using
 
 US$49 is the hardware price. Type is free and open source. Recognition and optional text services require preparation and separate usage charges; this release does not provide a ready-to-use official cloud account or allowance. USB flashing and Bluetooth OTA use the same firmware ZIP.
 
-This addresses a verified class of preview-to-final tail loss, not every recognition or automatic-ending failure. Strong background interference, the separate original early-ending/handoff issue, original brownout cause, real global/physical/cross-PC/long-term gaps remain open. Offline translation remains an editable draft; its bounded time/year guards do not guarantee all semantics. Existing service preparation and separate usage charges still apply. Firmware38 is unchanged; this app update does not require reflashing.
+These are bounded checks for recognized EN/ZH facts during ordinary buffered workspace rewriting, not a proof of all meaning, every language, names, promises or business policies. Explicit instruction-to-message drafting and translation retain their separate processing contracts; light translation remains an editable draft with its existing bounded checks. The private text fault test used a controlled loopback service, not a language-quality result. Original strong-interference/early-ending, brownout cause and real global/physical/cross-PC/long-term evidence gaps remain open. Hardware costs US$49; Type is free/open source and prepared third-party speech/text services have separate usage charges. Firmware38 is unchanged and needs no new flash for this app update.
 
 ## File identity
 
-- Type source: `998e911a0c902a0cade3bc5bf555e5b0f6c5b999` · `build-source/type221-20261028`
-- MSI: 299868160 bytes · SHA256 `63ea3acdabecf3d6e0115c796b35f2f5d06cb22b8df3d847ef6d1432a9f00b1f`
+- Type source: `b7b624aff1256a648af936efdcaa18fe297229ca` · `build-source/type222-20261029`
+- MSI: 299868160 bytes · SHA256 `30d95c0a57005c518c2f6cc364f6da40ceb1c182828beb99d511d0b0238cdaae`
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`
 - ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`
 
 ## 中文说明
 
-本次急修针对实际复现的“预览显示尾句，复核返回同段为空，成稿丢尾”。只恢复先前已接纳、时间坐标一致且有本人音频正证据的识别段，仍经过原有旁人／来源过滤，不新增声纹或确认授权。同时修正旧预览缓存覆盖真正非空纠错的问题。三条实际记录已在生产收尾逻辑中按原帧和当时本地时间线重放验证；安装包隔离启动另行核验，不能据此声称所有现场吞尾、端点、声纹、编辑器或跨电脑情况都已验证。原轻量翻译、保存稿、按需电脑快捷键及固件38保留。
+本批修复220完整售前／假设售后反馈：普通缓冲润色在结果进入缓存、编辑和保存前按当前输入核对可识别的时间／日期／数值与数量限定，去掉已知无来源的下午、金额上限；无法可靠匹配时保留输入，不自动重试付费、不静默上传早期原稿，也不改写后续手工修订。录音文件结果的复制／保存／继续、关闭和保存反馈独立于内容滚动，长文与展开参考不再把操作推走。匹配安装包已通过真实公开样例转写、明确标注的本地兼容文本服务反例、实际原生v1保存／另存／回找及窄视口操作验证；不将受控回复称为真实模型质量或真人体验。221吞尾修复、轻量翻译、最初原稿、按需快捷键与固件38保留。
