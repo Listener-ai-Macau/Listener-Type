@@ -1,0 +1,14 @@
+{
+  "runtime": {
+    "id": "llama-b11935-cpu-v1",
+    "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11935/llama-b11935-bin-win-vulkan-x64.zip",
+    "bytes": 37178856,
+    "sha256": "55f579da702fd47d0c1587589601e84b075541aafb4761046e135409f02428fc"
+  },
+  "model": {
+    "id": "hymt2-1.8b-q4km-a0c709d9-v1",
+    "url": "https://modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-1.8B-GGUF/resolve/ef1d40b8b315575d30d1eb6579996130b8fc0bb2/Hy-MT2-1.8B-Q4_K_M.gguf",
+    "bytes": 1133080448,
+    "sha256": "dc5f44fcf1fa496ee7ad725982c0c8c553a4de00259b53af84c4b89fb0c06699"
+  }
+}

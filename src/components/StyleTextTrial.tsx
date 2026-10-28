@@ -1,7 +1,7 @@
 import { SaveTextDraft } from './SaveTextDraft';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { canInsertStyleTrialResult, cancelStyleTrialInsert, copyStyleTrialResult, getStyleTextTrialReadiness, insertStyleTrialResult, isTauri, tryStylePackText, tryTranslationText, tryLocalTranslationText } from '../lib/ipc';
+import { canInsertStyleTrialResult, cancelStyleTrialInsert, copyStyleTrialResult, getStyleTextTrialReadiness, insertStyleTrialResult, isTauri, tryStylePackText, tryTranslationText, tryLocalTranslationText, cancelLocalTranslation } from '../lib/ipc';
 import { detectOS } from './WindowChrome';
 import { stylePackExamplePresentation, stylePackPresentation } from '../lib/stylePackPresentation';
 import type { StylePack, StyleTextTrialReadiness, StyleTextTrialResult } from '../lib/types';
@@ -14,7 +14,7 @@ import { ProviderSettingsDialog } from './ProviderSettingsDialog';
 import { SUPPORTED_LANGUAGES } from '../lib/types';
 import { LocalTranslationSetup } from './LocalTranslationSetup';
 import { canSuggestChineseSource, localTranslationErrorKey, localTranslationKey, translationLanguageLabel } from '../lib/localTranslation';
-import type { TranslationEngine, LocalTranslationReadiness } from '../lib/localTranslation';
+import type { TranslationEngine, LocalTranslationReadiness, LocalTranslationQuality } from '../lib/localTranslation';
 import { SavedTextDraftsDialog } from './SavedTextDraftsDialog';
 
 function withDraftOriginName(origin: string, suffix: string): string {
@@ -23,7 +23,7 @@ function withDraftOriginName(origin: string, suffix: string): string {
   return prefix ? `${prefix} · ${suffix}` : suffix;
 }
 
-export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, draftingChoice, prepareShorter, translationTarget, onTranslationTargetChange, initialTranslationEngine, initialTranslationSource, inputOriginName, suspended = false, onOpenSavedDraft, draft, onDraftChange, onClose }: {
+export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, draftingChoice, prepareShorter, translationTarget, onTranslationTargetChange, initialTranslationEngine, initialTranslationSource, initialTranslationQuality, inputOriginName, suspended = false, onOpenSavedDraft, draft, onDraftChange, onClose }: {
   pack: StylePack;
   packs?: StylePack[];
   onSelectPack?: (id: string) => void;
@@ -34,6 +34,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   onTranslationTargetChange?: (language: string) => void;
   initialTranslationEngine?: TranslationEngine;
   initialTranslationSource?: string;
+  initialTranslationQuality?: LocalTranslationQuality;
   inputOriginName?: string;
   suspended?: boolean;
   onOpenSavedDraft?: (id: string, onUnavailable: (id: string) => void) => void;
@@ -49,14 +50,16 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const [translationOriginName, setTranslationOriginName] = useState(inputOriginName ?? '');
   const [translationEngine, setTranslationEngine] = useState<TranslationEngine>(initialTranslationEngine ?? 'local');
   const [translationSource, setTranslationSource] = useState(initialTranslationSource ?? '');
+  const [translationQuality, setTranslationQuality] = useState<LocalTranslationQuality>(initialTranslationQuality ?? 'standard');
+  const localRequest = useRef<string | null>(null);
   const [optionsOpen, setOptionsOpen] = useState(true);
   const lastTranslationTarget = useRef(translationTarget || 'English');
   useEffect(() => { if (translationTarget) lastTranslationTarget.current = translationTarget; }, [translationTarget]);
   const [translationPreparing, setTranslationPreparing] = useState(false);
   const [offlineReadiness, setOfflineReadiness] = useState<LocalTranslationReadiness | null>(null);
   const offline = !!translationTarget && translationEngine === 'local';
-  const offlineReady = offlineReadiness?.key === localTranslationKey(translationSource, translationTarget ?? '') && offlineReadiness.ready;
-  const cacheKey = (id: string) => translationTarget ? JSON.stringify([id, translationEngine, translationSource]) : id;
+  const offlineReady = offlineReadiness?.key === localTranslationKey(translationSource, translationTarget ?? '', translationQuality) && offlineReadiness.ready;
+  const cacheKey = (id: string) => translationTarget ? JSON.stringify([id, translationEngine, translationSource, translationQuality]) : id;
   const styleChangePending = extraStyleChoice?.pending || draftingChoice?.pending;
   const presentation = stylePackPresentation(pack, t);
   const savedExamples = pack.examples
@@ -83,7 +86,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   // exact fresh result through the selection, rather than calling it a restore
   // merely because it has just been added to the comparison cache.
   const freshSelectionResult = useRef<{ packId: string; signature: string; result: StyleTextTrialResult } | null>(null);
-  const signature = JSON.stringify(translationTarget ? [draft, pack.prompt, translationEngine, translationSource] : [draft, pack.prompt]);
+  const signature = JSON.stringify(translationTarget ? [draft, pack.prompt, translationEngine, translationSource, translationQuality] : [draft, pack.prompt]);
   const result = storedResult?.packId === pack.id && resultSignature === signature ? storedResult : null;
   const savedForPack = completed.current.get(cacheKey(pack.id));
   const earlier = !result && savedForPack && savedForPack.signature !== signature ? savedForPack : null;
@@ -129,6 +132,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const canProcess = offline ? offlineReady : !!readiness?.available && (!readiness.requiresTextService || readiness.textServiceConfigured);
 
   useEffect(() => {
+    if (localRequest.current) { void cancelLocalTranslation(localRequest.current).catch(() => {}); localRequest.current = null; }
     ++generation.current;
     running.current = false;
     setPending(false);
@@ -183,6 +187,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   useEffect(() => {
     return () => {
       generation.current += 1;
+      if (localRequest.current) void cancelLocalTranslation(localRequest.current).catch(() => {});
       if (deliveryRequest.current) void cancelStyleTrialInsert(deliveryRequest.current).catch(() => {});
     };
   }, []);
@@ -206,11 +211,13 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
       const target = prepare ? await prepare() : pack;
       // Closing the workspace while preparing must not start a paid request.
       if (generation.current !== request) return;
-      const targetSignature = JSON.stringify(translationTarget ? [draft, target.prompt, translationEngine, translationSource] : [draft, target.prompt]);
+      const targetSignature = JSON.stringify(translationTarget ? [draft, target.prompt, translationEngine, translationSource, translationQuality] : [draft, target.prompt]);
       const cached = prepare ? completed.current.get(cacheKey(target.id)) : null;
       const matching = cached?.signature === targetSignature ? cached : null;
+      const localId = offline && !matching ? crypto.randomUUID() : undefined;
+      if (localId) localRequest.current = localId;
       const returned = matching?.result ?? await (translationTarget
-        ? offline ? tryLocalTranslationText(draft, translationSource, translationTarget) : tryTranslationText(draft, translationTarget)
+        ? offline ? tryLocalTranslationText(draft, translationSource, translationTarget, translationQuality, localId) : tryTranslationText(draft, translationTarget)
         : tryStylePackText(target.id, draft));
       // The backend receipt identifies the route; workspace identity also binds
       // the captured source/method signature, so late results cannot cross it.
@@ -243,6 +250,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
       }
     } finally {
       if (generation.current === request) {
+        localRequest.current = null;
         running.current = false;
         setPending(false);
         setShortening(false);
@@ -373,7 +381,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         <summary>{translationTarget ? t(offline ? 'textWorkspace.translationOptions' : 'textDraft.cloudTranslationOptions', {
           source: translationSource ? translationLanguageLabel(translationSource, i18n.resolvedLanguage ?? i18n.language) : t('offlineTranslation.chooseSource'),
           target: translationLanguageLabel(translationTarget, i18n.resolvedLanguage ?? i18n.language),
-          engine: t(offline ? 'offlineTranslation.local' : 'offlineTranslation.cloud'),
+          engine: offline ? `${t('offlineTranslation.local')} · ${t(`offlineTranslation.${translationQuality}`)}` : t('offlineTranslation.cloud'),
         }) : t('textWorkspace.styleOptions', { style: presentation.name })}</summary>
       <div className="ol-style-trial-options">
       {onTranslationTargetChange && <label className="ol-style-trial-picker" data-text-task-choice>
@@ -403,7 +411,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
             <option value="cloud">{t('offlineTranslation.cloud')}</option>
           </select>
         </label>
-        {offline && <LocalTranslationSetup source={translationSource} target={translationTarget}
+        {offline && <LocalTranslationSetup key={translationQuality} quality={translationQuality} onQualityChange={setTranslationQuality} source={translationSource} target={translationTarget}
           onSourceChange={setTranslationSource} disabled={pending || copying || delivering || draftSaving}
           onReadiness={setOfflineReadiness} onBusy={setTranslationPreparing} showNotice={false} />}
       </>}
@@ -456,6 +464,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
       </div>
       {pending && <p role="status" className="ol-style-trial-hint" data-style-trial-pending>
         {t(offline ? 'offlineTranslation.pending' : !shortening && readiness?.requiresTextService === false ? 'textWorkspace.pendingLocal' : 'style.trial.pending')}
+        {offline && <Btn size="sm" variant="ghost" onClick={() => { if (localRequest.current) void cancelLocalTranslation(localRequest.current).catch(() => {}); }}>{t('common.cancel')}</Btn>}
       </p>}
       {error && <p role="alert" style={{ color: 'var(--ol-err)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.6 }}>{error}</p>}
       </div>
@@ -483,11 +492,6 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
               onChange={event => setDraftNameEdit(event.target.value)} />
           </label>
           {draftNameInvalid && <p role="alert" className="ol-style-trial-hint">{t('textDraft.nameInvalid')}</p>}
-          {onTranslationTargetChange && translationTarget && <p role="note" className="ol-style-trial-hint" data-translation-refine-hint>{t('textWorkspace.refineTranslationHint')}</p>}
-          {offline && <p className="ol-style-trial-hint" data-cloud-retranslation>
-            <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || draftSaving || styleChangePending || translationPreparing}
-              onClick={prepareCloudRetranslation}>{t('textWorkspace.retranslateOriginal')}</Btn>
-          </p>}
           <div className="ol-style-trial-primary-actions">
             <Btn size="sm" variant="blue" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => void copyResult()}>
               {t(copying ? 'style.trial.copying' : copiedResult === result ? 'style.trial.copied' : 'style.trial.copyResult')}
@@ -502,6 +506,11 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
             {(!offline || translationTarget === 'English') && <PoliteEditSuggestions key={`${generation.current}:${result?.packId ?? ''}`} text={resultOutput} originalText={draft} localOnly={offline} cloudConfigured={!offline && readiness?.textServiceConfigured === true}
               disabled={copying || delivering || draftSaving} onApply={updateEditedOutput} />}
           </div>
+          {onTranslationTargetChange && translationTarget && <p role="note" className="ol-style-trial-hint" data-translation-refine-hint>{t('textWorkspace.refineTranslationHint')}</p>}
+          {offline && <p className="ol-style-trial-hint" data-cloud-retranslation>
+            <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || draftSaving || styleChangePending || translationPreparing}
+              onClick={prepareCloudRetranslation}>{t('textWorkspace.retranslateOriginal')}</Btn>
+          </p>}
           {onTranslationTargetChange && resultOutput.length > 4000 && <p className="ol-style-trial-hint">{t('textWorkspace.nextInputTooLong')}</p>}
           <p role="note" className="ol-style-trial-hint" data-style-trial-retention>{t(savedCurrentDraft ? isTauri ? 'textWorkspace.saved' : 'textDraft.browserSaved' : isTauri ? 'textWorkspace.unsaved' : 'textWorkspace.browserUnsaved')}</p>
           {restored && <p role="note" className="ol-style-trial-hint" data-style-trial-restored>{t('style.trial.restoredResult')}</p>}

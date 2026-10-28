@@ -1,4 +1,5 @@
 export type TranslationEngine = 'local' | 'cloud';
+export type LocalTranslationQuality = 'standard' | 'enhanced';
 
 // Stored/native values remain unchanged; only presentation follows the UI locale.
 export function translationLanguageLabel(language: string, locale: string): string {
@@ -26,8 +27,8 @@ export function canSuggestChineseSource(text: string, target: string): boolean {
     && !/[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(text);
 }
 
-export function localTranslationKey(source: string, target: string): string {
-  return JSON.stringify([source, target]);
+export function localTranslationKey(source: string, target: string, quality: LocalTranslationQuality = 'standard'): string {
+  return JSON.stringify([source, target, quality]);
 }
 
 export type LocalTranslationReadiness = { key: string; ready: boolean };
@@ -40,6 +41,9 @@ export function localTranslationErrorKey(error: unknown): string {
   if (value.includes('download')) return 'downloadFailed';
   if (value.includes('busy') || value.includes('preparing')) return 'busy';
   if (value.includes('timeout')) return 'timeout';
+  if (value.includes('memory_low')) return 'memoryLow';
+  if (value.includes('context_limit') || value.includes('output_limit')) return 'capacity';
+  if (value.includes('_fidelity')) return 'fidelity';
   if (value.includes('invalid_text')) return 'invalidText';
   return 'failed';
 }

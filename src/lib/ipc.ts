@@ -230,6 +230,7 @@ let mockSettings: UserPreferences = {
   workingLanguages: ['简体中文'],
   translationTargetLanguage: '',
   translationEngine: 'local',
+  localTranslationQuality: 'standard',
   translationSourceLanguage: '',
   qaHotkey: defaultQaShortcut(),
   chineseScriptPreference: 'auto',
@@ -1849,15 +1850,15 @@ export type LocalTranslationStatus = {
   expectedBytes: number;
 };
 
-export function getLocalTranslationStatus(): Promise<LocalTranslationStatus> {
-  return invokeOrMock('get_local_translation_status', {}, () => ({
+export function getLocalTranslationStatus(quality: 'standard' | 'enhanced' = 'standard'): Promise<LocalTranslationStatus> {
+  return invokeOrMock('get_local_translation_status', { quality }, () => ({
     supported: false, runtimeReady: false, runtimeDownloadBytes: 0, pairs: [],
     preparing: false, receivedBytes: 0, expectedBytes: 0,
   }));
 }
 
-export function prepareLocalTranslation(sourceLanguage: string, targetLanguage: string): Promise<LocalTranslationStatus> {
-  return invokeOrMock('prepare_local_translation', { sourceLanguage, targetLanguage }, () => {
+export function prepareLocalTranslation(sourceLanguage: string, targetLanguage: string, quality: 'standard' | 'enhanced' = 'standard'): Promise<LocalTranslationStatus> {
+  return invokeOrMock('prepare_local_translation', { sourceLanguage, targetLanguage, quality }, () => {
     throw new Error('local_translation_platform_unavailable');
   });
 }
@@ -1866,8 +1867,12 @@ export function cancelLocalTranslationPreparation(): Promise<void> {
   return invokeOrMock('cancel_local_translation_preparation', {}, () => {});
 }
 
-export function tryLocalTranslationText(rawText: string, sourceLanguage: string, targetLanguage: string): Promise<StyleTextTrialResult> {
-  return invokeOrMock('try_local_translation_text', { rawText, sourceLanguage, targetLanguage }, () => {
+export function cancelLocalTranslation(requestId: string): Promise<void> {
+  return invokeOrMock('cancel_local_translation', { requestId }, () => {});
+}
+
+export function tryLocalTranslationText(rawText: string, sourceLanguage: string, targetLanguage: string, quality: 'standard' | 'enhanced' = 'standard', requestId?: string): Promise<StyleTextTrialResult> {
+  return invokeOrMock('try_local_translation_text', { rawText, sourceLanguage, targetLanguage, quality, requestId }, () => {
     throw new Error('local_translation_platform_unavailable');
   });
 }

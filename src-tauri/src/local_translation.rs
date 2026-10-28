@@ -1,13 +1,17 @@
 //! Optional offline translation. Explicit preparation owns network access;
 //! inference never downloads, reads provider credentials or falls back to cloud.
 use serde::{Deserialize, Serialize};
+use crate::types::LocalTranslationQuality;
+mod enhanced;
+mod supervised;
+pub(crate) use supervised::cancel as cancel_inference;
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File},
     io::{Read, Write},
     path::{Component, Path, PathBuf},
     process::{Command, Stdio},
-    sync::{atomic::{AtomicBool, AtomicU64, Ordering}, OnceLock},
+    sync::{atomic::{AtomicBool, AtomicU64, Ordering}},
     time::{Duration, Instant},
 };
 
@@ -19,7 +23,8 @@ static CANCEL: AtomicBool = AtomicBool::new(false);
 static RECEIVED: AtomicU64 = AtomicU64::new(0);
 static EXPECTED: AtomicU64 = AtomicU64::new(0);
 static PREPARATION_CONTROL: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
-static INFERENCE: OnceLock<parking_lot::Mutex<()>> = OnceLock::new();
+#[cfg(test)]
+static TEST_SERIAL: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -128,6 +133,10 @@ pub(crate) fn status() -> Result<Status, String> {
         received_bytes: RECEIVED.load(Ordering::Relaxed),
         expected_bytes: EXPECTED.load(Ordering::Relaxed),
     })
+}
+
+pub(crate) fn status_for(quality: LocalTranslationQuality) -> Result<Status, String> {
+    match quality { LocalTranslationQuality::Standard => status(), LocalTranslationQuality::Enhanced => enhanced::status() }
 }
 
 fn cancelled() -> Result<(), String> {
@@ -306,7 +315,7 @@ fn prepare_directory(root: &Path, id: &str, assets: &[Asset], model: bool) -> Re
     fs::rename(&content, &dest).map_err(|e| e.to_string())
 }
 
-pub(crate) struct Preparation { pair: Pair }
+pub(crate) struct Preparation { pair: Pair, quality: LocalTranslationQuality }
 impl Drop for Preparation {
     fn drop(&mut self) {
         let _control = PREPARATION_CONTROL.lock();
@@ -317,6 +326,10 @@ impl Drop for Preparation {
 /// Reserve before queueing a blocking worker, so an immediate Cancel cannot be
 /// erased by that worker resetting its flag after it eventually starts.
 pub(crate) fn reserve_preparation(source: &str, target: &str) -> Result<Preparation, String> {
+    reserve_preparation_for(source, target, LocalTranslationQuality::Standard)
+}
+
+pub(crate) fn reserve_preparation_for(source: &str, target: &str, quality: LocalTranslationQuality) -> Result<Preparation, String> {
     if !cfg!(all(target_os = "windows", target_arch = "x86_64")) {
         return Err("local_translation_platform_unavailable".into());
     }
@@ -328,13 +341,19 @@ pub(crate) fn reserve_preparation(source: &str, target: &str) -> Result<Preparat
     CANCEL.store(false, Ordering::Release);
     RECEIVED.store(0, Ordering::Relaxed);
     EXPECTED.store(0, Ordering::Relaxed);
-    Ok(Preparation { pair })
+    Ok(Preparation { pair, quality })
 }
 impl Preparation {
     pub(crate) fn run(self) -> Result<Status, String> {
         cancelled()?;
         let pair = &self.pair;
         let root = root()?;
+        if self.quality == LocalTranslationQuality::Enhanced {
+            enhanced::prepare(&root)?;
+            let mut status = enhanced::status()?;
+            status.preparing = false;
+            return Ok(status);
+        }
         let catalog = catalog();
         let runtime_missing = !manifest_ready(&root.join(RUNTIME), true);
         let pair_missing = !manifest_ready(&root.join(&pair.asset.id), true);
@@ -348,63 +367,32 @@ impl Preparation {
     }
 }
 
-fn worker_request(runtime: &Path, model: &Path, text: &str, timeout: Duration) -> Result<String, String> {
-    let request = serde_json::to_vec(&serde_json::json!({"text": text, "model": model.join("model"), "tokenizer": model.join("sentencepiece.model")})).map_err(|e| e.to_string())?;
-    let mut command = Command::new(runtime.join("python.exe"));
-    command.args(["-I", "-S", "-X", "utf8", "-c", WORKER]).current_dir(runtime)
-        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    #[cfg(target_os = "windows")]
-    { use std::os::windows::process::CommandExt; command.creation_flags(0x08000000); }
-    let mut child = command.spawn().map_err(|_| "local_translation_runtime_failed".to_owned())?;
-    let stdout = child.stdout.take().ok_or("local_translation_runtime_failed")?;
-    let stderr = child.stderr.take().ok_or("local_translation_runtime_failed")?;
-    let output = std::thread::spawn(move || { let mut bytes = Vec::new(); stdout.take(64_001).read_to_end(&mut bytes).map(|_| bytes) });
-    let errors = std::thread::spawn(move || { let mut bytes = Vec::new(); stderr.take(8_001).read_to_end(&mut bytes).map(|_| bytes) });
-    if child.stdin.take().ok_or("local_translation_runtime_failed")?.write_all(&request).is_err() {
-        let _ = child.kill(); let _ = child.wait();
-        let _ = output.join(); let _ = errors.join();
-        return Err("local_translation_runtime_failed".into());
-    }
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break Ok(status),
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
-            Ok(None) => break Err("local_translation_timeout"),
-            Err(_) => break Err("local_translation_runtime_failed"),
-        }
-    };
-    if status.is_err() { let _ = child.kill(); let _ = child.wait(); }
-    let output = output.join().map_err(|_| "local_translation_runtime_failed")?.map_err(|_| "local_translation_runtime_failed")?;
-    let diagnostics = errors.join().ok().and_then(Result::ok).unwrap_or_default();
-    #[cfg(test)]
-    if status.as_ref().is_ok_and(|s| !s.success()) {
-        // Test fixtures contain only synthetic text; production never logs a
-        // draft or returns dependency diagnostics to the product interface.
-        eprintln!("offline worker status={status:?}, diagnostic={}", String::from_utf8_lossy(&diagnostics));
-    }
-    #[cfg(not(test))]
-    let _ = diagnostics;
-    if !status.map_err(str::to_owned)?.success() || output.len() > 64_000 {
-        return Err("local_translation_runtime_failed".into());
-    }
-    let result: serde_json::Value = serde_json::from_slice(&output).map_err(|_| "local_translation_runtime_failed")?;
-    result["text"].as_str().filter(|s| !s.trim().is_empty()).map(str::to_owned)
-        .ok_or_else(|| "local_translation_empty_output".into())
+fn worker_request_owned(runtime: &Path, model: &Path, text: &str, timeout: Duration, owner: &supervised::Request) -> Result<String, String> {
+    supervised::run(runtime, WORKER, serde_json::json!({"text": text, "model": model.join("model"), "tokenizer": model.join("sentencepiece.model")}), timeout, owner)
 }
 
-pub(crate) fn translate(source: &str, target: &str, text: &str) -> Result<String, String> {
+#[cfg(test)]
+fn worker_request(runtime: &Path, model: &Path, text: &str, timeout: Duration) -> Result<String, String> {
+    let owner = supervised::Request::reserve(None)?;
+    worker_request_owned(runtime, model, text, timeout, &owner)
+}
+
+fn translate_owned(source: &str, target: &str, text: &str, quality: LocalTranslationQuality, owner: &supervised::Request) -> Result<String, String> {
+    owner.check()?;
     if text.trim().is_empty() || text.chars().count() > 4000 { return Err("local_translation_invalid_text".into()); }
     let pair = pair_for(source, target)?;
-    let _guard = INFERENCE.get_or_init(|| parking_lot::Mutex::new(())).try_lock()
-        .ok_or("local_translation_busy")?;
     let root = root()?;
+    if quality == LocalTranslationQuality::Enhanced { return enhanced::translate(&root, source, target, text, owner); }
     let runtime = root.join(RUNTIME);
     let model = root.join(pair.asset.id);
-    if !manifest_ready(&runtime, true) || !manifest_ready(&model, true) {
-        return Err("local_translation_not_ready".into());
-    }
-    worker_request(&runtime, &model, text, Duration::from_secs(45))
+    if !manifest_ready(&runtime, true) || !manifest_ready(&model, true) { return Err("local_translation_not_ready".into()); }
+    worker_request_owned(&runtime, &model, text, Duration::from_secs(45), owner)
+}
+
+#[cfg(test)]
+pub(crate) fn translate(source: &str, target: &str, text: &str) -> Result<String, String> {
+    let owner = supervised::Request::reserve(None)?;
+    translate_owned(source, target, text, LocalTranslationQuality::Standard, &owner)
 }
 
 pub(crate) fn language_code(language: &str) -> Option<&'static str> {
@@ -418,8 +406,16 @@ pub(crate) fn language_code(language: &str) -> Option<&'static str> {
 /// The same explicit offline route is shared by text previews and voice
 /// translation. Language/script choice never changes the cloud provider.
 pub(crate) async fn translate_to_language(text: String, source: String, target: String) -> Result<String, String> {
+    translate_with_quality(text, source, target, LocalTranslationQuality::Standard, None).await
+}
+
+pub(crate) async fn translate_with_quality(text: String, source: String, target: String, quality: LocalTranslationQuality, request_id: Option<String>) -> Result<String, String> {
     let target_code = language_code(&target).ok_or("local_translation_unsupported_pair")?;
-    let output = tauri::async_runtime::spawn_blocking(move || translate(&source, target_code, &text))
+    // Reserve on the command thread, before queueing: an immediate UI Cancel
+    // cannot be lost. Dropping the async command also cancels this same owner.
+    let owner = supervised::Request::reserve(request_id)?;
+    let _cancel_on_drop = supervised::CancelOnDrop(owner.cancel.clone());
+    let output = tauri::async_runtime::spawn_blocking(move || translate_owned(&source, target_code, &text, quality, &owner))
         .await.map_err(|_| "local_translation_runtime_failed".to_owned())??;
     Ok(if target.trim() == "繁体中文" {
         crate::coordinator::apply_chinese_script_preference(&output, crate::types::ChineseScriptPreference::Traditional)
@@ -429,7 +425,7 @@ pub(crate) async fn translate_to_language(text: String, source: String, target: 
 #[cfg(test)]
 mod tests {
     use super::*;
-    static FLAGS: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+    use super::TEST_SERIAL as FLAGS;
     #[test]
     fn local_translation_paths_cannot_escape_cache() {
         for path in ["", "../name", "a/../b", "C:/temp", "a\\b", "/abs", "a:stream"] {

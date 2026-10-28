@@ -3,14 +3,16 @@ import { useTranslation } from 'react-i18next';
 import { cancelLocalTranslationPreparation, getLocalTranslationStatus, prepareLocalTranslation } from '../lib/ipc';
 import type { LocalTranslationStatus } from '../lib/ipc';
 import { localTargetCode, localTranslationErrorKey, localTranslationKey } from '../lib/localTranslation';
-import type { LocalTranslationReadiness } from '../lib/localTranslation';
+import type { LocalTranslationReadiness, LocalTranslationQuality } from '../lib/localTranslation';
 import { Btn } from '../pages/_atoms';
 
 /** Explicit optional assets only: mounting or choosing a language never downloads. */
-export function LocalTranslationSetup({ source, target, onSourceChange, disabled = false, onReadiness, onBusy, showNotice = true }: {
+export function LocalTranslationSetup({ source, target, onSourceChange, quality = 'standard', onQualityChange, disabled = false, onReadiness, onBusy, showNotice = true }: {
   source: string;
   target: string;
   onSourceChange: (source: string) => void;
+  quality?: LocalTranslationQuality;
+  onQualityChange?: (quality: LocalTranslationQuality) => void;
   disabled?: boolean;
   onReadiness?: (state: LocalTranslationReadiness) => void;
   onBusy?: (busy: boolean) => void;
@@ -27,12 +29,12 @@ export function LocalTranslationSetup({ source, target, onSourceChange, disabled
     if (refreshing.current) return;
     refreshing.current = true;
     try {
-      const value = await getLocalTranslationStatus();
+      const value = await getLocalTranslationStatus(quality);
       if (active.current) setStatus(value);
     } catch {
       if (active.current) setFailure('statusFailed');
     } finally { refreshing.current = false; }
-  }, []);
+  }, [quality]);
   useEffect(() => {
     active.current = true;
     void refresh();
@@ -51,7 +53,7 @@ export function LocalTranslationSetup({ source, target, onSourceChange, disabled
   const targetCode = localTargetCode(target);
   const pair = status?.pairs.find(item => item.source === source && item.target === targetCode);
   const ready = !!status?.supported && !!pair?.ready && !busy;
-  const key = localTranslationKey(source, target);
+  const key = localTranslationKey(source, target, quality);
   useEffect(() => { onReadiness?.({ key, ready }); }, [key, ready, onReadiness]);
 
   const prepare = async () => {
@@ -59,7 +61,7 @@ export function LocalTranslationSetup({ source, target, onSourceChange, disabled
     request.current = true;
     setPending(true); setFailure('');
     try {
-      const value = await prepareLocalTranslation(source, targetCode);
+      const value = await prepareLocalTranslation(source, targetCode, quality);
       if (active.current) setStatus(value);
     } catch (error) {
       if (active.current) setFailure(localTranslationErrorKey(error));
@@ -70,6 +72,15 @@ export function LocalTranslationSetup({ source, target, onSourceChange, disabled
   };
   const downloadBytes = (pair?.downloadBytes ?? 0) + (status?.runtimeReady ? 0 : status?.runtimeDownloadBytes ?? 0);
   return <div className="ol-local-translation-setup" data-local-translation-setup>
+    {onQualityChange && <label className="ol-style-trial-picker">
+      <span>{t('offlineTranslation.quality')}</span>
+      <select aria-label={t('offlineTranslation.quality')} value={quality} disabled={disabled || busy}
+        onChange={event => onQualityChange(event.target.value as LocalTranslationQuality)}>
+        <option value="standard">{t('offlineTranslation.standard')}</option>
+        <option value="enhanced">{t('offlineTranslation.enhanced')}</option>
+      </select>
+    </label>}
+    {quality === 'enhanced' && <p className="ol-style-trial-hint">{t('offlineTranslation.enhancedHint')}</p>}
     <label className="ol-style-trial-picker">
       <span>{t('offlineTranslation.source')}</span>
       <select aria-label={t('offlineTranslation.source')} value={source} disabled={disabled || busy}

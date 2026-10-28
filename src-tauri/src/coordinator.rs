@@ -3988,9 +3988,9 @@ pub(crate) async fn translate_voice_or_passthrough(
             &prefs.working_languages, prefs.chinese_script_preference,
             prefs.output_language_preference, prefs.llm_thinking_enabled, front_app).await;
     }
-    match crate::local_translation::translate_to_language(
+    match crate::local_translation::translate_with_quality(
         raw.text.clone(), prefs.translation_source_language.clone(),
-        prefs.translation_target_language.clone(),
+        prefs.translation_target_language.clone(), prefs.local_translation_quality, None,
     ).await {
         Ok(text) => (text, None),
         Err(error) => (raw.text.clone(), Some(error)),

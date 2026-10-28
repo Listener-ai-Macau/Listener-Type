@@ -95,15 +95,15 @@ pub async fn try_translation_text(
 }
 
 #[tauri::command]
-pub fn get_local_translation_status() -> Result<crate::local_translation::Status, String> {
-    crate::local_translation::status()
+pub fn get_local_translation_status(quality: Option<crate::types::LocalTranslationQuality>) -> Result<crate::local_translation::Status, String> {
+    crate::local_translation::status_for(quality.unwrap_or_default())
 }
 
 /// Preparation is a separate explicit action, never a side effect of selecting
 /// a language, opening a dialog, recording, or requesting a translation.
 #[tauri::command]
-pub async fn prepare_local_translation(source_language: String, target_language: String) -> Result<crate::local_translation::Status, String> {
-    let preparation = crate::local_translation::reserve_preparation(&source_language, &target_language)?;
+pub async fn prepare_local_translation(source_language: String, target_language: String, quality: Option<crate::types::LocalTranslationQuality>) -> Result<crate::local_translation::Status, String> {
+    let preparation = crate::local_translation::reserve_preparation_for(&source_language, &target_language, quality.unwrap_or_default())?;
     tauri::async_runtime::spawn_blocking(move || preparation.run())
         .await.map_err(|_| "local_translation_runtime_failed".to_owned())?
 }
@@ -114,15 +114,20 @@ pub fn cancel_local_translation_preparation() {
 }
 
 #[tauri::command]
-pub async fn try_local_translation_text(source_language: String, target_language: String, raw_text: String) -> Result<crate::types::StyleTextTrialResult, String> {
+pub async fn try_local_translation_text(source_language: String, target_language: String, raw_text: String, quality: Option<crate::types::LocalTranslationQuality>, request_id: Option<String>) -> Result<crate::types::StyleTextTrialResult, String> {
     let started = std::time::Instant::now();
     let pack_id = format!("local_translation:{source_language}:{target_language}");
     let pack_name = format!("{source_language} → {target_language}");
-    let output_text = crate::local_translation::translate_to_language(raw_text, source_language, target_language).await?;
+    let output_text = crate::local_translation::translate_with_quality(raw_text, source_language, target_language, quality.unwrap_or_default(), request_id).await?;
     Ok(crate::types::StyleTextTrialResult {
         pack_id, pack_name, output_text, used_text_service: false,
         elapsed_ms: started.elapsed().as_millis() as u64,
     })
+}
+
+#[tauri::command]
+pub fn cancel_local_translation(request_id: String) {
+    crate::local_translation::cancel_inference(&request_id);
 }
 
 #[tauri::command]

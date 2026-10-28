@@ -1043,6 +1043,7 @@ pub fn run() {
             commands::get_local_translation_status,
             commands::prepare_local_translation,
             commands::cancel_local_translation_preparation,
+            commands::cancel_local_translation,
             commands::try_local_translation_text,
             commands::suggest_polite_text_edits,
             commands::transcribe_audio_file_trial,

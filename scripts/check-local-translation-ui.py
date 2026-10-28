@@ -17,7 +17,7 @@ with sync_playwright() as pw:
    window.__offlineStatus={supported:true,runtimeReady:false,runtimeDownloadBytes:38481734,pairs:[{source:'zh',target:'en',downloadBytes:74481402,ready:false},{source:'en',target:'zh',downloadBytes:70743021,ready:false}],preparing:false,receivedBytes:0,expectedBytes:112963136};
    window.__offlineFixture=(cmd,args,mock)=>{
     window.__offlineCalls.push({cmd,args});
-    if(cmd==='get_local_translation_status')return structuredClone(window.__offlineStatus);
+    if(cmd==='get_local_translation_status'){const status=structuredClone(window.__offlineStatus);if(args.quality==='enhanced'){status.runtimeReady=!!window.__enhancedReady;status.runtimeDownloadBytes=37178856;status.pairs=status.pairs.map(p=>({...p,downloadBytes:1133080448,ready:!!window.__enhancedReady}));}return status;}
     if(cmd==='list_saved_text_drafts')return [{id:'older-fixture',createdAt:'2020-01-01T00:00:00Z',name:'Earlier draft',original:'Earlier source',text:'An older saved draft'},...(window.__missingSaved?[]:mock())];
     if(cmd==='get_style_text_trial_readiness')return {available:true,requiresTextService:args.stylePackId!=='builtin.raw',textServiceConfigured:true};
     if(cmd==='prepare_local_translation'){
@@ -29,8 +29,9 @@ with sync_playwright() as pw:
     }
     if(cmd==='try_local_translation_text'){
       if(window.__offlineFail)return Promise.reject('local_translation_not_ready');
-      return new Promise(resolve=>window.__offlinePending.push(()=>resolve({packId:'local_translation:'+args.sourceLanguage+':'+args.targetLanguage,packName:'fixture',outputText:'Do not send the email; save the draft only.',usedTextService:false,elapsedMs:410})));
+      return new Promise((resolve,reject)=>{const complete=()=>resolve({packId:'local_translation:'+args.sourceLanguage+':'+args.targetLanguage,packName:'fixture',outputText:args.quality==='enhanced'?'Enhanced fixture result':'Do not send the email; save the draft only.',usedTextService:false,elapsedMs:410});complete.requestId=args.requestId;complete.cancel=()=>reject('local_translation_cancelled');window.__offlinePending.push(complete);});
     }
+    if(cmd==='cancel_local_translation'){const i=window.__offlinePending.findIndex(x=>x.requestId===args.requestId);if(i>=0)window.__offlinePending.splice(i,1)[0].cancel();return;}
     if(cmd==='try_translation_text')return new Promise(resolve=>window.__cloudPending.push(()=>resolve({packId:'translation:'+args.targetLanguage,packName:args.targetLanguage,outputText:'Cloud fixture result',usedTextService:true,elapsedMs:750})));
     return mock();
    };
@@ -48,7 +49,7 @@ with sync_playwright() as pw:
   baseline=page.evaluate('window.__offlineCalls.length')
   def calls(cmd):return page.evaluate('(name)=>window.__offlineCalls.filter(x=>x.cmd===name)',cmd)
   def open_trial():
-   page.get_by_role('button',name='Try typed text',exact=True).click();expect(page.locator('.ol-style-trial-input')).to_be_visible()
+   page.get_by_role('button',name='Open text workspace',exact=True).click();expect(page.locator('.ol-style-trial-input')).to_be_visible()
   def close_trial():page.locator('dialog[open]').get_by_role('button',name='Close',exact=True).first.click()
   page.get_by_role('button',name='Chinese ↔ English on this PC',exact=True).click()
   expect(page.get_by_role('combobox',name='What would you like to do?',exact=True)).to_have_value('translate')
@@ -103,9 +104,9 @@ with sync_playwright() as pw:
   setup=page.locator('[data-local-translation-setup]')
   setup.get_by_role('button',name=re.compile('Download offline components')).click()
   page.wait_for_function('window.__preparePending!==null')
-  assert calls('prepare_local_translation')[0]['args']=={'sourceLanguage':'zh','targetLanguage':'en'}
+  assert calls('prepare_local_translation')[0]['args']=={'sourceLanguage':'zh','targetLanguage':'en','quality':'standard'}
   setup.get_by_role('button',name='Cancel',exact=True).click()
-  expect(setup).to_contain_text('Download stopped')
+  expect(setup).to_contain_text('Stopped.')
   expect(page.locator('.ol-style-trial-input')).to_have_value(source)
   assert calls('try_translation_text')==[]
   checks.append('Only explicit preparation starts exact selected pair; cancellation retains draft without cloud fallback')
@@ -118,7 +119,8 @@ with sync_playwright() as pw:
   expect(source_picker).to_be_disabled()
   expect(page.locator('[data-style-trial-pending]')).to_contain_text('does not request cloud translation')
   expect(page.locator('[data-style-trial-pending]')).not_to_contain_text('may still be charged')
-  assert calls('try_local_translation_text')[0]['args']=={'rawText':source,'sourceLanguage':'zh','targetLanguage':'English'}
+  first=calls('try_local_translation_text')[0]['args'];assert {k:first[k] for k in ['rawText','sourceLanguage','targetLanguage','quality']}=={'rawText':source,'sourceLanguage':'zh','targetLanguage':'English','quality':'standard'}
+  import uuid;uuid.UUID(first['requestId'])
   page.evaluate('window.__offlinePending.shift()()')
   output=page.locator('.ol-style-trial-result-editor');expect(output).to_have_value('Do not send the email; save the draft only.')
   options=page.locator('[data-text-options-panel]')
@@ -214,6 +216,43 @@ with sync_playwright() as pw:
   expect(saved.get_by_role('textbox',name='Saved text',exact=True)).to_have_value('Cloud fixture result')
   checks.append('New draft default names use the actual local/cloud result and explicit manual edit; cloud summary names target/service without a nonexistent source selector')
 
+
+  page.get_by_role('dialog',name='Saved drafts',exact=True).get_by_role('button',name='Close',exact=True).click()
+  close_trial();open_trial();page.evaluate('window.__offlineFail=false')
+  page.get_by_role('combobox',name='What would you like to do?',exact=True).select_option('translate')
+  page.get_by_role('combobox',name='Translate output to',exact=True).select_option('English')
+  page.get_by_role('combobox',name='Original language',exact=True).select_option('zh')
+  page.locator('.ol-style-trial-input').fill('保留此原文，先比较模型再取消。')
+  run=page.get_by_role('button',name='Translate',exact=True);run.click();page.wait_for_function('window.__offlinePending.length===1');page.evaluate('window.__offlinePending.shift()()')
+  expect(page.locator('.ol-style-trial-result-editor')).to_have_value('Do not send the email; save the draft only.')
+  options=page.locator('[data-text-options-panel]');options.locator('summary').click()
+  quality=page.get_by_role('combobox',name='Local model',exact=True);count=len(calls('prepare_local_translation'));translated=len(calls('try_local_translation_text'))
+  quality.select_option('enhanced');expect(run).to_be_disabled();expect(page.locator('.ol-style-trial-result-editor')).to_have_count(0)
+  expect(page.locator('[data-local-translation-setup]')).to_contain_text('available RAM')
+  assert len(calls('prepare_local_translation'))==count and len(calls('try_local_translation_text'))==translated
+  quality.select_option('standard');expect(run).to_be_enabled();expect(page.locator('.ol-style-trial-result-editor')).to_have_value('Do not send the email; save the draft only.')
+  quality.select_option('enhanced');page.get_by_role('button',name=re.compile('Download offline components')).click()
+  page.wait_for_function('window.__preparePending!==null');assert calls('prepare_local_translation')[-1]['args']['quality']=='enhanced'
+  page.evaluate("window.__enhancedReady=true;window.__offlineStatus.preparing=false;const s=structuredClone(window.__offlineStatus);s.runtimeReady=true;s.pairs=s.pairs.map(p=>({...p,ready:true}));window.__preparePending.resolve(s);window.__preparePending=null")
+  expect(run).to_be_enabled();run.click();page.wait_for_function('window.__offlinePending.length===1')
+  enhanced=calls('try_local_translation_text')[-1]['args'];assert enhanced['quality']=='enhanced'
+  page.locator('[data-style-trial-pending]').get_by_role('button',name='Cancel',exact=True).click()
+  expect(page.locator('[data-style-trial-pending]')).to_have_count(0)
+  assert calls('cancel_local_translation')[-1]['args']['requestId']==enhanced['requestId']
+  expect(page.locator('.ol-style-trial-input')).to_have_value('保留此原文，先比较模型再取消。')
+  expect(page.locator('.ol-style-trial-result-editor')).to_have_count(0)
+  run.click();page.wait_for_function('window.__offlinePending.length===1');closing=calls('try_local_translation_text')[-1]['args']['requestId'];close_trial()
+  page.wait_for_function('(id)=>window.__offlineCalls.some(x=>x.cmd==="cancel_local_translation"&&x.args.requestId===id)',arg=closing)
+  page.wait_for_function('window.__offlinePending.length===0');open_trial();expect(page.locator('.ol-style-trial-input')).to_have_value('保留此原文，先比较模型再取消。')
+  assert len(calls('try_translation_text'))==2
+  checks.append('Model readiness and cached results are isolated by quality; selecting enhanced neither downloads nor translates; explicit preparation/request carry quality; Cancel and Close address the exact request and retain source without cloud fallback')
+
+ except Exception as error:
+  if a.screenshot:
+   a.screenshot.parent.mkdir(exist_ok=True,parents=True);page.screenshot(path=str(a.screenshot))
+  a.report.parent.mkdir(exist_ok=True,parents=True)
+  a.report.write_text(json.dumps({'at':datetime.datetime.now().astimezone().isoformat(),'passed':False,'error':str(error),'checksCompleted':checks,'viewport':page.viewport_size,'layout':page.evaluate("Array.from(document.querySelectorAll('dialog[open],.ol-style-trial-options-panel,.ol-style-trial-result-editor,.ol-style-trial-primary-actions')).map(e=>({tag:e.tagName,classes:e.className,rect:e.getBoundingClientRect().toJSON()}))")},ensure_ascii=False,indent=2)+'\n',encoding='utf8')
+  raise
  finally:browser.close()
 r={'at':datetime.datetime.now().astimezone().isoformat(),'scope':__doc__,'passed':True,'checks':checks}
 a.report.parent.mkdir(exist_ok=True,parents=True);a.report.write_text(json.dumps(r,ensure_ascii=False,indent=2)+'\n',encoding='utf8');print(json.dumps(r,ensure_ascii=False))

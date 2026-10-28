@@ -1317,6 +1317,9 @@ pub struct UserPreferences {
     /// Explicit translation route; missing legacy JSON keeps its cloud route.
     #[serde(default)]
     pub translation_engine: TranslationEngine,
+    /// Optional larger CPU model. Existing installations keep the light model.
+    #[serde(default)]
+    pub local_translation_quality: LocalTranslationQuality,
     /// Required offline source code. No language guessing or model download.
     #[serde(default)]
     pub translation_source_language: String,
@@ -1544,6 +1547,14 @@ pub enum TranslationEngine {
     Local,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LocalTranslationQuality {
+    #[default]
+    Standard,
+    Enhanced,
+}
+
 fn deserialize_optional_translation_engine<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<serde_json::Value>, D::Error> {
     // Present JSON null stays distinguishable from an absent legacy field.
     serde_json::Value::deserialize(deserializer).map(Some)
@@ -1613,6 +1624,8 @@ struct UserPreferencesWire {
     translation_target_language: String,
     #[serde(default, deserialize_with = "deserialize_optional_translation_engine")]
     translation_engine: Option<serde_json::Value>,
+    #[serde(default)]
+    local_translation_quality: serde_json::Value,
     #[serde(default)]
     translation_source_language: serde_json::Value,
     chinese_script_preference: ChineseScriptPreference,
@@ -1741,6 +1754,7 @@ impl Default for UserPreferencesWire {
             working_languages: prefs.working_languages,
             translation_target_language: prefs.translation_target_language,
             translation_engine: None,
+            local_translation_quality: serde_json::to_value(prefs.local_translation_quality).unwrap_or_default(),
             translation_source_language: serde_json::Value::String(prefs.translation_source_language),
             chinese_script_preference: prefs.chinese_script_preference,
             output_language_preference: prefs.output_language_preference,
@@ -1952,6 +1966,7 @@ impl<'de> Deserialize<'de> for UserPreferences {
                 _ => TranslationEngine::Local,
             },
             translation_target_language: wire.translation_target_language,
+            local_translation_quality: if wire.local_translation_quality.as_str() == Some("enhanced") { LocalTranslationQuality::Enhanced } else { LocalTranslationQuality::Standard },
             translation_source_language: wire.translation_source_language.as_str().unwrap_or_default().to_owned(),
             chinese_script_preference: wire.chinese_script_preference,
             output_language_preference: wire.output_language_preference,
@@ -2393,6 +2408,7 @@ impl Default for UserPreferences {
             translation_target_language: String::new(),
             translation_engine: if cfg!(all(target_os = "windows", target_arch = "x86_64")) { TranslationEngine::Local } else { TranslationEngine::Cloud },
             translation_source_language: String::new(),
+            local_translation_quality: LocalTranslationQuality::Standard,
             chinese_script_preference: ChineseScriptPreference::Auto,
             output_language_preference: OutputLanguagePreference::Auto,
             qa_hotkey: default_qa_hotkey(),
@@ -3750,5 +3766,31 @@ mod tests {
                 .unwrap();
 
         assert!(binding.effective_codes().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod local_translation_quality_compatibility {
+    use super::*;
+    #[test]
+    fn legacy_unknown_or_malformed_quality_keeps_light_model_and_saved_route() {
+        let original = UserPreferences { translation_engine: TranslationEngine::Cloud,
+            translation_source_language: "zh".into(), translation_target_language: "English".into(), ..Default::default() };
+        let base = serde_json::to_value(original).unwrap();
+        for value in [None, Some(serde_json::Value::Null), Some(serde_json::json!("future-model")), Some(serde_json::json!({"unexpected":true}))] {
+            let mut saved = base.clone();
+            saved.as_object_mut().unwrap().remove("localTranslationQuality");
+            if let Some(value) = value { saved["localTranslationQuality"] = value; }
+            let prefs: UserPreferences = serde_json::from_value(saved).unwrap();
+            assert_eq!(prefs.local_translation_quality, LocalTranslationQuality::Standard);
+            assert_eq!(prefs.translation_engine, TranslationEngine::Cloud);
+            assert_eq!(prefs.translation_source_language, "zh");
+            assert_eq!(prefs.translation_target_language, "English");
+        }
+        let mut enhanced = base;
+        enhanced["localTranslationQuality"] = serde_json::json!("enhanced");
+        let prefs: UserPreferences = serde_json::from_value(enhanced).unwrap();
+        assert_eq!(prefs.local_translation_quality, LocalTranslationQuality::Enhanced);
+        assert_eq!(prefs.translation_engine, TranslationEngine::Cloud);
     }
 }

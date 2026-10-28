@@ -219,6 +219,8 @@ export function Translation() {
             disabled={preparingLocal}
           />
           {prefs.translationEngine === 'local' && <LocalTranslationSetup
+            key={prefs.localTranslationQuality ?? 'standard'} quality={prefs.localTranslationQuality ?? 'standard'}
+            onQualityChange={localTranslationQuality => { void persistPrefs(current => ({ ...current, localTranslationQuality }), t('translation.save.targetFailed')); }}
             source={prefs.translationSourceLanguage ?? ''} target={prefs.translationTargetLanguage}
             onSourceChange={translationSourceLanguage => { void persistPrefs(current => ({ ...current, translationSourceLanguage }), t('translation.save.targetFailed')); }}
             onBusy={setPreparingLocal} />}
@@ -295,6 +297,7 @@ export function Translation() {
           translationTarget={prefs.translationTargetLanguage}
           initialTranslationEngine={prefs.translationEngine ?? 'cloud'}
           initialTranslationSource={prefs.translationSourceLanguage}
+          initialTranslationQuality={prefs.localTranslationQuality}
           draft={trialDraft} onDraftChange={setTrialDraft} onClose={() => setTrialOpen(false)}
         />
       )}
