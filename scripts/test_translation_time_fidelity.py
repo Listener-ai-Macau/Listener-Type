@@ -94,6 +94,10 @@ class ClockFacts(unittest.TestCase):
         self.check('不要取消。下午三点以后来。', 'Do not cancel. Arrive after 3 p.m.',
                    'Do not cancel. Arrive after 3 p.m.')
 
+    def test_model_joined_unrelated_negative_sentence_does_not_negate_clock(self):
+        self.check('Dr. Lee will call at 3 p.m. on Friday. Do not cancel the meeting.',
+                   '李医生星期五下午3时会来电 不取消会议。', '李医生星期五下午3时会来电 不取消会议。', 'en')
+
 
 if __name__ == '__main__':
     unittest.main()

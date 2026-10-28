@@ -43,7 +43,9 @@ def _negated_clause(text, start, end, language):
     # A negated verb can change the meaning of a nearby before/after phrase.
     # Do not silently rewrite that scope or drop the negation while repairing
     # a clock. Explicit "not before" / 不早于 are part of the clock relation.
-    clause = re.split(r'[。！？!?.,，;；\r\n]', text[:start])[-1] + re.split(r'[。！？!?.,，;；\r\n]', text[end:])[0]
+    prefix = re.split(r'[。！？!?.,，;；\r\n]', text[:start])[-1]
+    suffix = re.split(r'[。！？!?.,，;；\r\n]', text[end:])[0]
+    clause = prefix + (suffix if language == 'zh' and re.match(r'^\s*(?:不要|不能|不得|不许|禁止)', suffix) else '')
     return bool(re.search(r'不要|不能|不得|禁止|不许|不|未|无|没有', clause) if language == 'zh'
                 else re.search(r"\b(?:not|no|never|cannot|can[’']t|don[’']t|mustn[’']t)\b", clause, re.I))
 
@@ -138,7 +140,7 @@ def _mentions(text, language, target_anchors=False):
                     relation = ''
                 found.append({'start': match.start(), 'end': match.end(), 'clocks': clocks,
                               'shape': shape, 'relation': relation,
-                              'negated': _negated_clause(text, match.start(), match.end(), language),
+                              'negated': bool(relation) and _negated_clause(text, match.start(), match.end(), language),
                               'preposition': (match.groupdict().get('relation') or '').lower()})
             except ValueError:
                 continue
