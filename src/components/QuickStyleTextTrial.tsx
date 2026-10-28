@@ -113,6 +113,12 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTran
   return <>{displayed ? <StyleTextTrial key={workspaceRevision} pack={displayed} packs={translationTarget ? undefined : packs}
     onSelectPack={translationTarget ? undefined : setSelectedId} draft={draft} onDraftChange={onDraftChange}
     translationTarget={translationTarget || undefined} onTranslationTargetChange={setTranslationTarget}
+    onRefineTranslation={selected && isMessageDraftStyle(selected) ? () => {
+      // The next input is an existing translated body, not writing directions.
+      // Change only this workspace's selection; retain other chosen styles.
+      const refinement = packs.find(pack => pack.id === 'builtin.light');
+      if (refinement) setSelectedId(refinement.id);
+    } : undefined}
     draftingChoice={!translationTarget && selected && !isMessageDraftStyle(selected) ? {
       label: t(savedMessageDraft ? 'messageDraft.choose' : 'messageDraft.add'),
       hint: t('messageDraft.hint'), pending: adding !== null,

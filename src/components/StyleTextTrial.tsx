@@ -25,7 +25,7 @@ function withDraftOriginName(origin: string, suffix: string): string {
   return prefix ? `${prefix} · ${suffix}` : suffix;
 }
 
-export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, draftingChoice, prepareShorter, translationTarget, onTranslationTargetChange, initialTranslationEngine, initialTranslationSource, initialTranslationQuality, inputOriginName, inputOriginal, suspended = false, onOpenSavedDraft, draft, onDraftChange, onClose }: {
+export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, draftingChoice, prepareShorter, translationTarget, onTranslationTargetChange, onRefineTranslation, initialTranslationEngine, initialTranslationSource, initialTranslationQuality, inputOriginName, inputOriginal, suspended = false, onOpenSavedDraft, draft, onDraftChange, onClose }: {
   pack: StylePack;
   packs?: StylePack[];
   onSelectPack?: (id: string) => void;
@@ -34,6 +34,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   prepareShorter?: () => Promise<StylePack>;
   translationTarget?: string;
   onTranslationTargetChange?: (language: string) => void;
+  onRefineTranslation?: () => void;
   initialTranslationEngine?: TranslationEngine;
   initialTranslationSource?: string;
   initialTranslationQuality?: LocalTranslationQuality;
@@ -311,6 +312,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
     // The previous source-language choice described the previous input, not
     // this output (which may now be in another language).
     setTranslationSource('');
+    if (translationTarget) onRefineTranslation?.();
     onTranslationTargetChange(translationTarget ? '' : lastTranslationTarget.current);
     setOptionsOpen(true);
   };
