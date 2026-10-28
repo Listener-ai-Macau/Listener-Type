@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-28T19:11:55.860478+08:00",
+  "updated_at": "2026-10-28T19:32:02.779482+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9344,7 +9344,7 @@
       "commit": "41cc06552120713170b8f85663a5294a6d0e3af5",
       "commit_subject": "Keep result actions outside scroll content across the full draft lifecycle",
       "subject": "Keep result actions independent of content scrolling throughout naming, save acknowledgement, library return and resizing",
-      "state": "source_and_complete_React_lifecycle_verified_exact_native_candidate_pending",
+      "state": "219_exact_native_full_saved_lifecycle_source_cache_and_v1_saves_verified_installed_public_prepared",
       "humanAccepted": false,
       "protects": [
         "Fresh, named, saved-expanded and returned results retain direct mouse hitability for Copy/Save/Open/Continue/cloud switch under desktop/narrow/zoom and content top/bottom.",
@@ -9372,11 +9372,22 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\shortcuts219-after1.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\shortcuts219-after2.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\saved-drafts219-after1.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-settings219-after1.json"
-      ]
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-settings219-after1.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\customer217-presale-feedback-handling.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\source219-ci-jobs.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native219-snapshot-20261028-192511\\workspace-source219-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261028-build219\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261028-build219\\type219-installed.json"
+      ],
+      "delivery": {
+        "build": 219,
+        "source": "68ed84370c44640af8602647b5e33eed1d2e1475",
+        "installed": true,
+        "publicPrepared": true
+      }
     }
   ],
-  "feature_routes_updated_at": "2026-10-28T19:11:55.860478+08:00",
+  "feature_routes_updated_at": "2026-10-28T19:32:02.779482+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -10559,7 +10570,7 @@
     },
     {
       "id": "text-workspace-clarity",
-      "accepted_scope": "Text workspace visual hierarchy and content-first saved-draft discovery only; speech/BLE/firmware unchanged. Type142 binds processing notice/eligibility to selected style/revision/retry; exact private MSI verifies actual policy/labels and separate actual-React fixtures cover delays, not a real unauthorized cloud request or visible-duration measurement. Exact ordinary215 private native submit/Close hit testing at both content scroll ends, real light translation and Cancel, keyless cloud-switch fee/confirmation visibility and exact edited-save/library-return proof added; no original22/global/physical/cross-PC closure. Fresh result Copy/Save/Continue/cloud actions are mouse-hit-testable after output without manual scrolling in desktop/narrow/zoomed views; native source/cache/v1 save checks match the exact candidate. No interactive global/hardware/cross-PC acceptance change.",
+      "accepted_scope": "Text workspace visual hierarchy and content-first saved-draft discovery only; speech/BLE/firmware unchanged. Type142 binds processing notice/eligibility to selected style/revision/retry; exact private MSI verifies actual policy/labels and separate actual-React fixtures cover delays, not a real unauthorized cloud request or visible-duration measurement. Exact ordinary215 private native submit/Close hit testing at both content scroll ends, real light translation and Cancel, keyless cloud-switch fee/confirmation visibility and exact edited-save/library-return proof added; no original22/global/physical/cross-PC closure. Fresh result Copy/Save/Continue/cloud actions are mouse-hit-testable after output without manual scrolling in desktop/narrow/zoomed views; native source/cache/v1 save checks match the exact candidate. No interactive global/hardware/cross-PC acceptance change. Full219 result lifecycle direct mouse checks cover named/saved-expanded states, library return, content top/bottom and private narrow viewport; original/source/cache/v1 saves and optional-shortcut guidance retained. Not a new speech/hardware/global/cross-PC qualification.",
       "baseline_state": "affected_ui_exact_native_installed_verified_not_customer_or_physical_qualified",
       "guard_entries": [
         "ui135_text_workspace_focus_and_content_first_saved_drafts",
@@ -10593,7 +10604,9 @@
           "src/pages/Overview.tsx",
           "src/i18n/audioFile.ts",
           "src/i18n/settingsFeedback.ts",
-          "src/lib/types.ts"
+          "src/lib/types.ts",
+          "src/i18n/shortcutDefaults.ts",
+          "src/pages/History.tsx"
         ]
       }
     },

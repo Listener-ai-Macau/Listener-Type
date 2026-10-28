@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build217 / Firmware38
+# Listener v1.0.6-rc1 · Type build219 / Firmware38
 
 | Download | File |
 | --- | --- |
@@ -7,7 +7,7 @@
 
 ## In this app update
 
-New installations start with all five computer shortcuts unassigned: recording, translation, question window, previous style and opening Listener Type. Record a shortcut only when you need it, or clear an assigned shortcut in Settings. Updates preserve existing saved bindings; device controls are unchanged. Explicit result handoffs retain the first input with the final saved draft. Continuing a saved draft preserves its attached original when saving a new version; the existing v1 file format and immutable older records are retained. In a translation/refinement session, use Retranslate from the original to revisit the full pre-translation input and explicitly submit to your own cloud service after reviewing the target and fees. Return restores your edited translation; opening the route sends nothing. Existing WAV import is now visible in Overview and as a Tools card. No model, speech backend or firmware change.
+Result Copy, Save, Open and Continue controls stay in a separate action area while draft content scrolls. They remain reachable after naming a draft, saving, opening and returning from Saved drafts, and resizing a window. Explicit cloud switching keeps the source, local edited comparison and fee/submission confirmation. Original input and immutable saved copies are retained. Empty recording history gives ordinary Overview/optional-shortcut guidance. Five computer shortcuts still start unassigned; updates preserve existing saved bindings. Light CPU translation, providers and Firmware38 are unchanged.
 
 ## Before using
 
@@ -17,11 +17,11 @@ Light offline translation is a useful editable draft, not guaranteed exact trans
 
 ## File identity
 
-- Type source: `6db81b0ad6cd73538edd248a1299f498031154a1` · `build-source/type217-20261028`
-- MSI: 299831296 bytes · SHA256 `3c54b1157bc2ec80b4ed5cd591cd2afb6c80209fde5ff8e979017fa1b74e909e`
+- Type source: `68ed84370c44640af8602647b5e33eed1d2e1475` · `build-source/type219-20261028`
+- MSI: 299831296 bytes · SHA256 `69daa18effcda7f7aaedfedad4be3fa4373de71394e963f3c9a24dc4a3b6f290`
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`
 - ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`
 
 ## 中文说明
 
-新安装时，录音、翻译、提问浮窗、上一风格和打开Listener Type这五项电脑快捷键默认全部未设置；需要哪项再自行录入，也可在设置中逐项清除。更新保留已有个人绑定，设备操作不变。明确把结果带入下一步时，最初原稿会随最终成稿保存；已保存稿继续编辑并另存，也保留其随附原文和原有不可变记录，沿用v1格式。当前翻译/润色会话可回到完整译前原文，核对目标语言与服务费用后明确提交云端重译，再返回原修订稿；打开不会自动发送。已有WAV音频导入在概览和工具页直接可见。模型、语音后端及固件不变。旧稿没有保存过的早期原文不会自动补回；中间版本需要分别保存。
+结果的复制、保存、查看和继续操作使用独立操作区；命名、保存、打开并返回成稿库、调整窗口大小或滚动内容后，仍可继续操作。明确云端切换保留原文、本机修订稿对照和费用/提交确认。原稿和不可变保存副本保留。空录音历史会说明概览按钮及按需配置快捷键的入口。五项电脑快捷键首次仍全空，更新保留已有绑定；轻量CPU翻译、服务和固件38不变。

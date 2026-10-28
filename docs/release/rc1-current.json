@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-28T17:30:39.006277+08:00",
+  "updatedAt": "2026-10-28T19:32:02.779482+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 217,
-    "source": "6db81b0ad6cd73538edd248a1299f498031154a1",
-    "sourceTag": "build-source/type217-20261028",
+    "build": 219,
+    "source": "68ed84370c44640af8602647b5e33eed1d2e1475",
+    "sourceTag": "build-source/type219-20261028",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "3c54b1157bc2ec80b4ed5cd591cd2afb6c80209fde5ff8e979017fa1b74e909e",
+    "sha256": "69daa18effcda7f7aaedfedad4be3fa4373de71394e963f3c9a24dc4a3b6f290",
     "sizeBytes": 299831296,
-    "exeSha256": "7c9c042410ae4fe58a6668286b4c88bccb792212c8a24ef6019c30b4a2c20ab0",
+    "exeSha256": "563869f10fd71f8f1c907329670e211dd530e27e7ed845252b9644f5b8a22a86",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -577,7 +577,13 @@
     "explicitIndividualShortcutClearAndPersistence217": true,
     "existingSavedBindingsPreserved217": true,
     "exactNativeSourceRetention217": true,
-    "realInteractiveGlobalTriggering217": false
+    "realInteractiveGlobalTriggering217": false,
+    "completeResultLifecycleMouseActions219": true,
+    "fixedRunCloseAndExplicitCloudConfirmation219": true,
+    "originalCacheAndImmutableV1Saves219": true,
+    "unassignedEmptyHistoryGuidance219": true,
+    "factoryComputerBindingsRemainUnassigned219": true,
+    "noNewHardwareOrSystemGlobalTriggerQualification219": true
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -595,6 +601,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build217-20261028"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build219-20261028"
   }
 }
