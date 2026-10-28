@@ -85,6 +85,9 @@ export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void 
     });
   }, []);
   const { prefs } = useHotkeySettings();
+  const historyEmptyHint = prefs?.dictationHotkey.primary.trim()
+    ? t('history.empty', { trigger: formatComboLabel(prefs.dictationHotkey) })
+    : t('shortcutDefaults.historyUnassigned');
 
   const refresh = useCallback(async (manual = false) => {
     const request = ++historyReadRef.current;
@@ -277,7 +280,7 @@ export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void 
         <section className="ol-history-empty" data-history-empty>
           <Icon name="history" size={28} />
           <h2>{t('firstUse.emptyHistoryTitle')}</h2>
-          <p>{t('history.empty', { trigger: prefs ? formatComboLabel(prefs.dictationHotkey) : '' })}</p>
+          <p>{historyEmptyHint}</p>
           {onOpenSavedDrafts && <div className="ol-history-draft-entry">
             <p>{t('firstUse.historyDraftHint')}</p>
             <Btn size="sm" variant="ghost" onClick={onOpenSavedDrafts}>{t('textDraft.title')}</Btn>
@@ -377,7 +380,7 @@ export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void 
                     <span>{t('history.noMatching')}</span>
                     <Btn size="sm" variant="ghost" onClick={() => selectFilter('all')}>{t('history.showAll')}</Btn>
                   </>
-                ) : t('history.empty', { trigger: prefs ? formatComboLabel(prefs.dictationHotkey) : '' })}
+                ) : historyEmptyHint}
               </div>
             )}
             {!loadError && filtered.map(s => (

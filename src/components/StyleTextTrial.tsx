@@ -69,7 +69,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const dialog = useRef<HTMLDialogElement>(null);
   const workspaceScroll = useRef<HTMLDivElement>(null);
   const dialogScroll = useRef(0);
-  const resultActions = useRef<HTMLDivElement>(null);
+  const resultSection = useRef<HTMLElement>(null);
   const generation = useRef(0);
   const running = useRef(false);
   const copyRunning = useRef(false);
@@ -164,10 +164,10 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   }, [pack.id, signature]);
 
   useEffect(() => {
-    // New results should expose their next actions on desktop as well as narrow
-    // windows. Cached results keep their existing reading/return position.
+    // Reveal the produced text; result actions have their own non-scrolling
+    // layout region, including after naming, saving and window resizing.
     if (result && !restored) {
-      resultActions.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      resultSection.current?.scrollIntoView({ block: 'start', inline: 'nearest' });
     }
   }, [result, restored]);
 
@@ -522,7 +522,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
       </div>
       <div className="ol-style-trial-outputs">
       {result && (
-        <section className="ol-style-trial-result" aria-label={t('style.trial.output')} aria-live="polite">
+        <section ref={resultSection} className="ol-style-trial-result" aria-label={t('style.trial.output')} aria-live="polite">
           <div className="ol-style-trial-result-heading">
             <div style={{ fontWeight: 600 }}>{t('style.trial.output')}</div>
             <span className="ol-style-trial-result-meta" title={t(editedOutput !== null ? 'style.trial.editedResult' : offline ? 'offlineTranslation.result' : result.usedTextService ? 'style.trial.serviceResult' : 'style.trial.rawResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}>
@@ -544,20 +544,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
               onChange={event => setDraftNameEdit(event.target.value)} />
           </label>
           {draftNameInvalid && <p role="alert" className="ol-style-trial-hint">{t('textDraft.nameInvalid')}</p>}
-          <div ref={resultActions} className="ol-style-trial-primary-actions" data-workspace-result-actions>
-            <Btn size="sm" variant="blue" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => void copyResult()}>
-              {t(copying ? 'style.trial.copying' : copiedResult === result ? 'style.trial.copied' : 'style.trial.copyResult')}
-            </Btn>
-            <SaveTextDraft compact name={savedDraftName} original={originalForSave} text={resultOutput} disabled={pending || copying || delivering || draftNameInvalid || styleChangePending || translationPreparing} onBusy={setDraftSaving}
-              onOpenSaved={(id,onUnavailable)=>{if(onOpenSavedDraft)onOpenSavedDraft(id,onUnavailable);else setLocalLibrary({id,onUnavailable});}}
-              onUnsaved={() => setSavedDraftSignature('')}
-              onSaved={text => setSavedDraftSignature(JSON.stringify([savedDraftName, originalForSave, text]))} />
-            {onTranslationTargetChange && <Btn size="sm" variant="ghost"
-              disabled={pending || copying || delivering || draftSaving || styleChangePending || translationPreparing || !resultOutput.trim() || resultOutput.length > 4000}
-              onClick={continueWithResult}>{t(translationTarget ? 'textWorkspace.refineResult' : 'textWorkspace.translateResult')}</Btn>}
-            {offline && <Btn size="sm" variant="ghost" data-cloud-retranslation
-              disabled={pending || copying || delivering || draftSaving || styleChangePending || translationPreparing}
-              onClick={prepareCloudRetranslation}>{t('textWorkspace.retranslateOriginal')}</Btn>}
+          <div className="ol-style-trial-secondary-actions">
             {(!offline || translationTarget === 'English') && <PoliteEditSuggestions key={`${generation.current}:${result?.packId ?? ''}`} text={resultOutput} originalText={draft} localOnly={offline} cloudConfigured={!offline && readiness?.textServiceConfigured === true}
               disabled={copying || delivering || draftSaving} onApply={updateEditedOutput} />}
           </div>
@@ -645,6 +632,23 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
       )}
       </div>
       <div className="ol-style-trial-submit" data-workspace-submit>
+        {result && (
+          <div className="ol-style-trial-primary-actions ol-style-trial-result-toolbar" role="group" aria-label={t('style.trial.output')} data-workspace-result-actions>
+            <Btn size="sm" variant="blue" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => void copyResult()}>
+              {t(copying ? 'style.trial.copying' : copiedResult === result ? 'style.trial.copied' : 'style.trial.copyResult')}
+            </Btn>
+            <SaveTextDraft compact name={savedDraftName} original={originalForSave} text={resultOutput} disabled={pending || copying || delivering || draftNameInvalid || styleChangePending || translationPreparing} onBusy={setDraftSaving}
+              onOpenSaved={(id,onUnavailable)=>{if(onOpenSavedDraft)onOpenSavedDraft(id,onUnavailable);else setLocalLibrary({id,onUnavailable});}}
+              onUnsaved={() => setSavedDraftSignature('')}
+              onSaved={text => setSavedDraftSignature(JSON.stringify([savedDraftName, originalForSave, text]))} />
+            {onTranslationTargetChange && <Btn size="sm" variant="ghost"
+              disabled={pending || copying || delivering || draftSaving || styleChangePending || translationPreparing || !resultOutput.trim() || resultOutput.length > 4000}
+              onClick={continueWithResult}>{t(translationTarget ? 'textWorkspace.refineResult' : 'textWorkspace.translateResult')}</Btn>}
+            {offline && <Btn size="sm" variant="ghost" data-cloud-retranslation
+              disabled={pending || copying || delivering || draftSaving || styleChangePending || translationPreparing}
+              onClick={prepareCloudRetranslation}>{t('textWorkspace.retranslateOriginal')}</Btn>}
+          </div>
+        )}
         {cloudRetranslationPrepared && <p role="status" className="ol-style-trial-hint" data-cloud-retranslation-ready>{t('textWorkspace.retranslationReferenceHint')}</p>}
         <div className="ol-style-trial-submit-actions">
           {refinementReturn && <Btn variant="ghost" disabled={pending || copying || delivering || draftSaving || styleChangePending || translationPreparing}

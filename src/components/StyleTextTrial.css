@@ -104,6 +104,16 @@
 .ol-style-trial-result-heading { display: flex; gap: 8px 12px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; margin-bottom: 8px; }
 .ol-style-trial-result-meta { color: var(--ol-ink-3); font-size: 11px; font-weight: 400; line-height: 1.5; }
 .ol-style-trial-primary-actions { margin-top: 12px; scroll-margin-block: 12px; }
+.ol-style-trial-result-toolbar { margin: 0 0 10px; padding-bottom: 10px; border-bottom: 1px solid var(--ol-line); }
+.ol-style-trial-result-toolbar button { max-width: 100%; white-space: normal; height: auto; min-height: 30px; }
+.ol-style-trial-result-toolbar .ol-save-text-draft { min-width: 0; max-width: 100%; }
+/* The result body already shows where the draft was saved. Keep the compact
+   control's live confirmation available to assistive technology without
+   duplicating that paragraph inside the action row. */
+.ol-style-trial-result-toolbar .ol-save-text-draft > [role="status"] {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+.ol-style-trial-result-toolbar .ol-save-text-draft > [role="alert"] { max-height: 72px; overflow-y: auto; overflow-wrap: anywhere; }
 .ol-style-trial-input, .ol-style-trial-result-editor {
   width: 100%;
   box-sizing: border-box;

@@ -9,6 +9,7 @@ const en = {
   microphoneStartUnbound: 'After speech setup, click “{{action}}” below to start. Assign a computer shortcut in Settings → Shortcuts only if you want one.',
   microphoneFinishUnbound: 'When finished, click Stop in the recording capsule.',
   translationUnbound: 'No computer translation shortcut is assigned. Choose a target language; set a shortcut in Settings → Shortcuts only when you need one.',
+  historyUnassigned: 'No recording shortcut is set. Use the recording button in Overview, or assign a shortcut in Settings → Shortcuts when needed.',
 };
 type Copy = typeof en;
 const zhCN: Copy = {
@@ -22,6 +23,7 @@ const zhCN: Copy = {
   microphoneStartUnbound: '完成语音配置后，点击下方「{{action}}」开始。需要电脑快捷键时，再到「设置 → 快捷键」自行录入。',
   microphoneFinishUnbound: '说完点击录音胶囊中的停止按钮。',
   translationUnbound: '尚未绑定电脑翻译快捷键。先选择目标语言；需要快捷键时，再到「设置 → 快捷键」自行录入。',
+  historyUnassigned: '尚未设置录音快捷键。可在概览点击「开始听写」，需要时再到「设置 → 快捷键」绑定。',
 };
 const zhTW: Copy = {
   unassigned: '未設定',
@@ -34,6 +36,7 @@ const zhTW: Copy = {
   microphoneStartUnbound: '完成語音設定後，點擊下方「{{action}}」開始。需要電腦快捷鍵時，再到「設定 → 快捷鍵」自行錄入。',
   microphoneFinishUnbound: '說完點擊錄音膠囊中的停止按鈕。',
   translationUnbound: '尚未綁定電腦翻譯快捷鍵。先選擇目標語言；需要快捷鍵時，再到「設定 → 快捷鍵」自行錄入。',
+  historyUnassigned: '尚未設定錄音快捷鍵。可在概覽點擊「開始聽寫」，需要時再到「設定 → 快捷鍵」綁定。',
 };
 const ja: Copy = {
   unassigned: '未設定',
@@ -46,6 +49,7 @@ const ja: Copy = {
   microphoneStartUnbound: '音声設定後、下の「{{action}}」で開始します。必要な場合だけ「設定 → ショートカット」でキーを登録してください。',
   microphoneFinishUnbound: '話し終えたら録音カプセルの停止ボタンを押してください。',
   translationUnbound: '翻訳用のパソコンショートカットは未設定です。翻訳先の言語を選び、必要な場合だけ「設定 → ショートカット」で登録してください。',
+  historyUnassigned: '録音ショートカットは未設定です。概要の録音ボタンを使うか、必要に応じて「設定 → ショートカット」で登録してください。',
 };
 const ko: Copy = {
   unassigned: '미설정',
@@ -58,5 +62,6 @@ const ko: Copy = {
   microphoneStartUnbound: '음성 설정을 마친 뒤 아래의 “{{action}}”을 눌러 시작하세요. 단축키가 필요할 때만 설정 → 단축키에서 등록하세요.',
   microphoneFinishUnbound: '말을 마치면 녹음 캡슐의 중지 버튼을 누르세요.',
   translationUnbound: '컴퓨터 번역 단축키가 지정되지 않았습니다. 출력 언어를 고르고 필요할 때만 설정 → 단축키에서 등록하세요.',
+  historyUnassigned: '녹음 단축키가 미설정입니다. 개요의 녹음 버튼을 사용하거나 필요할 때 설정 → 단축키에서 등록하세요.',
 };
 export const shortcutDefaultsTranslations = { en, 'zh-CN': zhCN, 'zh-TW': zhTW, ja, ko };

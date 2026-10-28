@@ -30,6 +30,7 @@ window.__shortcutCalls=[];window.__shortcutFail=false;window.__shortcutDelay=fal
 window.__shortcutFixture=(cmd,args,mock)=>{
  window.__shortcutCalls.push({cmd,args});
  if(cmd==='get_credentials')return {...mock(),asrConfigured:true,llmConfigured:true};
+ if(cmd==='list_history')return [];
  if(cmd.startsWith('set_')&&cmd.endsWith('_hotkey')){
   if(window.__shortcutFail)return Promise.reject('fixture write failed');
   if(window.__shortcutDelay)return new Promise(resolve=>window.__finishShortcut=()=>resolve(mock()));
@@ -52,6 +53,12 @@ window.__shortcutFixture=(cmd,args,mock)=>{
         prefs = page.evaluate('window.__readShortcutPrefs()')
         assert prefs['qaHotkey'] is None
         assert all(prefs[field] == {'primary': '', 'modifiers': []} for field in fields if field != 'qaHotkey')
+        page.get_by_role('button', name='History', exact=True).click()
+        expect(page.locator('[data-history-empty]')).to_contain_text('No recording shortcut is set')
+        expect(page.locator('[data-history-empty]')).to_contain_text('Overview')
+        assert 'Press Not set' not in page.locator('[data-history-empty]').inner_text()
+        assert not any(x['cmd'].startswith('set_') and x['cmd'].endswith('_hotkey') for x in page.evaluate('window.__shortcutCalls'))
+        report['checks'].append('Unassigned empty history gives ordinary Overview/optional-shortcut guidance without an invented press-Not-set instruction or automatic binding')
         page.get_by_title('Settings', exact=True).click()
         page.get_by_role('button', name='Shortcuts', exact=True).click()
         recorders = page.locator('[data-shortcut-recorder]')
