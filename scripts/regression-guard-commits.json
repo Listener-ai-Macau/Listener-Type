@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-28T13:53:41.967473+08:00",
+  "updated_at": "2026-10-28T15:44:17.701435+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9203,9 +9203,41 @@
         "installed": true,
         "publicPrepared": true
       }
+    },
+    {
+      "id": "workspace_first_input_survives_translation_refinement_and_saved_continuation",
+      "repo": "type",
+      "commit": "adefd625c7b6b6e982bc9d2e67d68dc49e5abd88",
+      "commit_subject": "fix(workspace): preserve first drafts across translation and refinement",
+      "subject": "Retain first input with final and continued saved drafts; revisit original-source cloud translation without losing current edits; expose existing WAV import",
+      "state": "216_frontend_verified_native_pending",
+      "humanAccepted": false,
+      "protects": [
+        "Explicit English->translation->refinement saves retain first input in unchanged v1 original field, including continuation from saved records.",
+        "Opening source retranslation makes no paid request; only explicit Translate submits complete pre-translation input. Returning restores exact refined text/name and cached cloud result.",
+        "Clearing input retires unrelated original/context; source-based cloud submit and return remain hit-testable in narrow viewports.",
+        "Overview and Tools expose existing audio import outside collapsed disclosures."
+      ],
+      "guards": [
+        "python scripts/check-workspace-source-continuation-ui.py --url <controlled-ui> --report <result>",
+        "python scripts/check-saved-text-drafts-ui.py --url <controlled-ui> --report <result> --naming --edit-copy",
+        "python scripts/check-workspace-action-visibility-ui.py --url <controlled-ui> --report <result>",
+        "python scripts/check-local-translation-ui.py --url <controlled-ui> --report <result>",
+        "npm run build"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-source216-source-checkpoint.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-source216-after4.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\saved-drafts216-after5.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-visibility216-after1.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\local-translation216-after1.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace216-harness-corrections.json"
+      ],
+      "machine_accepted_scope": "Controlled actual React/IPC boundaries and mock draft store; TypeScript/frontend build passed. Exact ordinary MSI/native disk verification remains pending.",
+      "pending_human_scope": "No physical, live microphone, global/external desktop, brownout or second-PC acceptance."
     }
   ],
-  "feature_routes_updated_at": "2026-10-28T13:53:41.967473+08:00",
+  "feature_routes_updated_at": "2026-10-28T15:44:17.701435+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -10382,7 +10414,8 @@
       "guard_entries": [
         "ui135_text_workspace_focus_and_content_first_saved_drafts",
         "type142_text_trial_selected_style_readiness_identity",
-        "workspace_fixed_submit_close_and_explicit_cloud_confirmation"
+        "workspace_fixed_submit_close_and_explicit_cloud_confirmation",
+        "workspace_first_input_survives_translation_refinement_and_saved_continuation"
       ],
       "paths": {
         "type": [
@@ -10402,7 +10435,11 @@
           "src-tauri/src/local_translation/enhanced.rs",
           "src/components/LocalTranslationSetup.tsx",
           "src/lib/localTranslation.ts",
-          "src/lib/ipc.ts"
+          "src/lib/ipc.ts",
+          "src/components/QuickStyleTextTrial.tsx",
+          "src/pages/Tools.tsx",
+          "src/pages/Overview.tsx",
+          "src/i18n/audioFile.ts"
         ]
       }
     },
