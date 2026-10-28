@@ -14,7 +14,7 @@ checks = []
 source = "Hi Sam, I need to move tomorrow's 10 o'clock meeting to Friday at 2 because the draft is not ready. Please confirm by 5 today or suggest a time next week."
 output = "Hi Sam, tomorrow's 10 o'clock meeting needs to move to Friday at 2 because the draft is not ready. Please confirm by 5 today or suggest a time next week."
 with sync_playwright() as pw:
-    b = pw.chromium.launch(headless=True, channel='msedge')
+    b = pw.chromium.launch(headless=True, channel='msedge', args=['--disable-gpu'])
     try:
         page = b.new_page(viewport={'width': 1240, 'height': 800})
         page.set_default_timeout(6500)
@@ -44,7 +44,7 @@ with sync_playwright() as pw:
         page.route(re.compile(r'/src/lib/ipc\.ts(?:\?.*)?$'), route_fixture)
         page.goto(a.url, wait_until='networkidle')
         def open_trial():
-            page.get_by_role('button', name='Try typed text', exact=True).click()
+            page.get_by_role('button', name='Open text workspace', exact=True).click()
             return page.locator('dialog').last
         def calls(cmd):
             return page.evaluate('window.__calls').copy() if cmd is None else [x for x in page.evaluate('window.__calls') if x['cmd'] == cmd]
@@ -55,7 +55,7 @@ with sync_playwright() as pw:
             page.reload(wait_until='networkidle')
             return open_trial()
         trial = open_trial()
-        picker = trial.get_by_role('combobox')
+        picker = trial.get_by_role('combobox', name='Trial style', exact=True)
         expect(picker).to_have_value('builtin.raw')
         short = trial.get_by_role('button', name='Make shorter', exact=True)
         expect(short).to_be_disabled()
@@ -122,7 +122,7 @@ with sync_playwright() as pw:
         checks.append('Fresh shorter result for a changed draft remains fresh when switching to an already-created target style')
         trial.get_by_role('button', name='Close', exact=True).click()
         trial = open_trial()
-        expect(trial.get_by_role('combobox')).to_have_value('builtin.raw')
+        expect(trial.get_by_role('combobox', name='Trial style', exact=True)).to_have_value('builtin.raw')
         assert len(calls('create_style_pack_from_template')) == 1
         checks.append('Reopening keeps the saved inactive preset without silently changing the daily/default selection')
 
@@ -134,7 +134,7 @@ with sync_playwright() as pw:
         expect(trial.get_by_role('alert')).to_contain_text('Your draft is kept')
         expect(trial.get_by_label('Your text', exact=True)).to_have_value(source)
         expect(trial.get_by_label('Result text', exact=True)).to_have_value(source)
-        expect(trial.get_by_role('combobox')).to_have_value('builtin.raw')
+        expect(trial.get_by_role('combobox', name='Trial style', exact=True)).to_have_value('builtin.raw')
         assert len(calls('try_style_pack_text')) == 1
         checks.append('Failed preset save retains full source, selected style and previous result; no paid request')
         page.evaluate('window.__failAdd=false;window.__failService=true')
@@ -142,7 +142,7 @@ with sync_playwright() as pw:
         finish_add()
         expect(trial.get_by_role('alert')).to_contain_text('controlled request failure')
         expect(trial.get_by_label('Result text', exact=True)).to_have_value(source)
-        expect(trial.get_by_role('combobox')).to_have_value('builtin.raw')
+        expect(trial.get_by_role('combobox', name='Trial style', exact=True)).to_have_value('builtin.raw')
         page.evaluate('window.__failService=false')
         trial.get_by_role('button', name='Make shorter', exact=True).click()
         expect(trial.get_by_label('Result text', exact=True)).to_have_value(output)

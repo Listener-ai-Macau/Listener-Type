@@ -21,6 +21,7 @@ import { localTranslationMessages } from './localTranslation';
 import { savedDraftCopyMessages } from './savedDraftCopy';
 import { styleEditorMessages, vocabPresetMessages } from './styleEditor';
 import { qaPreparationMessages } from './qaPreparation';
+import { sourceFactMessages } from './sourceFacts';
 
 export const SUPPORTED_LOCALES = ['zh-CN', 'zh-TW', 'en', 'ja', 'ko'] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
@@ -89,6 +90,9 @@ export default i18n;
 
 for (const [locale, qaPreparation] of Object.entries(qaPreparationMessages)) {
   i18n.addResourceBundle(locale, 'translation', { qaPreparation }, true, true);
+}
+for (const [locale, sourceFacts] of Object.entries(sourceFactMessages)) {
+  i18n.addResourceBundle(locale, 'translation', { sourceFacts }, true, true);
 }
 
 /**

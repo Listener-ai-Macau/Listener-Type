@@ -37,7 +37,7 @@ window.__sourceFixture=(cmd,args,mock)=>{
  window.__sourceCalls.push({cmd,args});
  if(cmd==='get_style_text_trial_readiness')return {available:true,requiresTextService:args.stylePackId!=='builtin.raw',textServiceConfigured:true};
  if(cmd==='get_local_translation_status')return {supported:true,runtimeReady:true,runtimeDownloadBytes:0,pairs:[{source:'en',target:'zh',ready:true,downloadBytes:70743021},{source:'zh',target:'en',ready:true,downloadBytes:74481402}],preparing:false,receivedBytes:0,expectedBytes:0};
- if(cmd==='try_style_pack_text')return {packId:args.stylePackId,packName:'Formal',outputText:/^[\\x00-\\x7F]*$/.test(args.rawText)?window.__formalInput:window.__polishedOutput,usedTextService:true,elapsedMs:350};
+ if(cmd==='try_style_pack_text')return {packId:args.stylePackId,packName:'Formal',outputText:window.__sourceReplies[args.rawText]??args.rawText,usedTextService:true,elapsedMs:350};
  if(cmd==='try_local_translation_text')return {packId:'local_translation:'+args.sourceLanguage+':'+args.targetLanguage,packName:'Local',outputText:window.__localOutput,usedTextService:false,elapsedMs:400};
  if(cmd==='try_translation_text')return new Promise(resolve=>window.__sourceCloud.push(()=>resolve({packId:'translation:'+args.targetLanguage,packName:'Cloud',outputText:'从完整英文原文重新翻译的结果。',usedTextService:true,elapsedMs:500})));
  return mock();
@@ -53,7 +53,10 @@ window.__sourceFixture=(cmd,args,mock)=>{
 
         page.route(re.compile(r'/src/lib/ipc\.ts(?:\?.*)?$'), fixture)
         page.goto(args.url, wait_until='networkidle')
-        page.evaluate('([formal,local,polished])=>{window.__formalInput=formal;window.__localOutput=local;window.__polishedOutput=polished}', [formal, local, polished])
+        # This fixture tests continuation/storage, not an omitted-date result.
+        # A second rewrite of the manually corrected full draft must retain its
+        # date/quantity facts rather than reuse an older, shorter fixture reply.
+        page.evaluate('([original,formal,local,polished,edited])=>{window.__sourceReplies={[original]:formal,[local]:polished,[edited]:edited};window.__localOutput=local}', [original, formal, local, polished, edited])
         audio = page.get_by_role('button', name='Transcribe recorded audio', exact=True)
         expect(audio).to_be_visible()
         assert audio.evaluate("e=>!e.closest('details:not([open])')")

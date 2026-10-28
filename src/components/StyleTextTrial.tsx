@@ -16,6 +16,8 @@ import { LocalTranslationSetup } from './LocalTranslationSetup';
 import { canSuggestChineseSource, localTranslationErrorKey, localTranslationKey, translationLanguageLabel } from '../lib/localTranslation';
 import type { TranslationEngine, LocalTranslationReadiness, LocalTranslationQuality } from '../lib/localTranslation';
 import { SavedTextDraftsDialog } from './SavedTextDraftsDialog';
+import { preserveBufferedSourceFacts } from '../lib/bufferedSourceFacts';
+import { isMessageDraftStyle } from '../lib/messageDraftStyle';
 
 function withDraftOriginName(origin: string, suffix: string): string {
   const room = Math.max(0, 80 - Array.from(suffix).length - 3);
@@ -235,8 +237,14 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         : tryStylePackText(target.id, draft));
       // The backend receipt identifies the route; workspace identity also binds
       // the captured source/method signature, so late results cannot cross it.
-      const value = offline ? { ...returned, packId: target.id, packName: target.name } : returned;
       if (generation.current === request) {
+        // This response belongs to this exact current input. Validate before
+        // caching/display/save, never by rewriting later manual edits or by
+        // secretly sending an earlier workflow original back to a service.
+        const baseValue = offline ? { ...returned, packId: target.id, packName: target.name } : returned;
+        const value = !matching && !translationTarget && returned.usedTextService && target.baseMode !== 'raw' && !isMessageDraftStyle(target)
+          ? { ...baseValue, outputText: preserveBufferedSourceFacts(draft, returned.outputText).outputText }
+          : baseValue;
         if (translationTarget) setOptionsOpen(false);
         completed.current.delete(cacheKey(target.id));
         completed.current.set(cacheKey(target.id), { signature: targetSignature, input: draft, result: value, edited: matching?.edited ?? null });
@@ -258,7 +266,8 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
           style_trial_timeout: 'timeout',
         }[message];
         setResult(result); setResultSignature(resultSignature); setEditedOutput(editedOutput);
-        setError(offline ? t(`offlineTranslation.${localTranslationErrorKey(cause)}`) : translationTarget && /status 401|AuthenticationError|Unauthorized|credentials were already rejected/i.test(message) ? t('translation.authFailed')
+        setError(message === 'buffered_source_facts_unmatched' ? t('sourceFacts.unmatched')
+          : offline ? t(`offlineTranslation.${localTranslationErrorKey(cause)}`) : translationTarget && /status 401|AuthenticationError|Unauthorized|credentials were already rejected/i.test(message) ? t('translation.authFailed')
           : message === 'style_trial_prepare_shorter_failed' ? t('conciseDraft.failed')
           : key ? t(`style.trial.${key}`) : t('style.trial.failed', { error: message }));
       }

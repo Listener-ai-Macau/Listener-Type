@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cancelAudioFileTrial, copyExplicitText, getCredentials, transcribeAudioFileTrial, type AudioFileTranscript } from '../lib/ipc';
 import type { CredentialsStatus } from '../lib/types';
@@ -18,6 +18,8 @@ function validateSelectedFileLength(length: number): void {
 export function AudioFileTrial({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
+  const scrollArea = useRef<HTMLDivElement>(null);
+  const resultArea = useRef<HTMLElement>(null);
   const generation = useRef(0);
   const requestId = useRef<string | null>(null);
   const copyBusy = useRef(false);
@@ -42,6 +44,10 @@ export function AudioFileTrial({ onClose }: { onClose: () => void }) {
   const [speechSettingsOpen, setSpeechSettingsOpen] = useState(false);
   const supported = status?.activeAsrProvider === 'volcengine';
   const ready = supported && status.asrConfigured;
+  useLayoutEffect(() => {
+    const scroll = scrollArea.current, pane = resultArea.current;
+    if (result && scroll && pane) scroll.scrollTop += pane.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+  }, [result]);
   useEffect(() => {
     let current = true;
     setStatus(null); setStatusFailed(false);
@@ -116,10 +122,11 @@ export function AudioFileTrial({ onClose }: { onClose: () => void }) {
     if (event.target !== event.currentTarget) return;
     event.preventDefault(); close();
   }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+    <div className="ol-style-trial-header">
       <h2 id="audio-file-title" style={{ margin: 0, fontSize: 20 }}>{t('audioFile.title')}</h2>
       <Btn variant="ghost" disabled={copying || saving || loading} onClick={close}>{t('audioFile.close')}</Btn>
     </div>
+    <div ref={scrollArea} className="ol-style-trial-scroll" data-audio-file-scroll>
     <p className="ol-style-trial-hint">{t('audioFile.intro')}</p>
     <p role="note" className="ol-style-trial-hint">{t('audioFile.cost')}</p>
     <div role="status" className="ol-style-trial-hint">
@@ -139,16 +146,19 @@ export function AudioFileTrial({ onClose }: { onClose: () => void }) {
     </div>
     <p className="ol-style-trial-hint">{loading ? t('audioFile.loading') : selection?.name ?? t('audioFile.noFile')}</p>
     {selection?.sample && <details className="ol-style-trial-details"><summary>{t('audioFile.sampleWords')}</summary><p>Hi Sam, let's meet on Thursday at three. I'll send the notes before lunch. Please keep the budget at fifty dollars, and tell me if the time needs to change.</p><audio controls preload="none" src={sampleUrl} aria-label={t('audioFile.sampleName')} /></details>}
-    {!result && <Btn variant="blue" disabled={!selection || !ready || loading || pending} onClick={() => void transcribe()}>{t(pending ? 'audioFile.processing' : 'audioFile.submit')}</Btn>}
-    {pending && <Btn variant="ghost" onClick={() => { if (requestId.current) void cancelAudioFileTrial(requestId.current).catch(() => {}); }}>{t('audioFile.stop')}</Btn>}
-    {result && <section aria-label={t('audioFile.result')} style={{ marginTop: 16 }}>
+    {result && <section ref={resultArea} aria-label={t('audioFile.result')} style={{ marginTop: 16 }}>
       <h3 style={{ fontSize: 15 }}>{t('audioFile.result')}</h3>
       <p className="ol-style-trial-hint">{t('audioFile.receipt', { source: result.source, duration: (result.audioDurationMs / 1000).toFixed(1), time: (result.elapsedMs / 1000).toFixed(1) })}</p>
       <textarea aria-label={t('audioFile.result')} className="ol-style-trial-result-body ol-style-trial-result-editor" value={text} disabled={copying || saving} onChange={event => { setText(event.target.value); setCopied(false); setCloseConfirm(false); }} />
+      <p className="ol-style-trial-hint">{t(text.length > 4000 ? 'audioFile.textWorkspaceLimit' : 'audioFile.textWorkspaceHint')}</p>
+    </section>}
+    </div>
+    <div className="ol-style-trial-submit" data-audio-file-submit>
+    {result && <>
       <p className="ol-style-trial-hint" data-audio-file-retention>{t(savedText === text ? 'textDraft.savedRetention' : 'audioFile.retention')}</p>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+      <div className="ol-style-trial-primary-actions ol-style-trial-result-toolbar ol-audio-file-actions" data-audio-file-result-actions>
         <Btn variant="blue" disabled={copying || saving || !text.trim()} onClick={() => void copy()}>{t(copying ? 'audioFile.copying' : copied ? 'audioFile.copied' : 'audioFile.copy')}</Btn>
-        <SaveTextDraft name={result.source} original={result.text} text={text} disabled={copying}
+        <SaveTextDraft compact name={result.source} original={result.text} text={text} disabled={copying}
           onBusy={value => {
             saveBusy.current = value; setSaving(value);
             if (value) { setError(''); setCloseConfirm(false); }
@@ -163,12 +173,16 @@ export function AudioFileTrial({ onClose }: { onClose: () => void }) {
           setCloseConfirm(false); setResult(null); setText(''); setCopied(false); setSavedText(null); setError('');
         }}>{t('audioFile.discard')}</Btn>
       </div>
-      <p className="ol-style-trial-hint">{t(text.length > 4000 ? 'audioFile.textWorkspaceLimit' : 'audioFile.textWorkspaceHint')}</p>
-    </section>}
-    {error && <p role="alert" className="ol-style-trial-hint" style={{ color: 'var(--ol-red)' }}>{error}</p>}
+    </>}
+    {!result && <div className="ol-style-trial-submit-actions">
+      <Btn variant="blue" disabled={!selection || !ready || loading || pending} onClick={() => void transcribe()}>{t(pending ? 'audioFile.processing' : 'audioFile.submit')}</Btn>
+      {pending && <Btn variant="ghost" onClick={() => { if (requestId.current) void cancelAudioFileTrial(requestId.current).catch(() => {}); }}>{t('audioFile.stop')}</Btn>}
+    </div>}
+    {error && <p role="alert" className="ol-style-trial-submit-error">{error}</p>}
     {closeConfirm && <div role="alert" style={{ marginTop: 14 }}><p>{t('audioFile.confirmClose')}</p><Btn disabled={copying || saving} onClick={() => setCloseConfirm(false)}>{t('audioFile.keep')}</Btn> <Btn variant="ghost" disabled={copying || saving} onClick={() => {
       if (!saveBusy.current && !copyBusy.current) onClose();
     }}>{t('audioFile.closeWithoutCopy')}</Btn></div>}
+    </div>
   </dialog>
     {speechSettingsOpen && <ProviderSettingsDialog kind="speech" onClose={() => {
       setSpeechSettingsOpen(false);
