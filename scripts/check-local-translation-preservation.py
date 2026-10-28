@@ -64,6 +64,7 @@ def main():
                      'missingMeaningGroups': missing, 'repeatedCountOk': repeated_count_ok,
                      'passed': process.returncode == 0 and not missing and repeated_count_ok})
     result = {'workerSha256': hashlib.sha256(worker.read_bytes()).hexdigest(), 'rows': rows,
+              'executedScriptSha256': hashlib.sha256(code.encode('utf8')).hexdigest(),
               'passed': all(row['passed'] for row in rows),
               'scope': 'Actual worker and saved assets: retained customer cases and bounded factual preservation. Customer167 event/dayparts restored, but its availability request remains inaccurate; these marker checks are not a general semantic-quality score.'}
     args.report.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf8')
