@@ -480,7 +480,7 @@ export interface UserPreferences {
   qaSaveHistory: boolean;
   /** 自定义录音组合键。当 hotkey.trigger == 'custom' 时使用。null = 未设置。 */
   customComboHotkey: ComboBinding | null;
-  /** 录音中触发翻译的全局快捷键。默认 Shift。 */
+  /** 录音中触发翻译的全局快捷键。首次未设置，按需录入。 */
   translationHotkey: ShortcutBinding;
   /** 切换到上一个润色风格的全局快捷键。 */
   switchStyleHotkey: ShortcutBinding;

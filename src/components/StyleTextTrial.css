@@ -103,7 +103,7 @@
 .ol-style-trial-drafting-choice > p { margin: 6px 0; }
 .ol-style-trial-result-heading { display: flex; gap: 8px 12px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; margin-bottom: 8px; }
 .ol-style-trial-result-meta { color: var(--ol-ink-3); font-size: 11px; font-weight: 400; line-height: 1.5; }
-.ol-style-trial-primary-actions { margin-top: 12px; }
+.ol-style-trial-primary-actions { margin-top: 12px; scroll-margin-block: 12px; }
 .ol-style-trial-input, .ol-style-trial-result-editor {
   width: 100%;
   box-sizing: border-box;

@@ -756,7 +756,7 @@ const mockHotkeyCapability: HotkeyCapability = {
   supportsModifierOnlyTrigger: true,
   supportsSideSpecificModifiers: true,
   explicitFallbackAvailable: false,
-  statusHint: '默认建议使用“右Ctrl + 单击”。若无响应，可在权限页查看 hook 安装状态。',
+  statusHint: '电脑快捷键首次未设置，需要时自行录入或清除。已设置但无响应时，可在权限页查看监听状态。',
 };
 
 const mockCredentialsStatus: CredentialsStatus = {

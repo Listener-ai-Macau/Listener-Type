@@ -69,7 +69,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const dialog = useRef<HTMLDialogElement>(null);
   const workspaceScroll = useRef<HTMLDivElement>(null);
   const dialogScroll = useRef(0);
-  const resultSection = useRef<HTMLElement>(null);
+  const resultActions = useRef<HTMLDivElement>(null);
   const generation = useRef(0);
   const running = useRef(false);
   const copyRunning = useRef(false);
@@ -164,11 +164,12 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   }, [pack.id, signature]);
 
   useEffect(() => {
-    // Keep a new result reachable in a short/narrow dialog without moving focus.
-    if (result && window.matchMedia('(max-width: 800px)').matches) {
-      resultSection.current?.scrollIntoView({ block: 'nearest' });
+    // New results should expose their next actions on desktop as well as narrow
+    // windows. Cached results keep their existing reading/return position.
+    if (result && !restored) {
+      resultActions.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     }
-  }, [result]);
+  }, [result, restored]);
 
   useEffect(() => {
     let current = true;
@@ -521,7 +522,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
       </div>
       <div className="ol-style-trial-outputs">
       {result && (
-        <section ref={resultSection} className="ol-style-trial-result" aria-label={t('style.trial.output')} aria-live="polite">
+        <section className="ol-style-trial-result" aria-label={t('style.trial.output')} aria-live="polite">
           <div className="ol-style-trial-result-heading">
             <div style={{ fontWeight: 600 }}>{t('style.trial.output')}</div>
             <span className="ol-style-trial-result-meta" title={t(editedOutput !== null ? 'style.trial.editedResult' : offline ? 'offlineTranslation.result' : result.usedTextService ? 'style.trial.serviceResult' : 'style.trial.rawResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}>
@@ -543,7 +544,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
               onChange={event => setDraftNameEdit(event.target.value)} />
           </label>
           {draftNameInvalid && <p role="alert" className="ol-style-trial-hint">{t('textDraft.nameInvalid')}</p>}
-          <div className="ol-style-trial-primary-actions">
+          <div ref={resultActions} className="ol-style-trial-primary-actions" data-workspace-result-actions>
             <Btn size="sm" variant="blue" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => void copyResult()}>
               {t(copying ? 'style.trial.copying' : copiedResult === result ? 'style.trial.copied' : 'style.trial.copyResult')}
             </Btn>
@@ -554,14 +555,13 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
             {onTranslationTargetChange && <Btn size="sm" variant="ghost"
               disabled={pending || copying || delivering || draftSaving || styleChangePending || translationPreparing || !resultOutput.trim() || resultOutput.length > 4000}
               onClick={continueWithResult}>{t(translationTarget ? 'textWorkspace.refineResult' : 'textWorkspace.translateResult')}</Btn>}
+            {offline && <Btn size="sm" variant="ghost" data-cloud-retranslation
+              disabled={pending || copying || delivering || draftSaving || styleChangePending || translationPreparing}
+              onClick={prepareCloudRetranslation}>{t('textWorkspace.retranslateOriginal')}</Btn>}
             {(!offline || translationTarget === 'English') && <PoliteEditSuggestions key={`${generation.current}:${result?.packId ?? ''}`} text={resultOutput} originalText={draft} localOnly={offline} cloudConfigured={!offline && readiness?.textServiceConfigured === true}
               disabled={copying || delivering || draftSaving} onApply={updateEditedOutput} />}
           </div>
           {onTranslationTargetChange && translationTarget && <p role="note" className="ol-style-trial-hint" data-translation-refine-hint>{t('textWorkspace.refineTranslationHint')}</p>}
-          {offline && <p className="ol-style-trial-hint" data-cloud-retranslation>
-            <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || draftSaving || styleChangePending || translationPreparing}
-              onClick={prepareCloudRetranslation}>{t('textWorkspace.retranslateOriginal')}</Btn>
-          </p>}
           {onTranslationTargetChange && resultOutput.length > 4000 && <p className="ol-style-trial-hint">{t('textWorkspace.nextInputTooLong')}</p>}
           <p role="note" className="ol-style-trial-hint" data-style-trial-retention>{t(savedCurrentDraft ? isTauri ? 'textWorkspace.saved' : 'textDraft.browserSaved' : isTauri ? 'textWorkspace.unsaved' : 'textWorkspace.browserUnsaved')}</p>
           {restored && <p role="note" className="ol-style-trial-hint" data-style-trial-restored>{t('style.trial.restoredResult')}</p>}
