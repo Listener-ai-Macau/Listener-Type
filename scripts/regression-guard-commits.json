@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-28T18:09:04.497635+08:00",
+  "updated_at": "2026-10-28T19:11:55.860478+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9303,7 +9303,7 @@
       "commit": "08813a20d2fe4c119a3bf0a9984661b3c85d4506",
       "commit_subject": "Reveal fresh result actions before the fixed workspace submit bar",
       "subject": "Reveal new result Copy/Save/Continue and explicit cloud switch in the current viewport, retaining fixed Run/Close and cached edits",
-      "state": "source_and_affected_React_verified_matching_native_package_pending",
+      "state": "218_fresh_result_improved_but_assumed_aftersale_saved_state_still_clips_continue_publication_withdrawn",
       "humanAccepted": false,
       "protects": [
         "Fresh desktop/narrow/zoomed results expose mouse-hit-testable Copy, Save, Continue and explicit cloud switch without test auto-scrolling.",
@@ -9323,11 +9323,60 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-result218-source-checkpoint.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-result218-after1.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-visibility218-after1.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-source218-after1.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-source218-after1.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\source218-ci-jobs.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native218-snapshot-20261028-182405\\workspace-source218-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261028-build218\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261028-build218\\type218-installed.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\outputs\\Listener-FIRST_USE218-aftersale-20261028\\customer-experience.md"
+      ],
+      "delivery": {
+        "build": 218,
+        "source": "8bf3de92272f34d233c893b06cf0abe91b0d6fe7",
+        "installed": true,
+        "publicPrepared": false,
+        "published": false
+      }
+    },
+    {
+      "id": "workspace_result_toolbar_survives_name_save_return_and_resize",
+      "repo": "type",
+      "commit": "41cc06552120713170b8f85663a5294a6d0e3af5",
+      "commit_subject": "Keep result actions outside scroll content across the full draft lifecycle",
+      "subject": "Keep result actions independent of content scrolling throughout naming, save acknowledgement, library return and resizing",
+      "state": "source_and_complete_React_lifecycle_verified_exact_native_candidate_pending",
+      "humanAccepted": false,
+      "protects": [
+        "Fresh, named, saved-expanded and returned results retain direct mouse hitability for Copy/Save/Open/Continue/cloud switch under desktop/narrow/zoom and content top/bottom.",
+        "Fixed Run/Close and local pending Cancel remain visible; caches, edited text, first input and explicit paid submission remain protected.",
+        "Saved text remains immutable v1 data; uncertain saves keep the request identity, visible failure and exact editable content.",
+        "Unassigned empty history directs users to ordinary recording controls or optional shortcut configuration."
+      ],
+      "guards": [
+        "python scripts/check-workspace-result-reachability-ui.py --url <controlled-ui> --report <result>",
+        "python scripts/check-workspace-action-visibility-ui.py --url <controlled-ui> --report <result>",
+        "python scripts/check-workspace-source-continuation-ui.py --url <controlled-ui> --report <result>",
+        "python scripts/check-saved-text-drafts-ui.py --url <controlled-ui> --report <result>",
+        "python scripts/check-style-workspace-settings-return-ui.py --url <controlled-ui> --report <result>",
+        "python scripts/check-unassigned-shortcuts-ui.py --url <controlled-ui> --report <result>",
+        "npm run build"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\customer218-aftersale-feedback-handling.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-result219-source-checkpoint.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-actions218-direct-name-save-native-before.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-result219-before.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-result219-after2.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-visibility219-after1.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-source219-after1.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\shortcuts219-after1.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\shortcuts219-after2.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\saved-drafts219-after1.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-settings219-after1.json"
       ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-28T18:09:04.497635+08:00",
+  "feature_routes_updated_at": "2026-10-28T19:11:55.860478+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -10146,7 +10195,8 @@
         "audio_file_empty_vs_oversize_selection_errors",
         "tools_disclosure_and_voice_question_expectation",
         "computer_shortcuts_default_unassigned_and_explicit_clear",
-        "fresh_workspace_result_actions_revealed_without_losing_submit_or_cached_edits"
+        "fresh_workspace_result_actions_revealed_without_losing_submit_or_cached_edits",
+        "workspace_result_toolbar_survives_name_save_return_and_resize"
       ],
       "paths": {
         "type": [
@@ -10509,14 +10559,15 @@
     },
     {
       "id": "text-workspace-clarity",
-      "accepted_scope": "Text workspace visual hierarchy and content-first saved-draft discovery only; speech/BLE/firmware unchanged. Type142 binds processing notice/eligibility to selected style/revision/retry; exact private MSI verifies actual policy/labels and separate actual-React fixtures cover delays, not a real unauthorized cloud request or visible-duration measurement. Exact ordinary215 private native submit/Close hit testing at both content scroll ends, real light translation and Cancel, keyless cloud-switch fee/confirmation visibility and exact edited-save/library-return proof added; no original22/global/physical/cross-PC closure.",
+      "accepted_scope": "Text workspace visual hierarchy and content-first saved-draft discovery only; speech/BLE/firmware unchanged. Type142 binds processing notice/eligibility to selected style/revision/retry; exact private MSI verifies actual policy/labels and separate actual-React fixtures cover delays, not a real unauthorized cloud request or visible-duration measurement. Exact ordinary215 private native submit/Close hit testing at both content scroll ends, real light translation and Cancel, keyless cloud-switch fee/confirmation visibility and exact edited-save/library-return proof added; no original22/global/physical/cross-PC closure. Fresh result Copy/Save/Continue/cloud actions are mouse-hit-testable after output without manual scrolling in desktop/narrow/zoomed views; native source/cache/v1 save checks match the exact candidate. No interactive global/hardware/cross-PC acceptance change.",
       "baseline_state": "affected_ui_exact_native_installed_verified_not_customer_or_physical_qualified",
       "guard_entries": [
         "ui135_text_workspace_focus_and_content_first_saved_drafts",
         "type142_text_trial_selected_style_readiness_identity",
         "workspace_fixed_submit_close_and_explicit_cloud_confirmation",
         "workspace_first_input_survives_translation_refinement_and_saved_continuation",
-        "fresh_workspace_result_actions_revealed_without_losing_submit_or_cached_edits"
+        "fresh_workspace_result_actions_revealed_without_losing_submit_or_cached_edits",
+        "workspace_result_toolbar_survives_name_save_return_and_resize"
       ],
       "paths": {
         "type": [
@@ -10540,7 +10591,9 @@
           "src/components/QuickStyleTextTrial.tsx",
           "src/pages/Tools.tsx",
           "src/pages/Overview.tsx",
-          "src/i18n/audioFile.ts"
+          "src/i18n/audioFile.ts",
+          "src/i18n/settingsFeedback.ts",
+          "src/lib/types.ts"
         ]
       }
     },
