@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-28T01:30:39.031388+08:00",
+  "updated_at": "2026-10-28",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9107,9 +9107,49 @@
       "commit_availability": "local_snapshot",
       "local_retention_ref": "refs/tags/regression-baseline/type-96f43d09edb0",
       "public_history_exclusion_reason": "Unpushed212 optional-workflow source was rejected by OAuth workflow-scope protection and remains retained locally. Final213 ancestry from public211 fully excludes that workflow change; business source equivalence is preserved."
+    },
+    {
+      "id": "optional_cpu_translation_source_fidelity_and_owned_worker_lifecycle",
+      "repo": "type",
+      "commit": "818ed43c4ebe02882a08d17685a832d594761a51",
+      "commit_subject": "Add optional CPU translation with source fidelity and owned cancellation",
+      "subject": "Optional CPU translation retains source-backed dates, layout/repetitions and request-owned cancellation; primary draft actions precede secondary help",
+      "state": "source_checkpoint_cpu19_worker_native13_React_controls_passed_full_native_candidate_pending",
+      "humanAccepted": false,
+      "protects": [
+        "Existing preferences retain the light model. Enhanced preparation is explicit, pinned/full-SHA verified, CPU-only and app-local; no automatic download or cloud fallback.",
+        "Whole context is retained except exact consecutive repetitions; source-backed year restoration rejects ambiguous/conflicting calendar facts. Layout/repetition cardinality and bounded UTF8 assembly must survive.",
+        "Python and native server are owned before stdin by a Windows kill-on-close Job; Cancel/Close/timeout terminate this request only, stale IDs cannot terminate another request. Provider environment variables are excluded.",
+        "Model quality/readiness/cache identity is part of the text trial. It never silently changes voice preferences.",
+        "Save/copy precede secondary review/retranslation help and remain reachable at900x700; existing sticky workspace Close remains."
+      ],
+      "guards": [
+        "python scripts/test_translation_date_fidelity.py",
+        "python scripts/test_translation_result_fidelity.py",
+        "python scripts/test_translation_sentence_boundaries.py",
+        "python scripts/check-local-translation-ui.py --url <controlled-ui> --report <result>",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib local_translation -- --test-threads=1"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\enhanced213-cpu-quality-review.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\enhanced213-first7-output-bound-replay.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\enhanced213-actual-worker-remaining12.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\enhanced213-affected-native-source-map.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\enhanced213-affected-tests-pinned.log",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\enhanced213-local-ui-run5.json"
+      ],
+      "machine_accepted_scope": [
+        "Nineteen unique actual CPU worker inputs across retained7 plus12 remaining; first7 sole output-bound change replayed separately. Real app-local CRT module paths and all owned model servers exited.",
+        "Thirteen affected native-source controls using a documented small harness; real Python tree finish/cancel/timeout, legacy saved-model inference, range retry/checksum/cancellation, cache/path/early-cancel protection. Tauri/preferences/OpenCC adapters are not covered by that harness.",
+        "Actual React readiness/quality/cache/explicit preparation/request-bound Cancel/Close/source retention and save/reopen/delete/cloud ownership controls."
+      ],
+      "pending_human_scope": [
+        "Actual CPU inference through the new native host was rejected by unchanged memory admission; only that case awaits fresh headroom. Whole-app candidate MSI/preferences/voice/native UI and new independent complete-purpose feedback are pending.",
+        "Residual reply/listing/shipping-time wording remains reviewed, not universal semantic accuracy. No second-PC, physical, long-term, original22 or brownout closure."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-27T08:54:34.710494+08:00",
+  "feature_routes_updated_at": "2026-10-28",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -10408,15 +10448,16 @@
     },
     {
       "id": "offline-text-translation",
-      "accepted_scope": "Controlled saved-archive Windows backend inference and lifecycle only; no front-end, voice, general quality or product delivery.",
-      "baseline_state": "source_UI_and_controlled_native_passed_MSI_pending",
+      "accepted_scope": "Existing213 ordinary native scope remains. Optional818ed43 CPU candidate has19 worker inputs,13 affected native controls and React quality/cancellation/save checks; new matching MSI/whole-app native use/independent feedback pending.",
+      "baseline_state": "213_delivered_818ed43_optional_CPU_source_checkpoint_not_released",
       "guard_entries": [
         "offline_translation_optional_verified_worker_no_cloud_fallback",
         "offline_translation_explicit_preview_voice_route_and_legacy_provider_preservation",
         "offline_translation_sentence_units_preserve_short_paragraph_content",
         "local_translation_actual_route_notice_and_exact_saved_draft_navigation",
         "local_saved_draft_deleted_or_missing_record_never_becomes_another_draft",
-        "local_translation_abbreviation_boundaries_and_reachable_workspace_exit"
+        "local_translation_abbreviation_boundaries_and_reachable_workspace_exit",
+        "optional_cpu_translation_source_fidelity_and_owned_worker_lifecycle"
       ],
       "paths": {
         "type": [
@@ -10441,7 +10482,15 @@
           "vite.config.ts",
           "scripts/windows-package-msvc.ps1",
           "scripts/test_translation_sentence_boundaries.py",
-          "src/components/StyleTextTrial.css"
+          "src/components/StyleTextTrial.css",
+          "src-tauri/src/local_translation/enhanced.rs",
+          "src-tauri/src/local_translation/supervised.rs",
+          "src-tauri/resources/translation/date_fidelity.py",
+          "src-tauri/resources/translation/result_fidelity.py",
+          "src-tauri/resources/translation/enhanced_worker.py",
+          "src-tauri/resources/translation/enhanced-catalog.json",
+          "scripts/test_translation_date_fidelity.py",
+          "scripts/test_translation_result_fidelity.py"
         ]
       }
     },
