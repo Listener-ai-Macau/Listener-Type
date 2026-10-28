@@ -9,10 +9,10 @@ import { DeviceLayoutsDialog } from './DeviceLayoutsDialog';
 import { writingDeviceKeyProfile } from '../lib/deviceKeyLayouts';
 import { QuickStyleTextTrial } from './QuickStyleTextTrial';
 
-export function SavedTextDraftsDialog({onClose,initialDraftId,onUnavailable,onContinueDraft}:{onClose:()=>void;initialDraftId?:string;onUnavailable?:(id:string)=>void;onContinueDraft?:(draft:Pick<SavedTextDraft,'name'|'text'>)=>void}) {
+export function SavedTextDraftsDialog({onClose,initialDraftId,onUnavailable,onContinueDraft}:{onClose:()=>void;initialDraftId?:string;onUnavailable?:(id:string)=>void;onContinueDraft?:(draft:Pick<SavedTextDraft,'name'|'text'|'original'>)=>void}) {
   const {t,i18n}=useTranslation();const dialog=useRef<HTMLDialogElement>(null),alive=useRef(true),running=useRef(false);
   const titleId=useId();
-  const [workspace,setWorkspace]=useState<{name:string;text:string}|null>(null);
+  const [workspace,setWorkspace]=useState<Pick<SavedTextDraft,'name'|'text'|'original'>|null>(null);
   const workspaceOpen=workspace!==null,dialogScroll=useRef(0);
   // Keep the identity requested when this dialog opened, even if its owner
   // clears its saved receipt after learning that the record is unavailable.
@@ -119,7 +119,7 @@ export function SavedTextDraftsDialog({onClose,initialDraftId,onUnavailable,onCo
         <details style={{margin:'14px 0'}}><summary>{t('textDraft.original')}</summary><pre className="ol-saved-phrase-text">{selected.original}</pre></details>
         <div style={{display:'flex',gap:10,flexWrap:'wrap'}}><Btn size="sm" disabled={busy} onClick={()=>void copy()}>{t(busy?'textDraft.working':copied===selected.id?'textDraft.copied':'textDraft.copy')}</Btn>
           <Btn size="sm" variant="ghost" disabled={busy||nameDirty||!!leaveTarget||!selected.text.trim()||selected.text.length>4000}
-            onClick={()=>{const value={name:selected.name,text:selected.text};if(onContinueDraft)onContinueDraft(value);else setWorkspace(value);setConfirm(false);}}>{t('textWorkspace.continueSaved')}</Btn>
+            onClick={()=>{const value={name:selected.name,text:selected.text,original:selected.original};if(onContinueDraft)onContinueDraft(value);else setWorkspace(value);setConfirm(false);}}>{t('textWorkspace.continueSaved')}</Btn>
           <Btn size="sm" variant="ghost" disabled={busy||nameDirty} onClick={()=>{const name=Array.from(t('textDraft.copyName',{name:selected.name})).slice(0,80).join('').trim();setEditing({...selected});setEditText(selected.text);setEditName(name);setEditBaseline(JSON.stringify([name,selected.text]));setConfirm(false);setCopied('');setError('');}}>{t('textDraft.editCopy')}</Btn>
           <Btn size="sm" variant="ghost" disabled={busy||nameDirty||!selected.text.trim()||selected.text.length>2000} onClick={()=>setKeyPhrase(selected.text)}>{t('keyPhrase.open')}</Btn>
           <Btn size="sm" variant="ghost" disabled={busy||nameDirty} onClick={()=>setConfirm(true)}>{t('textDraft.delete')}</Btn></div>
@@ -137,7 +137,7 @@ export function SavedTextDraftsDialog({onClose,initialDraftId,onUnavailable,onCo
     <details className="ol-style-trial-details"><summary>{t('textWorkspace.draftsDetails')}</summary><p className="ol-device-layout-hint">{t('textDraft.intro')}</p></details>
   </dialog>{keyPhrase!==null&&<DeviceLayoutsDialog rememberSelection initialProfile={writingDeviceKeyProfile()}
     incomingText={keyPhrase} phraseOrigin="savedDraft" onLeaveForPage={onClose} onClose={()=>setKeyPhrase(null)}/>}
-    {workspace&&<QuickStyleTextTrial inputOriginName={workspace.name} draft={workspace.text}
+    {workspace&&<QuickStyleTextTrial inputOriginName={workspace.name} inputOriginal={workspace.original} draft={workspace.text}
       onDraftChange={text=>setWorkspace(current=>current?{...current,text}:null)}
       onClose={()=>{setWorkspace(null);void refresh();}}/>}</>;
 }

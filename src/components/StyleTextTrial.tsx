@@ -23,7 +23,7 @@ function withDraftOriginName(origin: string, suffix: string): string {
   return prefix ? `${prefix} · ${suffix}` : suffix;
 }
 
-export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, draftingChoice, prepareShorter, translationTarget, onTranslationTargetChange, initialTranslationEngine, initialTranslationSource, initialTranslationQuality, inputOriginName, suspended = false, onOpenSavedDraft, draft, onDraftChange, onClose }: {
+export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, draftingChoice, prepareShorter, translationTarget, onTranslationTargetChange, initialTranslationEngine, initialTranslationSource, initialTranslationQuality, inputOriginName, inputOriginal, suspended = false, onOpenSavedDraft, draft, onDraftChange, onClose }: {
   pack: StylePack;
   packs?: StylePack[];
   onSelectPack?: (id: string) => void;
@@ -36,6 +36,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   initialTranslationSource?: string;
   initialTranslationQuality?: LocalTranslationQuality;
   inputOriginName?: string;
+  inputOriginal?: string;
   suspended?: boolean;
   onOpenSavedDraft?: (id: string, onUnavailable: (id: string) => void) => void;
   draft: string;
@@ -81,6 +82,14 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const [resultSignature, setResultSignature] = useState('');
   const [editedOutput, setEditedOutput] = useState<string | null>(null);
   const [previousStep, setPreviousStep] = useState<{ input: string; output: string; name: string; translated: boolean; continued: boolean } | null>(null);
+  // Keep the first input through explicit result handoffs. Persist it using the
+  // existing immutable draft's original field, so older versions can still read it.
+  const [workflowOriginal, setWorkflowOriginal] = useState<string | null>(inputOriginal ?? null);
+  const [translationReference, setTranslationReference] = useState<{ input: string; target: string; source: string } | null>(null);
+  const [refinementReturn, setRefinementReturn] = useState<{
+    input: string; name: string | null; previousStep: typeof previousStep;
+    engine: TranslationEngine; source: string; quality: LocalTranslationQuality;
+  } | null>(null);
   // Session-only comparisons, never History or persistent customer text storage.
   const completed = useRef(new Map<string, { signature: string; input: string; result: StyleTextTrialResult; edited: string | null }>());
   // A request can finish before its target style becomes selected. Carry that
@@ -123,13 +132,14 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const [deliveryMessage, setDeliveryMessage] = useState('');
   const delivering = deliveryStarted !== null;
   const resultOutput = editedOutput ?? result?.outputText ?? '';
+  const originalForSave = workflowOriginal ?? draft;
   const generatedDraftName = translationTarget && result
     ? withDraftOriginName(translationOriginName, `${presentation.name} · ${t(result.usedTextService ? 'textDraft.routeCloud' : 'textDraft.routeLocal')}${editedOutput !== null ? ` · ${t('textDraft.routeEdited')}` : ''}`)
     : presentation.name;
   const draftName = draftNameEdit ?? generatedDraftName;
   const savedDraftName = draftName.trim();
   const draftNameInvalid = !savedDraftName || Array.from(savedDraftName).length > 80;
-  const savedCurrentDraft = savedDraftSignature === JSON.stringify([savedDraftName, draft, resultOutput]);
+  const savedCurrentDraft = savedDraftSignature === JSON.stringify([savedDraftName, originalForSave, resultOutput]);
   const canProcess = offline ? offlineReady : !!readiness?.available && (!readiness.requiresTextService || readiness.textServiceConfigured);
   const cloudRetranslationPrepared = !!translationTarget && translationEngine === 'cloud' &&
     previousStep?.translated && !previousStep.continued && !result && !pending;
@@ -276,6 +286,9 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
     // the exact edited output and its source visible instead of relying on the
     // clipboard or mislabelling the preceding result as a new one.
     setPreviousStep({ input: draft, output: resultOutput, name: savedDraftName || presentation.name, translated: !!translationTarget, continued: true });
+    setWorkflowOriginal(current => current ?? draft);
+    if (translationTarget) setTranslationReference({ input: draft, target: translationTarget, source: translationSource });
+    setRefinementReturn(null);
     if (!translationTarget) {
       setTranslationOriginName(savedDraftName || presentation.name);
       setDraftNameEdit(null);
@@ -301,6 +314,37 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
     // Show the selected service settings while keeping explicit submission in
     // the fixed action area. Switching routes must not submit a paid request.
     workspaceScroll.current?.scrollTo({ top: 0 });
+  };
+
+  const retranslateBeforeRefinement = () => {
+    if (!onTranslationTargetChange || translationTarget || !translationReference ||
+        pending || copying || delivering || draftSaving || styleChangePending || translationPreparing) return;
+    // Revisit the actual pre-translation input, never send an already mistranslated
+    // sentence as a substitute. Switching is preparation, not a paid request.
+    setRefinementReturn({ input: draft, name: draftNameEdit, previousStep,
+      engine: translationEngine, source: translationSource, quality: translationQuality });
+    setPreviousStep({ input: translationReference.input, output: result ? resultOutput : draft,
+      name: savedDraftName || presentation.name, translated: true, continued: false });
+    onDraftChange(translationReference.input);
+    onTranslationTargetChange(translationReference.target);
+    setTranslationSource(translationReference.source);
+    setTranslationEngine('cloud');
+    setDraftNameEdit(null);
+    setOptionsOpen(true);
+    workspaceScroll.current?.scrollTo({ top: 0 });
+  };
+
+  const returnToRefinement = () => {
+    if (!onTranslationTargetChange || !refinementReturn || pending || copying || delivering ||
+        draftSaving || styleChangePending || translationPreparing) return;
+    onDraftChange(refinementReturn.input);
+    onTranslationTargetChange('');
+    setTranslationEngine(refinementReturn.engine);
+    setTranslationSource(refinementReturn.source);
+    setTranslationQuality(refinementReturn.quality);
+    setDraftNameEdit(refinementReturn.name);
+    setPreviousStep(refinementReturn.previousStep);
+    setRefinementReturn(null);
   };
 
   const copyResult = async () => {
@@ -383,6 +427,16 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
       </div>}
       {inputOriginName && <p role="note" className="ol-style-trial-hint" data-saved-draft-origin>{t('textWorkspace.savedDraftInput', { name: inputOriginName })}</p>}
       {!translationTarget && previousStep?.translated && <p role="note" className="ol-style-trial-hint" data-translation-refine-hint>{t('textWorkspace.refineTranslationHint')}</p>}
+      {!translationTarget && translationReference && onTranslationTargetChange && <div className="ol-style-trial-hint" data-refinement-original-translation>
+        <p>{t('textWorkspace.retranslateBeforeRefinementHint')}</p>
+        <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || draftSaving || styleChangePending || translationPreparing}
+          onClick={retranslateBeforeRefinement}>{t('textWorkspace.retranslateBeforeRefinement')}</Btn>
+      </div>}
+      {workflowOriginal !== null && workflowOriginal !== draft && <details className="ol-style-trial-details" data-workspace-original>
+        <summary>{t('textWorkspace.workflowOriginal')}</summary>
+        <p className="ol-style-trial-hint">{t('textWorkspace.workflowOriginalHint')}</p>
+        <pre>{workflowOriginal}</pre>
+      </details>}
       <details className="ol-style-trial-options-panel" data-text-options-panel open={optionsOpen}
         onToggle={event => setOptionsOpen(event.currentTarget.open)}>
         <summary>{translationTarget ? t(offline ? 'textWorkspace.translationOptions' : 'textDraft.cloudTranslationOptions', {
@@ -453,7 +507,11 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         // Readiness gates submission, not drafting: checking/failure must not discard typing.
         disabled={pending || copying || delivering || draftSaving || styleChangePending}
         placeholder={t('style.trial.placeholder')}
-        onChange={event => { onDraftChange(event.target.value); setResult(null); setError(''); setCopiedResult(null); setCopyError(false); }}
+        onChange={event => {
+          const value = event.target.value;
+          onDraftChange(value); setResult(null); setError(''); setCopiedResult(null); setCopyError(false);
+          if (!value.trim()) { setWorkflowOriginal(null); setTranslationReference(null); setPreviousStep(null); setRefinementReturn(null); }
+        }}
       />
       {offline && !translationSource && canSuggestChineseSource(draft, translationTarget ?? '') && <div className="ol-style-trial-hint" data-local-source-suggestion>
         <p>{t('textWorkspace.hanSourceHint')}</p>
@@ -489,10 +547,10 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
             <Btn size="sm" variant="blue" disabled={copying || delivering || draftSaving || !resultOutput.trim()} onClick={() => void copyResult()}>
               {t(copying ? 'style.trial.copying' : copiedResult === result ? 'style.trial.copied' : 'style.trial.copyResult')}
             </Btn>
-            <SaveTextDraft compact name={savedDraftName} original={draft} text={resultOutput} disabled={pending || copying || delivering || draftNameInvalid || styleChangePending || translationPreparing} onBusy={setDraftSaving}
+            <SaveTextDraft compact name={savedDraftName} original={originalForSave} text={resultOutput} disabled={pending || copying || delivering || draftNameInvalid || styleChangePending || translationPreparing} onBusy={setDraftSaving}
               onOpenSaved={(id,onUnavailable)=>{if(onOpenSavedDraft)onOpenSavedDraft(id,onUnavailable);else setLocalLibrary({id,onUnavailable});}}
               onUnsaved={() => setSavedDraftSignature('')}
-              onSaved={text => setSavedDraftSignature(JSON.stringify([savedDraftName, draft, text]))} />
+              onSaved={text => setSavedDraftSignature(JSON.stringify([savedDraftName, originalForSave, text]))} />
             {onTranslationTargetChange && <Btn size="sm" variant="ghost"
               disabled={pending || copying || delivering || draftSaving || styleChangePending || translationPreparing || !resultOutput.trim() || resultOutput.length > 4000}
               onClick={continueWithResult}>{t(translationTarget ? 'textWorkspace.refineResult' : 'textWorkspace.translateResult')}</Btn>}
@@ -589,6 +647,8 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
       <div className="ol-style-trial-submit" data-workspace-submit>
         {cloudRetranslationPrepared && <p role="status" className="ol-style-trial-hint" data-cloud-retranslation-ready>{t('textWorkspace.retranslationReferenceHint')}</p>}
         <div className="ol-style-trial-submit-actions">
+          {refinementReturn && <Btn variant="ghost" disabled={pending || copying || delivering || draftSaving || styleChangePending || translationPreparing}
+            onClick={returnToRefinement}>{t('textWorkspace.returnToRefinement')}</Btn>}
           <Btn variant="blue" disabled={pending || copying || delivering || draftSaving || styleChangePending || !canProcess || !draft.trim()} onClick={() => void runTrial()}>
             {t(pending ? 'style.trial.running' : translationTarget ? 'offlineTranslation.run' : 'style.trial.run')}
           </Btn>

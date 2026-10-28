@@ -333,11 +333,14 @@ export function Overview({ showFirstUseGuide = true, onDismissOverview, onOpenPr
             <span style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--ol-ink-3)' }}>{t('overview.tryTypedTextHint')}</span>
           </div>
         )}
+        {onOpenAudioFile && <div className="ol-overview-text-entry" data-recorded-audio-entry>
+          <Btn size="sm" variant="ghost" icon="mic" onClick={onOpenAudioFile}>{t('audioFile.title')}</Btn>
+          <span style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--ol-ink-3)' }}>{t('audioFile.entryHint')}</span>
+        </div>}
         <details className="ol-overview-utilities">
           <summary>{t('firstUse.moreTools')}</summary>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 10 }}>
           {onOpenSavedDrafts && <Btn size="sm" variant="ghost" onClick={onOpenSavedDrafts}>{t('textDraft.title')}</Btn>}
-          {onOpenAudioFile && <Btn size="sm" variant="ghost" onClick={onOpenAudioFile}>{t('audioFile.title')}</Btn>}
           <Btn size="sm" variant="ghost" onClick={() => setLayoutsOpen('practice')}>{t('devicePractice.open')}</Btn>
           <Btn size="sm" variant="ghost" onClick={() => setLayoutsOpen('configure')}>{t('deviceLayouts.open')}</Btn>
           <Btn size="sm" variant="ghost" onClick={() => setLayoutsOpen('phrases')}>{t('savedPhrases.title')}</Btn>

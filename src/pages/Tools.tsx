@@ -19,10 +19,14 @@ export function Tools({ onOpen, onTryText, onOpenAudioFile, onOpenSavedDrafts }:
 }) {
   const { t } = useTranslation();
   const [layoutsOpen, setLayoutsOpen] = useState<'configure' | 'practice' | 'phrases' | null>(null);
+  const visibleTools = [
+    ...TOOLS.map(tool => ({ ...tool, title: `nav.${tool.id}`, hint: `tools.${tool.id}`, open: () => onOpen(tool.id) })),
+    { id: 'audio-file', icon: 'mic', title: 'audioFile.title', hint: 'audioFile.entryHint', open: onOpenAudioFile },
+  ];
   return <>
     <PageHeader title={t('nav.tools')} desc={t('tools.description')} />
     <div className="ol-tools-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
-      {TOOLS.map(tool => <button key={tool.id} type="button" onClick={() => onOpen(tool.id)}
+      {visibleTools.map(tool => <button key={tool.id} type="button" onClick={tool.open}
         className="ol-tool-card" data-tool={tool.id} style={{
           display: 'flex', alignItems: 'center', gap: 14, textAlign: 'left', padding: 20,
           background: 'var(--ol-surface)', border: '0.5px solid var(--ol-line)',
@@ -31,8 +35,8 @@ export function Tools({ onOpen, onTryText, onOpenAudioFile, onOpenSavedDrafts }:
         }}>
         <Icon name={tool.icon} size={21} style={{ color: 'var(--ol-ink-3)', flexShrink: 0 }} />
         <span style={{ flex: 1, minWidth: 0 }}>
-          <span style={{ display: 'block', fontWeight: 600, marginBottom: 5 }}>{t(`nav.${tool.id}`)}</span>
-          <span style={{ display: 'block', fontSize: 12, lineHeight: 1.6, color: 'var(--ol-ink-3)' }}>{t(`tools.${tool.id}`)}</span>
+          <span style={{ display: 'block', fontWeight: 600, marginBottom: 5 }}>{t(tool.title)}</span>
+          <span style={{ display: 'block', fontSize: 12, lineHeight: 1.6, color: 'var(--ol-ink-3)' }}>{t(tool.hint)}</span>
         </span>
         <Icon name="chevRight" size={15} style={{ color: 'var(--ol-ink-4)', flexShrink: 0 }} />
       </button>)}
@@ -50,7 +54,6 @@ export function Tools({ onOpen, onTryText, onOpenAudioFile, onOpenSavedDrafts }:
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, paddingTop: 10 }}>
         <Btn size="sm" onClick={onTryText}>{t('overview.tryTypedText')}</Btn>
         <Btn size="sm" onClick={onOpenSavedDrafts}>{t('textDraft.title')}</Btn>
-        <Btn size="sm" onClick={onOpenAudioFile}>{t('audioFile.title')}</Btn>
         <Btn size="sm" onClick={() => setLayoutsOpen('configure')}>{t('deviceLayouts.open')}</Btn>
         <Btn size="sm" onClick={() => setLayoutsOpen('practice')}>{t('devicePractice.open')}</Btn>
         <Btn size="sm" onClick={() => setLayoutsOpen('phrases')}>{t('savedPhrases.title')}</Btn>

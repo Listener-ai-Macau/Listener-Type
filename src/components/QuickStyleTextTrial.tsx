@@ -11,18 +11,20 @@ import { translationTrialPack } from '../lib/translationTrial';
 import { SavedTextDraftsDialog } from './SavedTextDraftsDialog';
 
 /** A text workspace, not a style activation or a shortcut to pack management. */
-export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTranslationTarget = '', inputOriginName }: {
+export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTranslationTarget = '', inputOriginName, inputOriginal }: {
   draft: string;
   onDraftChange: (text: string) => void;
   onClose: () => void;
   initialTranslationTarget?: string;
   inputOriginName?: string;
+  inputOriginal?: string;
 }) {
   const { t } = useTranslation();
   const [packs, setPacks] = useState<StylePack[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [translationTarget, setTranslationTarget] = useState(initialTranslationTarget);
   const [originName, setOriginName] = useState(inputOriginName);
+  const [originalInput, setOriginalInput] = useState(inputOriginal);
   const [library, setLibrary] = useState<{ id: string; onUnavailable: (id: string) => void } | null>(null);
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const [failed, setFailed] = useState(false);
@@ -122,11 +124,11 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTran
       error: addFailed === 'list' ? t('style.everydayList.failed') : '', onChoose: () => void chooseEverydayList(),
     } : undefined}
     prepareShorter={translationTarget ? undefined : prepareConcise}
-    inputOriginName={originName} suspended={library !== null} onOpenSavedDraft={(id,onUnavailable)=>setLibrary({id,onUnavailable})} onClose={onClose} /> :
+    inputOriginName={originName} inputOriginal={originalInput} suspended={library !== null} onOpenSavedDraft={(id,onUnavailable)=>setLibrary({id,onUnavailable})} onClose={onClose} /> :
     <TrialLoading failed={failed} onRetry={() => setAttempt(value => value + 1)} onClose={onClose} title={t('overview.tryTypedText')} />}
     {library !== null && <SavedTextDraftsDialog initialDraftId={library.id} onUnavailable={library.onUnavailable}
       onClose={() => setLibrary(null)} onContinueDraft={value => {
-        setOriginName(value.name); onDraftChange(value.text); setTranslationTarget('');
+        setOriginName(value.name); setOriginalInput(value.original); onDraftChange(value.text); setTranslationTarget('');
         setWorkspaceRevision(current => current + 1); setLibrary(null);
       }} />}
   </>;
