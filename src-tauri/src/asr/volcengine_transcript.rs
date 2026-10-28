@@ -263,6 +263,92 @@ pub(super) fn transcript_text_from_result(result: &Value) -> String {
 /// A missing row rendering is not an empty audio occurrence. Reconcile it
 /// before timing, recognition confirmation, speaker projection and merging
 /// consume the response. Explicit empty second-pass rows remain empty.
+/// A mixed hard-VAD response can replace a spoken stream occurrence with
+/// `two_pass_empty`. Positive owner audio at those exact words contradicts
+/// treating that occurrence as silence. Reuse only its already accepted,
+/// aligned rendering; the ordinary source projection still decides ownership.
+/// This never certifies the recovered stream row as a definite second pass.
+pub(super) fn reconcile_owner_backed_empty_rows<'a>(
+    result: &'a Value,
+    previous: Option<&Value>,
+    accepted_text: &str,
+    protected_owner_audio: &[(u64, u64)],
+) -> std::borrow::Cow<'a, Value> {
+    use crate::transcript_boundary::{content_key, consumed_prefix_end};
+    use std::borrow::Cow;
+    let Some(previous) = previous else { return Cow::Borrowed(result); };
+    let accepted_key = content_key(accepted_text);
+    let previous_text = previous.get("text").and_then(Value::as_str).unwrap_or_default();
+    if protected_owner_audio.is_empty() || accepted_key.is_empty()
+        || content_key(previous_text) != accepted_key
+    { return Cow::Borrowed(result); }
+    let (Some(rows), Some(old_rows), Some(main)) = (
+        result.get("utterances").and_then(Value::as_array),
+        previous.get("utterances").and_then(Value::as_array),
+        result.get("text").and_then(Value::as_str),
+    ) else { return Cow::Borrowed(result); };
+    let current_key = content_key(main);
+    let rendered: String = rows.iter().filter_map(|row| row.get("text")?.as_str()).collect();
+    // A separate whole-response spelling revision cannot borrow this path.
+    // Whole-empty seal-only responses retain their existing ledger contract.
+    if current_key.is_empty() || current_key != content_key(&rendered) {
+        return Cow::Borrowed(result);
+    }
+    let mut recovered = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        let Some((start, end)) = explicit_confirmed_empty_range(row) else { continue; };
+        let candidates: Vec<_> = old_rows.iter().enumerate().filter(|(_, prior)|
+            value_millis_field(prior, &["start_time", "startTime", "start_ms"]) == Some(start as i64)
+        ).collect();
+        let [(old_index, prior)] = candidates.as_slice() else { continue; };
+        if prior.get("definite").and_then(Value::as_bool) != Some(false)
+            || prior.pointer("/additions/source").and_then(Value::as_str) != Some("stream")
+            || value_millis_field(prior, &["end_time", "endTime", "end_ms"])
+                .is_none_or(|old_end| old_end < 0 || old_end as u64 > end)
+        { continue; }
+        let Some(words) = validated_row_word_occurrences(prior) else { continue; };
+        let word_key: String = words.iter().map(|(_, _, word)| content_key(word)).collect();
+        if word_key != content_key(prior.get("text").and_then(Value::as_str).unwrap_or_default())
+            || !words.iter().any(|(left, right, _)| protected_owner_audio.iter()
+                .any(|(owner_start, owner_end)| *left >= 0 && (*left as u64) < *owner_end
+                    && *owner_start < *right as u64))
+            || rows.iter().enumerate().any(|(other_index, other)| other_index != index
+                && validated_row_word_occurrences(other).is_some_and(|other_words| other_words.iter()
+                    .any(|(left, right, _)| *left >= 0 && (*left as u64) < end && start < *right as u64)))
+        { continue; }
+        let before_key: String = old_rows[..*old_index].iter().filter_map(|row| row.get("text")?.as_str())
+            .map(content_key).collect();
+        let Some(before) = consumed_prefix_end(previous_text, &before_key) else { continue; };
+        let Some(through) = consumed_prefix_end(previous_text, &(before_key + &word_key)) else { continue; };
+        let leading_space: String = previous_text[..before].chars().rev()
+            .take_while(|ch| ch.is_whitespace()).collect::<String>().chars().rev().collect();
+        recovered.push((index, (*prior).clone(), previous_text[before..through].to_string(), leading_space));
+    }
+    if recovered.is_empty() { return Cow::Borrowed(result); }
+    // Insert just the conflicting empty occurrences, retaining the current
+    // response's punctuation, spaces and numeric rendering everywhere else.
+    let mut prefix = String::new();
+    let mut cursor = 0;
+    let mut text = String::new();
+    for (index, row) in rows.iter().enumerate() {
+        if let Some((_, _, rendering, leading_space)) = recovered.iter().find(|(missing, _, _, _)| *missing == index) {
+            let Some(seam) = consumed_prefix_end(main, &prefix) else { return Cow::Borrowed(result); };
+            text.push_str(&main[cursor..seam]);
+            if !text.is_empty() && !text.chars().next_back().is_some_and(char::is_whitespace) {
+                text.push_str(leading_space);
+            }
+            text.push_str(rendering);
+            cursor = seam;
+        }
+        prefix.push_str(&content_key(row.get("text").and_then(Value::as_str).unwrap_or_default()));
+    }
+    text.push_str(&main[cursor..]);
+    let mut reconciled = result.clone();
+    for (index, prior, _, _) in recovered { reconciled["utterances"][index] = prior; }
+    reconciled["text"] = Value::String(text);
+    Cow::Owned(reconciled)
+}
+
 pub(super) fn reconcile_missing_row_renderings<'a>(
     result: &'a Value,
     previous: Option<&Value>,
@@ -1828,6 +1914,65 @@ fn join_transcript_segments(previous: &str, current: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn owner_backed_empty_rows_require_the_same_accepted_spoken_occurrence() {
+        let previous = json!({"text":"Keep the list. Send the quote.","utterances":[
+            {"text":"Keep the list.","start_time":0,"end_time":1000,"definite":true,
+             "additions":{"source":"two_pass","speaker_id":"0"},
+             "words":[{"text":"Keep the list","start_time":100,"end_time":900}]},
+            {"text":"Send the quote.","start_time":1000,"end_time":2000,"definite":false,
+             "additions":{"source":"stream"},
+             "words":[{"text":"Send","start_time":1100,"end_time":1300},
+                {"text":"the quote","start_time":1400,"end_time":1800}]}
+        ]});
+        let empty = json!({"text":"Keep the list.","utterances":[previous["utterances"][0].clone(),
+            {"start_time":1000,"end_time":2200,"definite":true,
+             "additions":{"source":"two_pass","two_pass_empty":"true"}}
+        ]});
+        let accepted = previous["text"].as_str().unwrap();
+        let recovered = reconcile_owner_backed_empty_rows(&empty, Some(&previous), accepted, &[(1450,1750)]);
+        assert_eq!(recovered["text"], previous["text"]);
+        assert_eq!(recovered["utterances"][1], previous["utterances"][1],
+            "restoration must retain provisional finality, timing and lack of speaker identity");
+        let mut middle_previous = previous.clone();
+        middle_previous["text"] = json!("Keep the list. Send the quote. Finish tomorrow.");
+        middle_previous["utterances"].as_array_mut().unwrap().push(json!({
+            "text":"Finish tomorrow.","start_time":2300,"end_time":3000,"definite":true,
+            "additions":{"source":"two_pass","speaker_id":"0"},
+            "words":[{"text":"Finish tomorrow","start_time":2400,"end_time":2900}]
+        }));
+        let mut middle_empty = empty.clone();
+        middle_empty["text"] = json!("Keep the list. Finish tomorrow.");
+        middle_empty["utterances"].as_array_mut().unwrap().push(middle_previous["utterances"][2].clone());
+        assert_eq!(reconcile_owner_backed_empty_rows(&middle_empty, Some(&middle_previous),
+            middle_previous["text"].as_str().unwrap(), &[(1450,1750)])["text"], middle_previous["text"],
+            "recovered middle occurrences keep both English boundaries");
+        for invalid in ["no_owner", "owner_outside_words", "excluded_previous", "new_occurrence", "partial_range",
+            "misaligned_words", "nonempty_correction", "whole_text_correction", "missing_empty_flag", "confirmed_previous"] {
+            let mut old = previous.clone();
+            let mut current = empty.clone();
+            let mut owner = vec![(1450,1750)];
+            let mut approved = accepted;
+            match invalid {
+                "no_owner" => owner.clear(),
+                "owner_outside_words" => owner = vec![(1900,2100)],
+                "excluded_previous" => approved = "Keep the list.",
+                "new_occurrence" => current["utterances"][1]["start_time"] = json!(1050),
+                "partial_range" => current["utterances"][1]["end_time"] = json!(1600),
+                "misaligned_words" => old["utterances"][1]["words"][1]["text"] = json!("another quote"),
+                "nonempty_correction" => { current["utterances"][1] = json!({"text":"Send it.","start_time":1000,"end_time":2200,
+                    "definite":true,"additions":{"source":"two_pass"},"words":[{"text":"Send it","start_time":1100,"end_time":1800}]});
+                    current["text"] = json!("Keep the list. Send it."); },
+                "whole_text_correction" => current["text"] = json!("Keep a different list."),
+                "missing_empty_flag" => { current["utterances"][1]["additions"].as_object_mut().unwrap().remove("two_pass_empty"); },
+                "confirmed_previous" => old["utterances"][1]["definite"] = json!(true),
+                _ => unreachable!(),
+            }
+            assert!(matches!(reconcile_owner_backed_empty_rows(&current, Some(&old), approved, &owner),
+                std::borrow::Cow::Borrowed(_)), "{invalid}");
+        }
+    }
 
     #[test]
     fn explicit_empty_retracts_only_provisional_occurrences_including_a_middle_gap() {

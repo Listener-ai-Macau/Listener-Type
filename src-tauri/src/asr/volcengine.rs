@@ -3997,6 +3997,33 @@ fn session_committed_transcript(state: &SyncState) -> Option<(String, Vec<Transc
         .map(|(text, segments)| (text.to_string(), segments.clone()))
 }
 
+fn protected_owner_audio_ranges(
+    state: &SyncState,
+    local: &super::volcengine_speaker_ledger::LocalSpeakerTimeline,
+) -> Vec<(u64, u64)> {
+    local.identity.iter().chain(&local.presence)
+        .filter(|span| span.kind == super::volcengine_speaker_ledger::EvidenceKind::Owner)
+        .map(|span| (span.start_ms, span.end_ms))
+        .chain(state.local_owner_pcm_intervals.iter().copied()).collect()
+}
+
+fn reconcile_provider_revision<'a>(
+    state: &SyncState, result: &'a Value,
+    local: &super::volcengine_speaker_ledger::LocalSpeakerTimeline,
+    allow_owner_empty_recovery: bool,
+) -> std::borrow::Cow<'a, Value> {
+    let reconciled = super::volcengine_transcript::reconcile_missing_row_renderings(
+        result, state.latest_visual_provider_result.as_ref());
+    if allow_owner_empty_recovery {
+        if let std::borrow::Cow::Owned(recovered) =
+            super::volcengine_transcript::reconcile_owner_backed_empty_rows(
+                &reconciled, state.latest_visual_provider_result.as_ref(),
+                &state.best_transcript_text, &protected_owner_audio_ranges(state, local))
+        { return std::borrow::Cow::Owned(recovered); }
+    }
+    reconciled
+}
+
 /// Apply source retractions before any preview, fallback or final arbiter can
 /// recover the old longer hypothesis. This changes ASR caches only; an actual
 /// editor receipt remains owned by the coordinator and is never deleted here.
@@ -4005,9 +4032,7 @@ fn apply_explicit_empty_source_revision(
     local: &super::volcengine_speaker_ledger::LocalSpeakerTimeline,
 ) -> bool {
     use crate::transcript_boundary::{content_key, consumed_prefix_end, TimedTranscript};
-    let protected_owner_audio: Vec<_> = local.identity.iter().chain(&local.presence)
-        .filter(|span| span.kind == super::volcengine_speaker_ledger::EvidenceKind::Owner)
-        .map(|span| (span.start_ms, span.end_ms)).chain(state.local_owner_pcm_intervals.iter().copied()).collect();
+    let protected_owner_audio = protected_owner_audio_ranges(state, local);
     let revise = |text: &str| {
         let body_key = content_key(text);
         if body_key.is_empty() { return None; }
@@ -6777,17 +6802,17 @@ impl VolcengineStreamingASR {
         let Ok(json) = serde_json::from_slice::<Value>(&parsed.payload) else { return; };
         let Some(raw_result) = normalized_result(&json) else { return; };
         let Some(phrase) = self.identity_profile_phrase() else { return; };
-        let result = {
-            let state = self.state.lock();
-            super::volcengine_transcript::reconcile_missing_row_renderings(
-                raw_result, state.latest_visual_provider_result.as_ref()).into_owned()
-        };
-        if !super::volcengine_speaker_ledger::aligned_rows(&result).is_some_and(|rows| rows.iter().any(|row| row.definite)) { return; }
         let (local, raw) = {
             let slot = self.personal_vad.lock();
             let Some(stream) = slot.as_ref() else { return; };
             (stream.speaker_timeline(), stream.raw_activity_timeline())
         };
+        let allow_owner_empty_recovery = !self.cloud_owner_enabled();
+        let result = {
+            let state = self.state.lock();
+            reconcile_provider_revision(&state, raw_result, &local, allow_owner_empty_recovery).into_owned()
+        };
+        if !super::volcengine_speaker_ledger::aligned_rows(&result).is_some_and(|rows| rows.iter().any(|row| row.definite)) { return; }
         let generation = self.source_snapshot.lock().capture_generation;
         let pcm = self.retained_pcm_snapshot();
         let worker = Arc::clone(&self.native_source_identity);
@@ -10988,13 +11013,6 @@ impl VolcengineStreamingASR {
         let Some(raw_result) = normalized_result(&json) else {
             return true;
         };
-        let reconciled_result = {
-            let state = self.state.lock();
-            super::volcengine_transcript::reconcile_missing_row_renderings(
-                raw_result, state.latest_visual_provider_result.as_ref(),
-            )
-        };
-        let result = reconciled_result.as_ref();
         let local_timeline = {
             #[cfg(target_os = "windows")]
             { self.personal_vad.lock().as_ref().map(|stream| stream.speaker_timeline()).unwrap_or_default() }
@@ -11003,6 +11021,13 @@ impl VolcengineStreamingASR {
         };
         #[cfg(test)]
         let local_timeline = self.saved_local_timeline_for_test.lock().clone().unwrap_or(local_timeline);
+        let allow_owner_empty_recovery = self.owner_activity_only && !self.cloud_owner_enabled();
+        let reconciled_result = {
+            let state = self.state.lock();
+            reconcile_provider_revision(&state, raw_result, &local_timeline,
+                allow_owner_empty_recovery)
+        };
+        let result = reconciled_result.as_ref();
 
         // Install raw word coordinates before either preview callback runs.
         // Ownership filtering keeps its original provider input unchanged.
@@ -11809,7 +11834,12 @@ impl VolcengineStreamingASR {
                 // path; a newly appended provisional tail stays provisional.
                 && optimistic_candidate_is_already_accepted
                 && local_speaker_allows_non_destructive_final_recovery(&state);
-            let session_ledger_candidate = session_committed_transcript(&state);
+            // A validated current source revision already owns this capture's
+            // rendering. A longer last_partial cache is from the preceding
+            // response and cannot undo its genuine lexical correction. Only
+            // an unavailable source revision needs the legacy ledger fallback.
+            let session_ledger_candidate = ordinary_source_revision.clone()
+                .or_else(|| session_committed_transcript(&state));
             let session_ledger_recovery_safe = has_final
                 && !explicit_non_owner_tail
                 && session_ledger_candidate
@@ -18251,6 +18281,94 @@ mod tests {
             assert!(!state.optimistic_preview_text.contains("暂存干扰"));
             assert!(!state.last_emitted_preview_text.contains("暂存干扰"));
         }
+    }
+
+    #[test]
+    fn owner_backed_empty_revision_keeps_the_accepted_timed_tail() {
+        use super::super::volcengine_speaker_ledger::{EvidenceKind, LocalSpeakerTimeline, SpeakerSpan};
+        for later_lexical_correction in [false, true] {
+        let asr = uplink_stall_test_asr().with_owner_activity_only(true);
+        let previous = json!({"text":"明天先整理清单。然后把报价发给我。", "utterances":[
+            {"text":"明天先整理清单。", "start_time":0,"end_time":1500,
+             "definite":true,"additions":{"source":"two_pass","speaker_id":"0"},
+             "words":[{"text":"明天先整理清单","start_time":100,"end_time":1300}]},
+            {"text":"然后把报价发给我。","start_time":1500,"end_time":3000,
+             "definite":false,"additions":{"source":"stream"},
+             "words":[{"text":"然后把报价发给我","start_time":1700,"end_time":2800}]}
+        ]});
+        let local = LocalSpeakerTimeline { identity:Vec::new(), presence:vec![SpeakerSpan {
+            start_ms:1600, end_ms:2900, kind:EvidenceKind::Owner,
+        }] };
+        asr.apply_saved_native_result_with_local_timeline_for_test(&previous, false, &local);
+        let revision = json!({"text":"明天先整理清单。", "utterances":[previous["utterances"][0].clone(),
+            {"start_time":1500,"end_time":3100,"definite":true,
+             "additions":{"source":"two_pass","two_pass_empty":"true"}}
+        ]});
+        asr.apply_saved_native_result_with_local_timeline_for_test(&revision, false, &local);
+        assert_eq!(asr.state.lock().best_transcript_text, previous["text"].as_str().unwrap(),
+            "a native empty revision must not erase the same accepted occurrence with positive owner audio");
+        let final_revision = if later_lexical_correction {
+            json!({"text":"明天先整理清单。然后把报价给我。", "utterances":[previous["utterances"][0].clone(),
+                {"text":"然后把报价给我。","start_time":1500,"end_time":3100,"definite":true,
+                 "additions":{"source":"two_pass","speaker_id":"0"},
+                 "words":[{"text":"然后把报价给我","start_time":1700,"end_time":2800}]}
+            ]})
+        } else { revision };
+        let selected = asr.apply_saved_native_result_with_local_timeline_for_test(&final_revision, true, &local).unwrap();
+        assert_eq!(selected.text, if later_lexical_correction { final_revision["text"].as_str().unwrap() }
+            else { previous["text"].as_str().unwrap() },
+            "a genuine nonempty second-pass correction remains authoritative");
+        }
+    }
+
+    #[test]
+    #[ignore = "private captured provider frames and recorded local timelines; no service or audio capture"]
+    fn owner_backed_empty_revision_recorded_native_replay() {
+        use super::super::volcengine_speaker_ledger::{EvidenceKind, LocalSpeakerTimeline, SpeakerSpan};
+        use crate::transcript_boundary::content_key;
+        let input = std::env::var("LISTENER_OWNER_EMPTY_REPLAY_INPUT").expect("explicit private fixture");
+        let fixture: Value = serde_json::from_slice(&std::fs::read(input).unwrap()).unwrap();
+        let mut report = Vec::new();
+        let mut all_passed = true;
+        for case in fixture["cases"].as_array().unwrap() {
+            let trace: Value = serde_json::from_slice(&std::fs::read(case["trace"].as_str().unwrap()).unwrap()).unwrap();
+            let asr = uplink_stall_test_asr().with_owner_activity_only(true);
+            let mut expected = String::new();
+            let mut selected = None;
+            let mut frame_count = 0;
+            for entry in trace["trace"]["entries"].as_array().unwrap().iter()
+                .filter(|entry| entry["stage"] == "normalized_result")
+            {
+                let result = &entry["provider_result"];
+                if !result.is_object() { continue; }
+                if entry["frame"] == case["expectedFrame"] {
+                    expected = result["text"].as_str().unwrap().to_string();
+                }
+                let spans = |name| entry["speaker_projection"][name].as_array().into_iter().flatten()
+                    .filter_map(|row| Some(SpeakerSpan { start_ms:row[0].as_u64()?, end_ms:row[1].as_u64()?,
+                        kind:match row[2].as_str()? { "Owner"=>EvidenceKind::Owner,"Other"=>EvidenceKind::Other,
+                            "Unknown"=>EvidenceKind::Unknown,_=>return None } })).collect();
+                let local = LocalSpeakerTimeline {
+                    identity:spans("local_identity_newest_first"), presence:spans("local_presence_newest_first"),
+                };
+                let final_frame = entry["final_frame"] == true;
+                if let Some(final_result) = asr.apply_saved_native_result_with_local_timeline_for_test(result, final_frame, &local) {
+                    selected = Some(final_result.text);
+                }
+                frame_count += 1;
+            }
+            let selected = selected.expect("captured stream contains a protocol final");
+            assert!(!expected.is_empty());
+            let retained = content_key(&selected) == content_key(&expected);
+            all_passed &= retained;
+            report.push(json!({"sessionId":trace["sessionId"],"frames":frame_count,
+                "expectedFrame":case["expectedFrame"],"expectedChars":content_key(&expected).chars().count(),
+                "selectedChars":content_key(&selected).chars().count(),"acceptedTailRetained":retained,
+                "scope":"recorded provider frames and recorded local positive/negative/unknown scopes through production finalization; no new acoustic or editor acceptance"}));
+        }
+        std::fs::write(std::env::var("LISTENER_OWNER_EMPTY_REPLAY_REPORT").unwrap(),
+            serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+        assert!(all_passed, "captured owner-backed empty revisions must retain the accepted timed tail; see private length-only report");
     }
 
     #[test]
