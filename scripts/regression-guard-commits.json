@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-28",
+  "updated_at": "2026-10-28T11:46:45.344989+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9114,7 +9114,7 @@
       "commit": "818ed43c4ebe02882a08d17685a832d594761a51",
       "commit_subject": "Add optional CPU translation with source fidelity and owned cancellation",
       "subject": "Optional CPU translation retains source-backed dates, layout/repetitions and request-owned cancellation; primary draft actions precede secondary help",
-      "state": "source_checkpoint_cpu19_worker_native13_React_controls_passed_full_native_candidate_pending",
+      "state": "214_exact_ordinary_native_light_workflow_installed_and_scoped_CPU_worker_controls_passed_public_prepared",
       "humanAccepted": false,
       "protects": [
         "Existing preferences retain the light model. Enhanced preparation is explicit, pinned/full-SHA verified, CPU-only and app-local; no automatic download or cloud fallback.",
@@ -9136,7 +9136,11 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\enhanced213-actual-worker-remaining12.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\enhanced213-affected-native-source-map.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\enhanced213-affected-tests-pinned.log",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\enhanced213-local-ui-run5.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\enhanced213-local-ui-run5.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\enhanced213-precompiled-cpu-case-run2.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native214-snapshot-20261028-113634\\text-workspace214-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261028-build214\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261028-build214\\type214-installed.json"
       ],
       "machine_accepted_scope": [
         "Nineteen unique actual CPU worker inputs across retained7 plus12 remaining; first7 sole output-bound change replayed separately. Real app-local CRT module paths and all owned model servers exited.",
@@ -9144,12 +9148,18 @@
         "Actual React readiness/quality/cache/explicit preparation/request-bound Cancel/Close/source retention and save/reopen/delete/cloud ownership controls."
       ],
       "pending_human_scope": [
-        "Actual CPU inference through the new native host was rejected by unchanged memory admission; only that case awaits fresh headroom. Whole-app candidate MSI/preferences/voice/native UI and new independent complete-purpose feedback are pending.",
-        "Residual reply/listing/shipping-time wording remains reviewed, not universal semantic accuracy. No second-PC, physical, long-term, original22 or brownout closure."
-      ]
+        "Exact ordinary214 light prepare/translate/edit/save/reread/Cancel/reuse/Close/source retention and legacy light/service preferences passed, installed with four persisted hashes preserved. Whole-app optional enhanced UI/voice and independent complete-purpose feedback remain separate; native enhanced model host passed the pending precompiled case at fresh headroom.",
+        "Light model wording/semantics need review; Owner accepts lightweight useful editable drafts rather than arbitrary precision. No second-PC, physical, long-term, original22 or brownout closure."
+      ],
+      "delivery": {
+        "build": 214,
+        "source": "c01ab7d2ebb21ddc9f17892df1b9943cb2ef1c44",
+        "installed": true,
+        "publicPrepared": true
+      }
     }
   ],
-  "feature_routes_updated_at": "2026-10-28",
+  "feature_routes_updated_at": "2026-10-28T11:46:45.344989+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -10448,8 +10458,8 @@
     },
     {
       "id": "offline-text-translation",
-      "accepted_scope": "Existing213 ordinary native scope remains. Optional818ed43 CPU candidate has19 worker inputs,13 affected native controls and React quality/cancellation/save checks; new matching MSI/whole-app native use/independent feedback pending.",
-      "baseline_state": "213_delivered_818ed43_optional_CPU_source_checkpoint_not_released",
+      "accepted_scope": "Existing213 ordinary native scope remains. Optional818ed43 CPU candidate has19 worker inputs,13 affected native controls and React quality/cancellation/save checks; new matching MSI/whole-app native use/independent feedback pending. Ordinary214 private native default-light preparation/translation/edit/save/reread/return and owned Cancel/Close source-retention proof added; original evidence and remaining physical/global/other-model limits retained.",
+      "baseline_state": "214_installed_exact_light_workflow_passed_public_prepared",
       "guard_entries": [
         "offline_translation_optional_verified_worker_no_cloud_fallback",
         "offline_translation_explicit_preview_voice_route_and_legacy_provider_preservation",
