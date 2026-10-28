@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-28T21:13:03.274403+08:00",
+  "updatedAt": "2026-10-28T23:05:28.859522+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 220,
-    "source": "a4fb24ca1cc48c859433acbc8e5caf462071fa1c",
-    "sourceTag": "build-source/type220-20261028",
+    "build": 221,
+    "source": "998e911a0c902a0cade3bc5bf555e5b0f6c5b999",
+    "sourceTag": "build-source/type221-20261028",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "decd675eebd9e5155ff5264a1ac63f8a2d1d48b4712485f328121c45680e3ffd",
-    "sizeBytes": 299839488,
-    "exeSha256": "ca972911cb839e07270db55a4de6955266d15926a436e93fcaa18d151b927154",
+    "sha256": "63ea3acdabecf3d6e0115c796b35f2f5d06cb22b8df3d847ef6d1432a9f00b1f",
+    "sizeBytes": 299868160,
+    "exeSha256": "8c14e8ddb0e544913631891246e0afc410d49cb56918b77e2e025767c73f2e25",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -590,7 +590,11 @@
     "nativeOriginalEditCacheAndImmutableV1Save220": true,
     "nativeClockTranslationNamedSaveAndReopen220": true,
     "fiveFactoryComputerShortcutsUnassigned220": true,
-    "noNewFirmwareGlobalOrCrossPCQualification220": true
+    "noNewFirmwareGlobalOrCrossPCQualification220": true,
+    "threeCapturedOwnerBackedEmptyTailRevisions221": true,
+    "currentLexicalCorrectionAndForeignProjectionGuards221": true,
+    "exactMSIIsolatedKeylessStartup221": true,
+    "noNewLiveEndpointPhysicalOrCrossPCQualification221": true
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -608,6 +612,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build220-20261028"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build221-20261028"
   }
 }

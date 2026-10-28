@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-28T21:13:03.274403+08:00",
+  "updated_at": "2026-10-28T23:05:28.859522+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9442,9 +9442,42 @@
         "a21f16ddc25a028e40033898e594a298c9ca2c09",
         "caf3f33b29bd88715dd5a48d3db88077f4126ee7"
       ]
+    },
+    {
+      "id": "ordinary_asr_owner_backed_empty_revision_and_final_cache_authority",
+      "subject": "Preserve a previously accepted timed owner occurrence across a conflicting empty native revision while retaining current lexical correction and source exclusions",
+      "state": "three_captured_current220_failures_fixed_affected_guards_and_exact_MSI_isolated_startup_passed_live_field_pending",
+      "protects": [
+        "Only the same aligned stream occurrence already accepted in the prior whole response may be restored when an explicit two_pass_empty row conflicts with positive owner audio at its word coordinates.",
+        "Recovered text retains prior word clocks, stream finality and speaker metadata. It receives no new definite or speaker permission and passes through the existing source projection.",
+        "No owner evidence, an excluded previous occurrence, a shifted/partial source range, invalid timing or a nonempty correction cannot acquire this recovery path.",
+        "The current validated source revision owns final rendering; a stale longer partial cache cannot undo a genuine nonempty second-pass correction.",
+        "English and Chinese rendering boundaries preserve accepted spacing and punctuation; ordinary unknown/no-owner empty retraction, foreign filtering and stop-boundary guards remain."
+      ],
+      "guards": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib owner_backed_empty -- --test-threads=1",
+        "Explicit private fixture LISTENER_OWNER_EMPTY_REPLAY_INPUT and LISTENER_OWNER_EMPTY_REPLAY_REPORT: owner_backed_empty_revision_recorded_native_replay --ignored",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib asr::volcengine_transcript::tests -- --test-threads=1",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib asr::volcengine_speaker_ledger::tests -- --test-threads=1",
+        "Affected mixed_empty_final, two_pass_empty, protocol_final, physical_foreign_provisional, post_stop_final and installed_session_1868 guards; speech_decision_kernel::tests"
+      ],
+      "repo": "type",
+      "commit": "998e911a0c902a0cade3bc5bf555e5b0f6c5b999",
+      "commit_subject": "Preserve accepted owner speech across empty second-pass revisions",
+      "humanAccepted": false,
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\outputs\\Listener-tail-loss221-source.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\owner-tail220-20261028\\before-receipt.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\owner-tail220-20261028\\after-receipt.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\owner-tail220-20261028\\affected-guards.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\source221-ci-jobs.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native221-snapshot-20261028-230421\\setup-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261028-build221\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261028-build221\\type221-installed.json"
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-28T21:13:03.274403+08:00",
+  "feature_routes_updated_at": "2026-10-28T23:05:28.859522+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -9650,9 +9683,10 @@
     {
       "id": "asr-native-recognition-finality",
       "baseline_state": "saved_native_decoder_failure_passed_installed_field_pending",
-      "accepted_scope": "Saved exact native tail resolves recognition-only wait; no human end-to-end endpoint acceptance.",
+      "accepted_scope": "Saved exact native tail resolves recognition-only wait; no human end-to-end endpoint acceptance. Type221 source replays three captured current220 empty-revision tail losses (141→120,47→28,41→24 before; all retained after), plus current lexical-correction and source-exclusion guards. Exact MSI isolated keyless startup and basic native raw/storage checks are separate; no new live endpoint/editor/acoustic identity or all-cause tail-loss acceptance.",
       "guard_entries": [
-        "type_same_response_native_clause_finality"
+        "type_same_response_native_clause_finality",
+        "ordinary_asr_owner_backed_empty_revision_and_final_cache_authority"
       ],
       "paths": {
         "type": [

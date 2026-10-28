@@ -10,7 +10,7 @@
 
 | 用途 | 直接下载 |
 | --- | --- |
-| **Windows 软件** | **[下载 MSI · Type build220](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows 软件** | **[下载 MSI · Type build221](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **固件：USB 烧写 / 蓝牙 OTA** | **[下载固件 ZIP · 两种方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 <!-- listener-local-text-entry -->
@@ -41,7 +41,7 @@
 Type 默认使用 **USB 有线刷机**，刷机能力已内置；客户无需另装 Python、ESP-IDF 或其它刷机软件。
 设备设置各自独立：选择一台有线／蓝牙设备并读取；完成编辑后自动保存明确修改，读取或切换设备不会写入电脑默认值。名称、灯光、电源、按键和旋钮设置保存在所选设备中。请配套使用本页 MSI 与固件 ZIP。
 
-Type build220 在轻量离线翻译中按原文核对可识别的时间，保留明确时段及之前／之后关系，不补猜未写出的时段；保留明确日期年份和段落。无法可靠对应时保留原文并提示核对。译文仍是可编辑初稿，原稿、保存副本及按需设置电脑快捷键的方式保留。固件38不变。
+Type build221 修复一种“预览已有尾句、结束成稿却少了”的问题：后续复核把同段返回为空时，程序会保留已有对应本人说话证据、已接纳且坐标对齐的识别段，同时继续接受正常非空纠错和执行旁人过滤。轻量翻译及已有保存稿保留，固件38不变。
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
