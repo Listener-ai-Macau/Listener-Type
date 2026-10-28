@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-28T19:32:02.779482+08:00",
+  "updatedAt": "2026-10-28T21:13:03.274403+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 219,
-    "source": "68ed84370c44640af8602647b5e33eed1d2e1475",
-    "sourceTag": "build-source/type219-20261028",
+    "build": 220,
+    "source": "a4fb24ca1cc48c859433acbc8e5caf462071fa1c",
+    "sourceTag": "build-source/type220-20261028",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "69daa18effcda7f7aaedfedad4be3fa4373de71394e963f3c9a24dc4a3b6f290",
-    "sizeBytes": 299831296,
-    "exeSha256": "563869f10fd71f8f1c907329670e211dd530e27e7ed845252b9644f5b8a22a86",
+    "sha256": "decd675eebd9e5155ff5264a1ac63f8a2d1d48b4712485f328121c45680e3ffd",
+    "sizeBytes": 299839488,
+    "exeSha256": "ca972911cb839e07270db55a4de6955266d15926a436e93fcaa18d151b927154",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -583,7 +583,14 @@
     "originalCacheAndImmutableV1Saves219": true,
     "unassignedEmptyHistoryGuidance219": true,
     "factoryComputerBindingsRemainUnassigned219": true,
-    "noNewHardwareOrSystemGlobalTriggerQualification219": true
+    "noNewHardwareOrSystemGlobalTriggerQualification219": true,
+    "lightSourceClockRangeAndDaypart220": true,
+    "lightExplicitSourceYearAndLayout220": true,
+    "lightNegatedBoundaryAndUnrelatedClauseProtection220": true,
+    "nativeOriginalEditCacheAndImmutableV1Save220": true,
+    "nativeClockTranslationNamedSaveAndReopen220": true,
+    "fiveFactoryComputerShortcutsUnassigned220": true,
+    "noNewFirmwareGlobalOrCrossPCQualification220": true
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -601,6 +608,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build219-20261028"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build220-20261028"
   }
 }
