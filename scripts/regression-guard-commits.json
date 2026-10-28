@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-28T17:30:39.006277+08:00",
+  "updated_at": "2026-10-28T18:09:04.497635+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9254,7 +9254,7 @@
       "commit": "a4a90632694dbe0d6c19a947de9535bbd27362dc",
       "commit_subject": "fix(shortcuts): leave computer bindings unassigned until configured",
       "subject": "Start all five computer global shortcuts unassigned, preserve explicit user settings and allow confirmed clear without empty registration attempts",
-      "state": "217_native_unit_and_actual_React_verified_exact_MSI_pending",
+      "state": "217_installed_public_native_defaults_and_persistence_verified_interactive_global_triggering_unqualified",
       "humanAccepted": false,
       "protects": [
         "Fresh/minimal preferences and roundtrip leave five bindings empty/null; explicit legacy and current saved bindings remain exact.",
@@ -9296,9 +9296,38 @@
         "installed": true,
         "publicPrepared": true
       }
+    },
+    {
+      "id": "fresh_workspace_result_actions_revealed_without_losing_submit_or_cached_edits",
+      "repo": "type",
+      "commit": "08813a20d2fe4c119a3bf0a9984661b3c85d4506",
+      "commit_subject": "Reveal fresh result actions before the fixed workspace submit bar",
+      "subject": "Reveal new result Copy/Save/Continue and explicit cloud switch in the current viewport, retaining fixed Run/Close and cached edits",
+      "state": "source_and_affected_React_verified_matching_native_package_pending",
+      "humanAccepted": false,
+      "protects": [
+        "Fresh desktop/narrow/zoomed results expose mouse-hit-testable Copy, Save, Continue and explicit cloud switch without test auto-scrolling.",
+        "Run/Close and local pending Cancel remain visible; cloud switch retains original and local edits with no automatic paid request.",
+        "Named v1 save/read and restored result/cache/nested-library return retain text, source, immutable records and reading position.",
+        "Shortcut adapter hints match opt-in unassigned defaults, without changing saved bindings or device controls."
+      ],
+      "guards": [
+        "python scripts/check-workspace-result-reachability-ui.py --url <controlled-ui> --report <result>",
+        "python scripts/check-workspace-action-visibility-ui.py --url <controlled-ui> --report <result>",
+        "python scripts/check-workspace-source-continuation-ui.py --url <controlled-ui> --report <result>",
+        "npm run build"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\customer217-presale-feedback-handling.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-actions217-native-before.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-result218-source-checkpoint.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-result218-after1.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-visibility218-after1.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace-source218-after1.json"
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-28T17:30:39.006277+08:00",
+  "feature_routes_updated_at": "2026-10-28T18:09:04.497635+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -10116,7 +10145,8 @@
         "about180_actual_system_save_cancel_and_native_diagnostic_zip",
         "audio_file_empty_vs_oversize_selection_errors",
         "tools_disclosure_and_voice_question_expectation",
-        "computer_shortcuts_default_unassigned_and_explicit_clear"
+        "computer_shortcuts_default_unassigned_and_explicit_clear",
+        "fresh_workspace_result_actions_revealed_without_losing_submit_or_cached_edits"
       ],
       "paths": {
         "type": [
@@ -10485,7 +10515,8 @@
         "ui135_text_workspace_focus_and_content_first_saved_drafts",
         "type142_text_trial_selected_style_readiness_identity",
         "workspace_fixed_submit_close_and_explicit_cloud_confirmation",
-        "workspace_first_input_survives_translation_refinement_and_saved_continuation"
+        "workspace_first_input_survives_translation_refinement_and_saved_continuation",
+        "fresh_workspace_result_actions_revealed_without_losing_submit_or_cached_edits"
       ],
       "paths": {
         "type": [
