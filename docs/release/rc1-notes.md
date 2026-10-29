@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build230 / Firmware38
+# Listener v1.0.6-rc1 · Type build231 / Firmware38
 
 | Download | File |
 | --- | --- |
@@ -7,7 +7,7 @@
 
 ## In this app update
 
-The optional enhanced CPU translator now attempts the request without a fixed 4.4 GB available-memory admission gate. It can take time and uses memory; if system memory becomes critically low, its owned process stops and the original text remains, without cloud fallback. Two retained examples improved against the light model, but accuracy is not guaranteed. The optional email drafting style discourages invented prior interactions and removes only a trailing empty sender placeholder when none was requested; existing and custom styles stay available. Review all generated text.
+Text-use help now appears near the top of the workspace, where it can be opened without the fixed action bar covering its title. History shows the local saved-draft count when it has been read successfully; a read failure does not pretend there are zero drafts. Existing draft content and recording History remain separate. The optional enhanced CPU translator attempts work without a fixed 4.4 GB admission gate; it stops if the system becomes critically low on memory and does not fall back to cloud. Email draft facts and all translations still require review.
 
 ## Before using
 
@@ -17,11 +17,11 @@ Both local translation models may mistranslate or omit names, negation, commitme
 
 ## File identity
 
-- Type source: `4090f9e065ac54d5b50731b9def9ebba4ec9de96` · `build-source/type230-20261029`
-- MSI: 299896832 bytes · SHA256 `ed6424774ea039fbeb99575fac8d69b265745ea7f84e715a21ff0f5427e7a624`
+- Type source: `3acb8d33fb23228470bf546e12667b867da3de3c` · `build-source/type231-20261029`
+- MSI: 299892736 bytes · SHA256 `f80f837263e822f2b5b434d9d318801c1f8df7062d4bae38fac943420121dc29`
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`
 - ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`
 
 ## 中文说明
 
-可选增强翻译仍在本机 CPU 上运行，不再按固定4.4GB可用内存提前拒绝；执行时内存实际紧张会停止并保留原文，不自动转云端。两个保留案例较轻量模型改善，但不保证任意译文准确。可选邮件起草更明确避免虚构此前互动，并只清理未要求的末尾空签名占位；原有和自定义风格保留。所有生成文字仍需核对。
+文字用途说明移到工作区顶部，避免标题被固定操作栏遮住。历史页在本机成稿库读取成功时显示成稿数量，读取失败不会误显示为零；成稿和听写历史仍分别存放。可选增强CPU翻译不再按固定4.4GB预先拒绝，实际内存严重不足会停止且不转云端。邮件与翻译仍须对照原文核对。

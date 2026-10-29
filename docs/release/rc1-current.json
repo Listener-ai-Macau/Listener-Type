@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-29T15:42:54.938799+08:00",
+  "updatedAt": "2026-10-29T15:58:28.954697+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 230,
-    "source": "4090f9e065ac54d5b50731b9def9ebba4ec9de96",
-    "sourceTag": "build-source/type230-20261029",
+    "build": 231,
+    "source": "3acb8d33fb23228470bf546e12667b867da3de3c",
+    "sourceTag": "build-source/type231-20261029",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "ed6424774ea039fbeb99575fac8d69b265745ea7f84e715a21ff0f5427e7a624",
-    "sizeBytes": 299896832,
-    "exeSha256": "3615cdc4c872f8845ff140a57601b45cf745f89e1f975cba754551d56e568767",
+    "sha256": "f80f837263e822f2b5b434d9d318801c1f8df7062d4bae38fac943420121dc29",
+    "sizeBytes": 299892736,
+    "exeSha256": "a9cbb0efddfb25c99cf27203eea80f3ce1c746d3aca861a5ebc1160df433fa86",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -641,7 +641,10 @@
     "nativeEnhancedCpu230": true,
     "controlledCriticalMemory230": true,
     "actualEmailServiceContrasts230": true,
-    "nativeExistingFailureRecovery230": true
+    "nativeExistingFailureRecovery230": true,
+    "nativeHelpAndDraftCount231": true,
+    "controlledHelpAndCount231": true,
+    "nativeExistingFailureRecovery231": true
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -659,6 +662,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build230-20261029"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build231-20261029"
   }
 }

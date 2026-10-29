@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T15:52:53.601525+08:00",
+  "updated_at": "2026-10-29T15:58:28.954697+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9936,7 +9936,7 @@
       "commit": "3033049d71effa934908747e21c05f4c326af758",
       "commit_subject": "Keep text help reachable and show saved draft count",
       "subject": "Keep text help reachable above the footer and distinguish the saved draft count from empty history",
-      "state": "controlled_ui_verified_native_delivery_pending",
+      "state": "231_native_help_and_saved_count_verified_installed",
       "humanAccepted": false,
       "protects": [
         "Workspace help is initially mouse-accessible without being covered by the fixed action footer, while actions and the source editor remain usable.",
@@ -9952,17 +9952,27 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\check-help-and-count231.py",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\drafts231-final.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\layout231-inline-ui.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\outputs\\Listener-FIRST_USE230-aftersale-20261029\\customer-experience.md"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\outputs\\Listener-FIRST_USE230-aftersale-20261029\\customer-experience.md",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native231-snapshot-20261029-155732\\help231-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native231-snapshot-20261029-155732\\recording-recovery231-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build231\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build231\\type231-installed.json"
       ],
       "machine_accepted_scope": [
         "Actual React mouse hit tests and draft-library state fixtures; matching native build still pending."
       ],
       "pending_human_scope": [
         "No real customer, all screen sizes or physical qualification claim."
-      ]
+      ],
+      "delivery": {
+        "build": 231,
+        "source": "3acb8d33fb23228470bf546e12667b867da3de3c",
+        "installed": true,
+        "publicPrepared": true
+      }
     }
   ],
-  "feature_routes_updated_at": "2026-10-29T15:52:53.601525+08:00",
+  "feature_routes_updated_at": "2026-10-29T15:58:28.954697+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -11160,7 +11170,7 @@
     },
     {
       "id": "text-workspace-clarity",
-      "accepted_scope": "Text workspace visual hierarchy and content-first saved-draft discovery only; speech/BLE/firmware unchanged. Type142 binds processing notice/eligibility to selected style/revision/retry; exact private MSI verifies actual policy/labels and separate actual-React fixtures cover delays, not a real unauthorized cloud request or visible-duration measurement. Exact ordinary215 private native submit/Close hit testing at both content scroll ends, real light translation and Cancel, keyless cloud-switch fee/confirmation visibility and exact edited-save/library-return proof added; no original22/global/physical/cross-PC closure. Fresh result Copy/Save/Continue/cloud actions are mouse-hit-testable after output without manual scrolling in desktop/narrow/zoomed views; native source/cache/v1 save checks match the exact candidate. No interactive global/hardware/cross-PC acceptance change. Full219 result lifecycle direct mouse checks cover named/saved-expanded states, library return, content top/bottom and private narrow viewport; original/source/cache/v1 saves and optional-shortcut guidance retained. Not a new speech/hardware/global/cross-PC qualification. Type222 current-input buffered rewrite fact matching and fixed audio result action/retention areas passed controlled source/failure/cache/save workflows and exact ordinary MSI native UI/storage. The native probe used the real public-sample speech service and an explicitly controlled loopback compatible text service; it does not qualify all language/model meaning, live speech, hardware, global or cross-PC behavior. Original scopes and separate translation/generation contracts remain. Type223 extends bounded current-input fact matching to English/Chinese-target buffered cloud translation, contextual clocks and negated corrections, legitimate translated counts and recognized duration units. Controlled source and exact MSI loopback protocol/native v1 save/manual/reread/recovery proof retain their explicit scope; not all semantics, languages or live/physical/OS qualification. Type226 makes elapsed wait visible without fake service stages or extra requests, keeps explicit source confirmation with its language selector, and aligns saved text names/recovery with the History library. Matching ordinary MSI loopback pending/explicit submit/v1 save/history recovery proof is separate from current unchanged225 audio source and original field/physical limits. Factory Formal role compatibility and explicit model-choice help have scoped current source/native/React evidence; matching227 delivery/customer evidence remains separate. This does not establish universal generated quality, speech, physical or other-PC qualification. Matching ordinary227 private MSI verifies exact legacy factory upgrade and customized rules in actual loopback provider bodies, visible model help with retained source/reachable Close, plus existing native v1 original/final saves and failure recovery; actual model contrast and later customer use remain separately scoped. Overview pending credentials and result-side model-help context have scoped actual React before/after checks; exact228 native/delivery remains separately scoped. Existing227 complete customer purposes and original system/physical limits retained. Exact ordinary228 private native rendering/help and source/manual save evidence retained beside full227 independent PS/assumed-AS purposes. Text/provider/store/FW logic unchanged; not universal model, live or physical/system qualification. 229 adds explicit unverified result review, email subject drafting, discoverable saved drafts and local MP3/M4A decoding up to 60 seconds; codec availability depends on Windows. Model and hardware reliability limits remain. 230 removes the fixed enhanced-CPU admission threshold and retains an actual critical-memory stop; unsupported email interactions and unsolicited empty sender placeholders are constrained without overwriting existing styles.",
+      "accepted_scope": "Text workspace visual hierarchy and content-first saved-draft discovery only; speech/BLE/firmware unchanged. Type142 binds processing notice/eligibility to selected style/revision/retry; exact private MSI verifies actual policy/labels and separate actual-React fixtures cover delays, not a real unauthorized cloud request or visible-duration measurement. Exact ordinary215 private native submit/Close hit testing at both content scroll ends, real light translation and Cancel, keyless cloud-switch fee/confirmation visibility and exact edited-save/library-return proof added; no original22/global/physical/cross-PC closure. Fresh result Copy/Save/Continue/cloud actions are mouse-hit-testable after output without manual scrolling in desktop/narrow/zoomed views; native source/cache/v1 save checks match the exact candidate. No interactive global/hardware/cross-PC acceptance change. Full219 result lifecycle direct mouse checks cover named/saved-expanded states, library return, content top/bottom and private narrow viewport; original/source/cache/v1 saves and optional-shortcut guidance retained. Not a new speech/hardware/global/cross-PC qualification. Type222 current-input buffered rewrite fact matching and fixed audio result action/retention areas passed controlled source/failure/cache/save workflows and exact ordinary MSI native UI/storage. The native probe used the real public-sample speech service and an explicitly controlled loopback compatible text service; it does not qualify all language/model meaning, live speech, hardware, global or cross-PC behavior. Original scopes and separate translation/generation contracts remain. Type223 extends bounded current-input fact matching to English/Chinese-target buffered cloud translation, contextual clocks and negated corrections, legitimate translated counts and recognized duration units. Controlled source and exact MSI loopback protocol/native v1 save/manual/reread/recovery proof retain their explicit scope; not all semantics, languages or live/physical/OS qualification. Type226 makes elapsed wait visible without fake service stages or extra requests, keeps explicit source confirmation with its language selector, and aligns saved text names/recovery with the History library. Matching ordinary MSI loopback pending/explicit submit/v1 save/history recovery proof is separate from current unchanged225 audio source and original field/physical limits. Factory Formal role compatibility and explicit model-choice help have scoped current source/native/React evidence; matching227 delivery/customer evidence remains separate. This does not establish universal generated quality, speech, physical or other-PC qualification. Matching ordinary227 private MSI verifies exact legacy factory upgrade and customized rules in actual loopback provider bodies, visible model help with retained source/reachable Close, plus existing native v1 original/final saves and failure recovery; actual model contrast and later customer use remain separately scoped. Overview pending credentials and result-side model-help context have scoped actual React before/after checks; exact228 native/delivery remains separately scoped. Existing227 complete customer purposes and original system/physical limits retained. Exact ordinary228 private native rendering/help and source/manual save evidence retained beside full227 independent PS/assumed-AS purposes. Text/provider/store/FW logic unchanged; not universal model, live or physical/system qualification. 229 adds explicit unverified result review, email subject drafting, discoverable saved drafts and local MP3/M4A decoding up to 60 seconds; codec availability depends on Windows. Model and hardware reliability limits remain. 230 removes the fixed enhanced-CPU admission threshold and retains an actual critical-memory stop; unsupported email interactions and unsolicited empty sender placeholders are constrained without overwriting existing styles. 231 moves text-use help to the visible top area and shows the loaded saved-draft count; read failures do not imply zero.",
       "baseline_state": "affected_ui_exact_native_installed_verified_not_customer_or_physical_qualified",
       "guard_entries": [
         "ui135_text_workspace_focus_and_content_first_saved_drafts",
@@ -11218,7 +11228,9 @@
           "src/i18n/localTranslation.ts",
           "src/lib/compressedAudio.ts",
           "src/lib/messageDraftStyle.ts",
-          "src-tauri/resources/translation/enhanced_worker.py"
+          "src-tauri/resources/translation/enhanced_worker.py",
+          "src/pages/History.css",
+          "src/components/FloatingShell.tsx"
         ]
       }
     },
