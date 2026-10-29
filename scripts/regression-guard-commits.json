@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T15:15:48.624323+08:00",
+  "updated_at": "2026-10-29T15:36:59.195459+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9886,9 +9886,42 @@
         "installed": true,
         "publicPrepared": true
       }
+    },
+    {
+      "id": "enhanced_cpu_actual_pressure_and_email_fact_boundary",
+      "repo": "type",
+      "commit": "e9467da9e2588bb6d6e6c97ad6b8b04a4d15b06d",
+      "commit_subject": "Allow CPU translation under actual load and tighten email drafts",
+      "subject": "Use the enhanced CPU translator without a fixed admission gate and limit unsupported email additions",
+      "state": "exact_cpu_and_controlled_ui_verified_native_delivery_pending",
+      "humanAccepted": false,
+      "protects": [
+        "Enhanced CPU requests are attempted without a fixed 4.4 GB available-RAM admission; owned worker stops on critically low system memory and does not fall back to cloud.",
+        "An explicit email draft avoids unsupported past interactions and removes only an unrequested trailing empty sender-name placeholder before display. Explicit signatures and later user edits remain untouched.",
+        "Original body-only, previous email and custom styles remain available without being overwritten."
+      ],
+      "guards": [
+        "node --experimental-strip-types src/lib/messageDraftStyle.test.ts",
+        "python scripts/check-local-translation-ui.py --url <controlled-ui> --report <result>",
+        "npm run build",
+        "exact CPU worker and controlled critical-memory fixture with retained customer cases"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\enhanced230-exact-results.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\enhanced230-low-memory-fixture.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\email230-actual-model-contrast-first.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\email230-actual-model-contrast.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\local230-ui-final.json"
+      ],
+      "machine_accepted_scope": [
+        "Two exact CPU model cases preserve the reviewed actions and terms; a controlled critical-memory failure stops the worker. Two real DeepSeek comparisons do not imply universally accurate output."
+      ],
+      "pending_human_scope": [
+        "Matching native application, actual installation, other PCs and physical long-term use remain pending."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-29T15:15:48.624323+08:00",
+  "feature_routes_updated_at": "2026-10-29T15:36:59.195459+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -11101,7 +11134,8 @@
         "saved_text_recovery_locations_match_visible_history_and_saved_names",
         "formal_factory_role_and_local_model_choice_help",
         "overview_status_loading_and_result_model_help_keep_customer_context",
-        "manual_fact_review_email_subject_compressed_audio_history"
+        "manual_fact_review_email_subject_compressed_audio_history",
+        "enhanced_cpu_actual_pressure_and_email_fact_boundary"
       ],
       "paths": {
         "type": [
@@ -11570,7 +11604,8 @@
       "guard_entries": [
         "explicit_message_drafting_preserves_dictation_and_recipient_requests",
         "writing_original_retranslation_retains_local_edits_and_variant_names",
-        "manual_fact_review_email_subject_compressed_audio_history"
+        "manual_fact_review_email_subject_compressed_audio_history",
+        "enhanced_cpu_actual_pressure_and_email_fact_boundary"
       ],
       "paths": {
         "type": [
