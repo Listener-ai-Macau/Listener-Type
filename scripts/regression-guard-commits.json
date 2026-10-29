@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T14:44:39.521374+08:00",
+  "updated_at": "2026-10-29T15:08:09.018106+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9842,9 +9842,42 @@
         "installed": true,
         "publicPrepared": true
       }
+    },
+    {
+      "id": "manual_fact_review_email_subject_compressed_audio_history",
+      "repo": "type",
+      "commit": "aec27d236857b9e539f0b11b954c8f2c7c3f0753",
+      "commit_subject": "Keep reviewable results and improve draft and audio entry",
+      "subject": "Keep rejected results for explicit review and offer email subject and compressed audio",
+      "state": "controlled_browser_verified_native_pending",
+      "humanAccepted": false,
+      "protects": [
+        "Rejected source-fact results remain unadopted and are displayed with their exact input for explicit review; changing the input removes the candidate and no request is repeated.",
+        "Optional email subject drafting is a separate user choice and does not change existing body-only or active dictation styles.",
+        "MP3 and M4A decode locally to 16 kHz mono and reject unreadable or longer-than-60-second input without upload or truncation.",
+        "History shows the saved drafts entry whether or not dictation History is empty; existing local draft data is unchanged."
+      ],
+      "guards": [
+        "node --experimental-strip-types src/lib/bufferedSourceFacts.test.ts",
+        "npm run build",
+        "controlled browser scripts check-unmatched-review.py, check-compressed-audio.py, check-email-draft.py, check-saved-text-drafts-ui.py and check-audio-file-trial-ui.py"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\check-unmatched-review.py",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\check-compressed-audio.py",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\check-email-draft.py",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\audio229-existing.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\history229-browser.json"
+      ],
+      "machine_accepted_scope": [
+        "Controlled actual React and system Edge codec tests only; no actual WebView or service claim yet."
+      ],
+      "pending_human_scope": [
+        "Native matching artifact, independent customer usage, model semantic quality and physical/long-term conditions remain open."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-29T14:44:39.521374+08:00",
+  "feature_routes_updated_at": "2026-10-29T15:08:09.018106+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -11056,7 +11089,8 @@
         "workspace_pending_elapsed_and_adjacent_source_confirmation",
         "saved_text_recovery_locations_match_visible_history_and_saved_names",
         "formal_factory_role_and_local_model_choice_help",
-        "overview_status_loading_and_result_model_help_keep_customer_context"
+        "overview_status_loading_and_result_model_help_keep_customer_context",
+        "manual_fact_review_email_subject_compressed_audio_history"
       ],
       "paths": {
         "type": [
@@ -11479,7 +11513,8 @@
       "guard_entries": [
         "customer107_explicit_audio_file_transcription",
         "audio_file_chooser_cancel_preserves_selected_recording",
-        "audio_file_empty_vs_oversize_selection_errors"
+        "audio_file_empty_vs_oversize_selection_errors",
+        "manual_fact_review_email_subject_compressed_audio_history"
       ],
       "paths": {
         "type": [
@@ -11521,7 +11556,8 @@
       "baseline_state": "209_three_service_contrasts_React_request_boundary_and_exact_native_save_reread_passed_customer_pending",
       "guard_entries": [
         "explicit_message_drafting_preserves_dictation_and_recipient_requests",
-        "writing_original_retranslation_retains_local_edits_and_variant_names"
+        "writing_original_retranslation_retains_local_edits_and_variant_names",
+        "manual_fact_review_email_subject_compressed_audio_history"
       ],
       "paths": {
         "type": [
