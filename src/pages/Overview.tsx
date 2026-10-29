@@ -76,6 +76,7 @@ export function Overview({ showFirstUseGuide = true, onDismissOverview, onOpenPr
   const [history, setHistory] = useState<DictationSession[]>([]);
   const [historyError, setHistoryError] = useState(false);
   const [credsError, setCredsError] = useState(false);
+  const [credsLoaded, setCredsLoaded] = useState(false);
   const [bleRuntimeStatus, setBleRuntimeStatus] = useState<EmbeddedBleRuntimeStatus | null>(null);
   const [embeddedBleProbeStatus, setEmbeddedBleProbeStatus] = useState<EmbeddedBleProbeStatus>('idle');
   const [embeddedBleProbeMessage, setEmbeddedBleProbeMessage] = useState('');
@@ -136,12 +137,14 @@ export function Overview({ showFirstUseGuide = true, onDismissOverview, onOpenPr
         .then(status => {
           if (disposed || request !== latestRead) return;
           setCreds(status);
+          setCredsLoaded(true);
           setCredsError(false);
         })
         .catch(error => {
           if (disposed || request !== latestRead) return;
           console.error('[overview] failed to load credentials status', error);
           setCredsError(true);
+          setCredsLoaded(true);
         });
     };
     window.addEventListener(CREDENTIALS_STATUS_CHANGED_EVENT, refreshCredentials);
@@ -318,7 +321,7 @@ export function Overview({ showFirstUseGuide = true, onDismissOverview, onOpenPr
           <li>{!prefs ? t('common.loading') : t((prefs.dictationInputSource ?? 'embeddedBle') === 'embeddedBle' ? 'overview.firstDictationDeviceFinish' : prefs.dictationHotkey.primary.trim() ? 'overview.firstDictationFinish' : 'shortcutDefaults.microphoneFinishUnbound', { trigger: formatComboLabel(prefs.dictationHotkey) })}</li>
         </ol>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {!credsError && !creds.asrConfigured && onOpenProvidersSettings && (
+          {credsLoaded && !credsError && !creds.asrConfigured && onOpenProvidersSettings && (
             <Btn size="sm" variant="blue" icon="settings" onClick={onOpenProvidersSettings}>{t('overview.firstDictationSetup')}</Btn>
           )}
           {onOpenRecordingSettings && (
@@ -367,14 +370,14 @@ export function Overview({ showFirstUseGuide = true, onDismissOverview, onOpenPr
           kind={t('overview.asrKind')}
           name={asrProviderName}
           subname={asrProviderId}
-          status={credsError ? 'error' : creds.asrConfigured ? 'configured' : 'notConfigured'}
+          status={credsError ? 'error' : !credsLoaded ? 'loading' : creds.asrConfigured ? 'configured' : 'notConfigured'}
           onOpenSettings={onOpenProvidersSettings}
         />
         <ProviderCard
           kind={t('overview.llmKind')}
           name={llmProviderName}
           subname={llmProviderId}
-          status={credsError ? 'error' : creds.llmConfigured ? 'configured' : 'notConfigured'}
+          status={credsError ? 'error' : !credsLoaded ? 'loading' : creds.llmConfigured ? 'configured' : 'notConfigured'}
           onOpenSettings={onOpenProvidersSettings}
         />
       </div>
@@ -393,7 +396,7 @@ export function Overview({ showFirstUseGuide = true, onDismissOverview, onOpenPr
       </div>
 
       {/* Quick start guidance when providers aren't configured */}
-      {(!creds.asrConfigured || !creds.llmConfigured || (prefs && prefs.dictationInputSource !== 'embeddedBle' && !prefs.dictationHotkey.primary.trim())) && (
+      {credsLoaded && !credsError && (!creds.asrConfigured || !creds.llmConfigured || (prefs && prefs.dictationInputSource !== 'embeddedBle' && !prefs.dictationHotkey.primary.trim())) && (
         <QuickStartCard
           asrConfigured={creds.asrConfigured}
           llmConfigured={creds.llmConfigured}
@@ -419,7 +422,7 @@ interface ProviderCardProps {
   kind: string;
   name: string;
   subname: string;
-  status: 'configured' | 'notConfigured' | 'error';
+  status: 'loading' | 'configured' | 'notConfigured' | 'error';
   onOpenSettings?: () => void;
 }
 
@@ -427,7 +430,7 @@ function ProviderCard({ kind, name, subname, status, onOpenSettings }: ProviderC
   const { t } = useTranslation();
   // ASR 卡用 mic 图标，其他用 sparkle —— 通过比较译文判断会随语言改变，故改用本地化无关的字面量比较。
   const isAsr = kind === t('overview.asrKind');
-  const interactive = status !== 'configured' && Boolean(onOpenSettings);
+  const interactive = (status === 'notConfigured' || status === 'error') && Boolean(onOpenSettings);
   const card = (
     <Card padding={16} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
       <div
@@ -449,6 +452,7 @@ function ProviderCard({ kind, name, subname, status, onOpenSettings }: ProviderC
               {t('overview.statusConfigured')}
             </Pill>
           )}
+          {status === 'loading' && <Pill tone="outline" size="sm">{t('common.loading')}</Pill>}
           {status === 'notConfigured' && (
             <Pill tone="outline" size="sm">{t('overview.statusNotConfigured')}</Pill>
           )}
@@ -456,9 +460,9 @@ function ProviderCard({ kind, name, subname, status, onOpenSettings }: ProviderC
             <Pill tone="outline" size="sm" style={{ color: 'var(--ol-red, #ef4444)', borderColor: 'rgba(239,68,68,0.24)' }}>{t('overview.statusUnknown')}</Pill>
           )}
         </div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ol-ink)' }}>{name}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ol-ink)' }}>{status === 'loading' ? '—' : status === 'error' ? t('overview.statusUnknown') : name}</div>
         <div style={{ fontSize: 11.5, color: status === 'error' ? 'var(--ol-red, #ef4444)' : 'var(--ol-ink-3)', marginTop: 1, fontFamily: status === 'error' ? undefined : 'var(--ol-font-mono)' }}>
-          {status === 'error' ? t('overview.credentialsLoadError') : subname}
+          {status === 'loading' ? '\u00a0' : status === 'error' ? t('overview.credentialsLoadError') : subname}
         </div>
       </div>
     </Card>

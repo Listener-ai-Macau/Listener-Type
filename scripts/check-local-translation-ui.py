@@ -153,6 +153,26 @@ with sync_playwright() as pw:
   expect(page.locator('[data-style-trial-service-notice]')).to_contain_text('translated on this computer')
   output.fill('Do not send the email. Keep the draft for review.')
   expect(output).to_have_value('Do not send the email. Keep the draft for review.')
+  requests_before=[len(calls(cmd)) for cmd in ['try_local_translation_text','try_translation_text','prepare_local_translation']]
+  page.locator('.ol-style-trial-result-heading').get_by_role('button',name='Choosing light or enhanced',exact=True).click()
+  expect(options).to_have_attribute('open','')
+  expect(page.locator('[data-local-model-help]')).to_have_attribute('open','')
+  expect(page.locator('[data-local-model-help] > summary')).to_be_focused()
+  expect(output).to_have_value('Do not send the email. Keep the draft for review.')
+  expect(page.locator('.ol-style-trial-input')).to_have_value(source)
+  for width,height in [(1180,900),(360,640)]:
+   page.set_viewport_size({'width':width,'height':height})
+   options.locator(':scope > summary').click()
+   page.locator('.ol-style-trial-result-heading').get_by_role('button',name='Choosing light or enhanced',exact=True).click()
+   expect(page.locator('[data-local-model-help] > summary')).to_be_in_viewport()
+   close=page.locator('dialog[open] .ol-style-trial-header > button')
+   expect(close).to_be_in_viewport()
+   assert close.evaluate('(e)=>{const r=e.getBoundingClientRect();return e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}')
+  page.set_viewport_size({'width':1180,'height':900})
+  assert requests_before==[len(calls(cmd)) for cmd in ['try_local_translation_text','try_translation_text','prepare_local_translation']]
+  options.locator(':scope > summary').click()
+  expect(output).to_have_value('Do not send the email. Keep the draft for review.')
+  checks.append('Explicit result-side help opens and focuses existing model help without leaving the current edited result, changing source, preparing assets or repeating a request; narrow/wide Close remains reachable')
   if a.screenshot:
    a.screenshot.parent.mkdir(exist_ok=True,parents=True);page.screenshot(path=str(a.screenshot))
   assert calls('try_translation_text')==[]

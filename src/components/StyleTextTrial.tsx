@@ -298,6 +298,20 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
     }
   };
 
+  const openLocalModelHelp = () => {
+    const owner = dialog.current;
+    setOptionsOpen(true);
+    requestAnimationFrame(() => {
+      if (!owner?.open || dialog.current !== owner) return;
+      const help = owner.querySelector<HTMLDetailsElement>('[data-local-model-help]');
+      if (!help) return;
+      help.open = true;
+      const heading = help.querySelector<HTMLElement>('summary');
+      heading?.focus({ preventScroll: true });
+      heading?.scrollIntoView({ block: 'center' });
+    });
+  };
+
   const updateEditedOutput = (value: string) => {
     if (!result || copying || delivering || draftSaving) return;
     const edited = value === result.outputText ? null : value;
@@ -555,6 +569,8 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
             <span className="ol-style-trial-result-meta" title={t(editedOutput !== null ? 'style.trial.editedResult' : offline ? 'offlineTranslation.result' : result.usedTextService ? 'style.trial.serviceResult' : 'style.trial.rawResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}>
               {t(editedOutput !== null ? 'textWorkspace.editedResult' : offline ? 'offlineTranslation.result' : result.usedTextService ? 'textWorkspace.serviceResult' : 'textWorkspace.localResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}
             </span>
+            {offline && <Btn size="sm" variant="ghost" disabled={copying || delivering || draftSaving}
+              onClick={openLocalModelHelp}>{t('offlineTranslation.modelHelp')}</Btn>}
           </div>
           {result.usedTextService && result.outputText === draft && editedOutput === null && <p role="note" className="ol-style-trial-hint">{t('politeEdits.unchangedResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}</p>}
           <textarea className="ol-style-trial-result-body ol-style-trial-result-editor ol-thinscroll"
