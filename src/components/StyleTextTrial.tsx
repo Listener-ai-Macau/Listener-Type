@@ -253,16 +253,35 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
       const protection = offline && !matching ? protectTranslationTerms(draft, protectedTerms, translationSource) : null;
       const localId = offline && !matching ? crypto.randomUUID() : undefined;
       if (localId) localRequest.current = localId;
-      const returned = matching?.result ?? await (translationTarget
+      let returned = matching?.result ?? await (translationTarget
         ? offline ? tryLocalTranslationText(protection?.input ?? draft, translationSource, translationTarget, translationQuality, localId) : tryTranslationText(draft, translationTarget)
         : tryStylePackText(target.id, draft));
+      let restoredOutput: string | undefined;
+      if (generation.current === request && protection) {
+        try {
+          restoredOutput = protection.restore(returned.outputText);
+        } catch (cause) {
+          // Retry only the observed local Chinese marker corruption, once, with
+          // a different marker. Never retry backend errors or cloud requests.
+          if (!translationTarget || translationSource !== 'zh' || String(cause) !== 'Error: local_translation_protected_terms_failed') throw cause;
+          const retry = protectTranslationTerms(draft, protectedTerms, translationSource, 1);
+          if (retry.input === protection.input) throw cause;
+          const retryId = crypto.randomUUID();
+          localRequest.current = retryId;
+          const firstElapsed = returned.elapsedMs;
+          const second = await tryLocalTranslationText(retry.input, translationSource, translationTarget, translationQuality, retryId);
+          returned = { ...second, elapsedMs: firstElapsed + second.elapsedMs };
+          if (generation.current !== request) return;
+          restoredOutput = retry.restore(returned.outputText);
+        }
+      }
       // The backend receipt identifies the route; workspace identity also binds
       // the captured source/method signature, so late results cannot cross it.
       if (generation.current === request) {
         // This response belongs to this exact current input. Validate before
         // caching/display/save, never by rewriting later manual edits or by
         // secretly sending an earlier workflow original back to a service.
-        const routedValue = offline ? { ...returned, outputText: protection ? protection.restore(returned.outputText) : returned.outputText, packId: target.id, packName: target.name } : returned;
+        const routedValue = offline ? { ...returned, outputText: restoredOutput ?? returned.outputText, packId: target.id, packName: target.name } : returned;
         const baseValue = !translationTarget && isEmailDraftStyle(target) && returned.usedTextService
           ? { ...routedValue, outputText: removeUnrequestedEmailSignaturePlaceholder(draft, routedValue.outputText) }
           : routedValue;

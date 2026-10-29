@@ -2,7 +2,7 @@
  * A missing, duplicated or altered token fails closed instead of silently
  * claiming that the name survived translation. */
 export interface ProtectedTranslation { input: string; restore: (output: string) => string }
-export function protectTranslationTerms(source: string, list: string, sourceLanguage: string = 'zh'): ProtectedTranslation {
+export function protectTranslationTerms(source: string, list: string, sourceLanguage: string = 'zh', markerOffset = 0): ProtectedTranslation {
   const mappings = new Map<string, string>();
   for (const line of list.split(/\r?\n/u).map(x => x.trim()).filter(Boolean)) {
     const match = line.match(/^(.*?)\s*(?:->|→)\s*(.*?)$/u);
@@ -28,7 +28,7 @@ export function protectTranslationTerms(source: string, list: string, sourceLang
     if (!term) { input += source[i++]; continue; }
     // An odd, non-zero suffix avoids the tested model's removal of trailing
     // zeroes while remaining unique for inputs within the existing 4k limit.
-    const marker = numeric ? `98765${1234567 + entries.length * 2}` : `ZXQKEEP${entries.length}ZXQ`;
+    const marker = numeric ? `98765${1234567 + entries.length * 2}` : `ZXQKEEP${entries.length + markerOffset}ZXQ`;
     entries.push({ marker, term, replacement: mappings.get(term)! }); input += marker; i += term.length;
   }
   return { input, restore: output => {

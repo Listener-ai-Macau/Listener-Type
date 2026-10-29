@@ -3,6 +3,10 @@ import { protectTranslationTerms as protect } from './protectedTranslation.ts';
 
 const source='小林，请和小林及 Listener 确认；不要承诺完成。';
 const p=protect(source,'小林\nListener');
+const retry=protect('请核对截图。','截图 -> screenshot','zh',1);
+assert.equal(retry.input,'请核对ZXQKEEP1ZXQ。');
+assert.equal(retry.restore('Please check ZXQKEEP1ZXQ.'),'Please check screenshot.');
+assert.throws(()=>retry.restore('Please check ZXQKEEP1XQ.'));
 assert.equal(p.input,'ZXQKEEP0ZXQ，请和ZXQKEEP1ZXQ及 ZXQKEEP2ZXQ 确认；不要承诺完成。');
 assert.equal(p.restore('ZXQKEEP0ZXQ and ZXQKEEP1ZXQ should confirm with ZXQKEEP2ZXQ.'),'小林 and 小林 should confirm with Listener.');
 for(const bad of ['ZXQKEEP0ZXQ only','ZXQKEEP0ZXQ ZXQKEEP0ZXQ ZXQKEEP2ZXQ','zxqkeep0zxq ZXQKEEP1ZXQ ZXQKEEP2ZXQ','ZXQKEEP0ZXQ ZXQKEEP1ZXQ ZXQKEEP2ZXQ ZXQKEEP8ZXQ'])assert.throws(()=>p.restore(bad));

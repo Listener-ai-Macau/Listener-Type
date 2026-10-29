@@ -6,7 +6,7 @@ with sync_playwright() as p:
  b=p.chromium.launch(headless=True,channel='msedge',args=['--disable-gpu'])
  try:
   page=b.new_page(viewport={'width':1180,'height':900})
-  page.add_init_script("""localStorage.setItem('ol.locale','en');sessionStorage.setItem('ol.providerSetupPromptDeferredThisSession','1');window.__calls=[];window.__bad=false;window.__fixture=(cmd,args,mock)=>{if(cmd==='get_local_translation_status')return {supported:true,runtimeReady:true,runtimeDownloadBytes:0,pairs:[{source:'zh',target:'en',downloadBytes:0,ready:true},{source:'en',target:'zh',downloadBytes:0,ready:true}],preparing:false,receivedBytes:0,expectedBytes:0};if(cmd==='try_local_translation_text'){window.__calls.push(args);return {packId:'local_translation:zh:en',packName:'local',outputText:window.__bad?'The name was lost.':args.rawText.includes('ZXQKEEP1ZXQ')?'ZXQKEEP0ZXQ, please confirm ZXQKEEP1ZXQ.':'ZXQKEEP0ZXQ, please confirm.',usedTextService:false,elapsedMs:10};}if(cmd==='get_style_text_trial_readiness')return {available:true,requiresTextService:false,textServiceConfigured:false};if(cmd==='try_translation_text')throw Error('unexpected cloud call');return mock();};""")
+  page.add_init_script("""localStorage.setItem('ol.locale','en');sessionStorage.setItem('ol.providerSetupPromptDeferredThisSession','1');window.__calls=[];window.__bad=false;window.__retry=false;window.__holdRetry=false;window.__pending=null;window.__cancelled=[];window.__fixture=(cmd,args,mock)=>{if(cmd==='get_local_translation_status')return {supported:true,runtimeReady:true,runtimeDownloadBytes:0,pairs:[{source:'zh',target:'en',downloadBytes:0,ready:true},{source:'en',target:'zh',downloadBytes:0,ready:true}],preparing:false,receivedBytes:0,expectedBytes:0};if(cmd==='try_local_translation_text'){window.__calls.push(args);if(window.__holdRetry && args.rawText.includes('ZXQKEEP1ZXQ'))return new Promise((resolve,reject)=>window.__pending={id:args.requestId,reject});let output=window.__bad?'The name was lost.':window.__retry?(args.rawText.includes('ZXQKEEP0ZXQ')?'Please check ZXQKEEP0XQ.':'Please check ZXQKEEP1ZXQ.'):args.rawText.includes('ZXQKEEP1ZXQ')?'ZXQKEEP0ZXQ, please confirm ZXQKEEP1ZXQ.':'ZXQKEEP0ZXQ, please confirm.';return {packId:'local_translation:zh:en',packName:'local',outputText:output,usedTextService:false,elapsedMs:10};}if(cmd==='cancel_local_translation'){window.__cancelled.push(args.requestId);if(window.__pending?.id===args.requestId){window.__pending.reject('local_translation_cancelled');window.__pending=null;}return;}if(cmd==='get_style_text_trial_readiness')return {available:true,requiresTextService:false,textServiceConfigured:false};if(cmd==='try_translation_text')throw Error('unexpected cloud call');return mock();};""")
   def fixture(route):
    r=route.fetch();s=r.text();old='if (!isTauri) {\n    return mock();\n  }';assert s.count(old)==1;route.fulfill(response=r,body=s.replace(old,'if (!isTauri) {\n    return window.__fixture(cmd,args,mock);\n  }',1))
   page.route(re.compile(r'/src/lib/ipc\.ts(?:\?.*)?$'),fixture);page.goto(args.url,wait_until='networkidle')
@@ -31,6 +31,18 @@ with sync_playwright() as p:
   box.get_by_role('textbox').fill('小林\n不存在');page.evaluate('window.__bad=true')
   d.get_by_role('button',name='Translate',exact=True).click();expect(d.get_by_role('alert')).to_contain_text('did not preserve every selected term')
   expect(result).to_have_count(0);expect(source).to_have_value('小林，请确认报价。')
-  assert len(page.evaluate('window.__calls'))==3
-  print('PASS explicit name and preferred translation restore, changed terms invalidate old result, and missing marker rejects without cloud')
+  assert len(page.evaluate('window.__calls'))==4
+  # The known first-marker corruption gets one local retry with a distinct id.
+  page.evaluate('window.__bad=false;window.__retry=true')
+  source.fill('请核对截图。');box.get_by_role('textbox').fill('截图 -> screenshot')
+  d.get_by_role('button',name='Translate',exact=True).click();expect(result).to_have_value('Please check screenshot.')
+  calls=page.evaluate('window.__calls');assert len(calls)==6 and calls[-2]['rawText']=='请核对ZXQKEEP0ZXQ。' and calls[-1]['rawText']=='请核对ZXQKEEP1ZXQ。' and calls[-1]['requestId']!=calls[-2]['requestId']
+  assert source.input_value()=='请核对截图。'
+  if not box.is_visible():page.locator('details.ol-style-trial-options-panel > summary').click()
+  page.evaluate('window.__holdRetry=true');source.fill('请核对截图并发送。')
+  d.get_by_role('button',name='Translate',exact=True).click();page.wait_for_function('window.__pending!==null')
+  retry_id=page.evaluate('window.__pending.id');d.locator('[data-style-trial-pending]').get_by_role('button',name='Cancel',exact=True).click()
+  page.wait_for_function('window.__pending===null');expect(result).to_have_count(0);expect(source).to_have_value('请核对截图并发送。')
+  assert retry_id in page.evaluate('window.__cancelled') and len(page.evaluate('window.__calls'))==8
+  print('PASS explicit terms, bounded local retry, both-attempt failure and cancellation without cloud')
  finally:b.close()
