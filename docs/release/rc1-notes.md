@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build223 / Firmware38
+# Listener v1.0.6-rc1 · Type build224 / Firmware38
 
 | Download | File |
 | --- | --- |
@@ -7,21 +7,21 @@
 
 ## In this app update
 
-The text workspace now applies bounded recognized EN/ZH source-fact checks before adopting an English/Chinese cloud translation. Contextual time points and not/instead corrections no longer acquire unsupported AM/PM; explicit afternoon deadlines, recognized durations, numbers and calendar anchors remain tied to the submitted text. Legitimate translated counts such as one/a button remain usable. Unsafe matching leaves the input editable without an automatic service retry. Explicit later manual edits and saved copies remain under your control. The unchanged-service notice now renders elapsed seconds. Firmware38 is unchanged.
+A recording takeover that cannot maintain its connection now leaves an actionable error and a findable failed History entry. If recording retention is enabled, the audio already received before the interruption remains available for playback or export; later speech may be missing. Turning recording retention off continues to prevent audio-file storage. Actual user cancellation and subsequent recordings keep their existing behavior. In the text workspace, refining a translation that began as a message-drafting task now selects the existing Light refinement style, keeps the first instructions and saved versions, and still requires an explicit submit. Other selected styles remain selected. Firmware38 is unchanged.
 
 ## Before using
 
 US$49 is the hardware price. Type is free and open source. Recognition and optional text services require preparation and separate usage charges; this release does not provide a ready-to-use official cloud account or allowance. USB flashing and Bluetooth OTA use the same firmware ZIP.
 
-Checks are bounded to recognized EN/ZH anchors in ordinary workspace rewriting and English/Chinese-target cloud translation. They are not a guarantee of all meaning, noun identity, every language, names, promises or business policies. Explicit instruction drafting, other-language cloud translation and the existing light CPU worker retain their processing contracts and review requirements. The native fault probe uses controlled loopback replies, not actual model quality or customer/hardware evidence. Original strong-interference/early-ending, brownout cause and real global/physical/cross-PC/long-term gaps remain open. Hardware costs US$49; Type is free/open source and third-party services have separate charges.
+This improves failure reporting and recovery; it does not claim to repair the intermittent Windows GATT write timeout or restore speech never received after an interruption. Native seeded failure records come from production lifecycle tests with synthetic PCM, and text protocol checks use local controlled replies. Original voice/noise/early-ending, brownout cause, remaining real OS/physical/cross-PC and long-term evidence gaps stay open. The light CPU translation worker retains its editable-draft quality limits. Hardware costs US$49; Type is free/open source and third-party services have separate charges, with no bundled official cloud account or allowance.
 
 ## File identity
 
-- Type source: `b9fc00849c82544598b2a981c461951b94ca9483` · `build-source/type223-20261029`
-- MSI: 299868160 bytes · SHA256 `e84002a1336cce3d4c5a7b9e12eb26570ceddd659670c920bdeaac82d1f74311`
+- Type source: `6ac9cb46eb53b0590fa7b7c53f5a45ea6c24c111` · `build-source/type224-20261029`
+- MSI: 299868160 bytes · SHA256 `afa2ddfc3fd92ac7eb386efa47fa6ba1b28a349ada5d404d7e3d593f69619bcc`
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`
 - ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`
 
 ## 中文说明
 
-针对222完整文字体验中实际发现的云端译文擅加AM/PM，补上一般性缓冲中英云译事实边界：按本次提交识别上下文时间、否定纠正、日期／数量／时长，不猜上午下午；保留明确下午3点，允许one/a button等正常数量表达。无法可靠对应时不采用结果、保留输入，不自动重试付费或上传早期原稿；后续手改与独立v1保存继续保留。原样返回的耗时占位符同时修正。221吞尾、222音频操作区与固件38不变。
+修复录音接管超时被记为用户取消、历史中无法回找的问题：技术失败显示错误并生成原会话的失败记录；仅在开启录音保留时保存已接收到的音频，便于回找或导出，不能补出中断后的声音。关闭录音保留继续不落音频，真正取消及后续会话保护保持。此前待交付的起草→翻译→继续润色同批收敛：明确继续时切到已有Light正文润色，保留原要求和各份成稿；用户手选其它风格不变，无自动提交或付费重试。固件38不变。

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T08:17:12.741024+08:00",
+  "updated_at": "2026-10-29T08:47:56.041532+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9555,7 +9555,7 @@
       "commit": "a7c6d38b190f85b4a78a725cfa22d6d693194f9f",
       "commit_subject": "Keep failed recording takeovers visible and recoverable",
       "subject": "Keep technical takeover failures distinct from user cancellation and retain the received recording for History recovery",
-      "state": "production_lifecycle_and_controlled_React_verified_matching_MSI_and_field_pending",
+      "state": "production_lifecycle_and_matching_MSI_recovery_store_protocol_verified_field_pending",
       "protects": [
         "Unconfirmed takeover timeout without recognized body ends the original owner as an actionable failure, never a user Cancel or a completed transcript.",
         "With audio retention enabled, the exact received WAV and request-owned control/ASR diagnostics remain associated with one failed History record. Disabled retention writes no audio or diagnostic file.",
@@ -9570,10 +9570,26 @@
         "python scripts/check-recording-failure-history-ui.py --url <controlled-ui> --report <result>",
         "npm test",
         "npm run build"
-      ]
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\outputs\\Listener-recording-recovery224-source.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\outputs\\Listener-control-failure223-evidence.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\owner-control223-20261029\\history-source-after2.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\owner-control223-20261029\\after-capture_control_timeout.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\outputs\\Listener-workspace-intent-source.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native224-snapshot-20261029-083211\\recording-recovery224-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build224\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build224\\type224-installed.json"
+      ],
+      "delivery": {
+        "build": 224,
+        "source": "6ac9cb46eb53b0590fa7b7c53f5a45ea6c24c111",
+        "installed": true,
+        "publicPrepared": true
+      }
     }
   ],
-  "feature_routes_updated_at": "2026-10-29T01:34:47.400667+08:00",
+  "feature_routes_updated_at": "2026-10-29T08:47:56.041532+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -9608,7 +9624,7 @@
     {
       "id": "wake-continuation",
       "baseline_state": "exact_failure_not_human_accepted",
-      "accepted_scope": "No human-accepted good commit is registered for these unconfirmed ENSURE/source-EOF failure branches. Keep actual source replay evidence separate from field acceptance; normal endpoint/latency guards do not prove this boundary. Type136: stopped-predecessor PCM routing and matching device-cancel product-state closure verified in production-core replay; physical field attribution remains pending. Type137: an old takeover timeout cannot cancel a newer product owner or queue a second shared abort; production replay and exact package verified, full field attribution pending. Type138: ownerless malformed-stream failure cannot end an unrelated active recording; owned errors retain scoped cleanup. Production counterexample and exact package verified; historical physical failure attribution remains pending. Current source: technical capture-control failure has scoped Error/History/received-audio recovery, verified by production lifecycle and controlled React. Matching installed build and actual field failure recovery remain pending; no GATT root-cause repair claim.",
+      "accepted_scope": "No human-accepted good commit is registered for these unconfirmed ENSURE/source-EOF failure branches. Keep actual source replay evidence separate from field acceptance; normal endpoint/latency guards do not prove this boundary. Type136: stopped-predecessor PCM routing and matching device-cancel product-state closure verified in production-core replay; physical field attribution remains pending. Type137: an old takeover timeout cannot cancel a newer product owner or queue a second shared abort; production replay and exact package verified, full field attribution pending. Type138: ownerless malformed-stream failure cannot end an unrelated active recording; owned errors retain scoped cleanup. Production counterexample and exact package verified; historical physical failure attribution remains pending. Current source: technical capture-control failure has scoped Error/History/received-audio recovery, verified by production lifecycle and controlled React. Matching installed build and actual field failure recovery remain pending; no GATT root-cause repair claim. Type224 handles an expired recording takeover as an owned actionable failure with one History entry and the exact already-received WAV when retention is enabled. Matching MSI native seeded-failure read/UI and explicit draft/translation/Light/native v1 continuation retain their bounded scopes; no new radio, live fault, clipboard or root-cause acceptance.",
       "guard_entries": [
         "firmware_same_predecessor_ensure_source_lease",
         "type_session_capture_control_archive",
@@ -9627,7 +9643,10 @@
           "src-tauri/src/embedded_ble/windows_ble/mod.rs",
           "src-tauri/src/embedded_ble/windows_ble/capture_events.rs",
           "src-tauri/src/coordinator/dictation_embedded_stream_session.rs",
-          "src-tauri/src/coordinator/dictation_tests.rs"
+          "src-tauri/src/coordinator/dictation_tests.rs",
+          "src/pages/History.tsx",
+          "src/components/Capsule.tsx",
+          "src/i18n/recordingFailure.ts"
         ],
         "firmware": [
           "ports/esp32/audio_capture",
