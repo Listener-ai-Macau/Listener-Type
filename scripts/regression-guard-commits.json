@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T17:04:04.004129+08:00",
+  "updated_at": "2026-10-29T17:12:57.347497+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -10087,9 +10087,63 @@
         "installed": true,
         "publicPrepared": true
       }
+    },
+    {
+      "id": "light_translation_numbered_items_not_independent_sentences",
+      "repo": "type",
+      "commit": "f7aa6930d4c919a453a7f2c45fffa25efff1cbc8",
+      "commit_subject": "Keep numbered list markers outside the light translation model",
+      "subject": "Preserve numbered list markers instead of translating them as separate sentences",
+      "state": "actual_light_model_customer_counterexample_corrected_native_delivery_pending",
+      "humanAccepted": false,
+      "protects": [
+        "Line-leading numbered markers with following space stay outside the light model and are restored verbatim; decimal numbers and ordinary sentences remain unchanged.",
+        "Full customer-source actual light model comparison retains all three numbered items and avoids three hallucinated unrelated phrases."
+      ],
+      "guards": [
+        "python scripts/test_translation_sentence_boundaries.py",
+        "python scripts/test_translation_time_fidelity.py",
+        "python scripts/test_translation_result_fidelity.py"
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/translation234-list-final-actual-contrast.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/outputs/Listener-FIRST_USE233-presale-20261029/session-recount.md"
+      ],
+      "machine_accepted_scope": [
+        "Real CPU model, exact customer synthetic source, decimal and negation controls; matching native build pending."
+      ],
+      "pending_human_scope": [
+        "No universal semantic correctness, live speech or physical qualification."
+      ]
+    },
+    {
+      "id": "wording_suggestions_use_explicit_structured_contract",
+      "repo": "type",
+      "commit": "824a4341ce4d91cafa324a3e20ed0538c3193d69",
+      "commit_subject": "Use a structured request for wording suggestions",
+      "subject": "Ask text providers for structured wording suggestions without the dictation-output envelope",
+      "state": "focused_native_source_test_actual_service_and_delivery_pending",
+      "humanAccepted": false,
+      "protects": [
+        "Explicit suggestions request JSON without an instruction to output insertable prose; regular dictation retains the existing envelope.",
+        "Provider authentication and caller-visible error handling, source retention and explicit edit review remain."
+      ],
+      "guards": [
+        "cargo test --lib polite_suggestions_use_a_json_contract_not_the_dictation_envelope",
+        "node --experimental-strip-types src/lib/politeEdits.test.ts"
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/email233-polite-actual.json"
+      ],
+      "machine_accepted_scope": [
+        "Native source unit test passed; actual model and matching MSI pending."
+      ],
+      "pending_human_scope": [
+        "Provider behavior and semantic quality are not guaranteed."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-29T17:04:04.004129+08:00",
+  "feature_routes_updated_at": "2026-10-29T17:12:57.347497+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -11308,7 +11362,8 @@
         "overview_status_loading_and_result_model_help_keep_customer_context",
         "manual_fact_review_email_subject_compressed_audio_history",
         "enhanced_cpu_actual_pressure_and_email_fact_boundary",
-        "workspace_help_visible_and_history_draft_count"
+        "workspace_help_visible_and_history_draft_count",
+        "wording_suggestions_use_explicit_structured_contract"
       ],
       "paths": {
         "type": [
@@ -11475,7 +11530,8 @@
         "optional_cpu_translation_source_fidelity_and_owned_worker_lifecycle",
         "light_cpu_translation_source_clock_facts_and_explicit_years",
         "long_audio_resume_and_explicit_translation_terms",
-        "offline_translation_explicit_preferred_terms"
+        "offline_translation_explicit_preferred_terms",
+        "light_translation_numbered_items_not_independent_sentences"
       ],
       "paths": {
         "type": [
