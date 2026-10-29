@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T01:34:47.400667+08:00",
+  "updated_at": "2026-10-29T08:17:12.741024+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9548,6 +9548,29 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build223\\type-artifact-verification.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build223\\type223-installed.json"
       ]
+    },
+    {
+      "id": "capture_control_timeout_visible_failure_and_recording_recovery",
+      "repo": "type",
+      "commit": "a7c6d38b190f85b4a78a725cfa22d6d693194f9f",
+      "commit_subject": "Keep failed recording takeovers visible and recoverable",
+      "subject": "Keep technical takeover failures distinct from user cancellation and retain the received recording for History recovery",
+      "state": "production_lifecycle_and_controlled_React_verified_matching_MSI_and_field_pending",
+      "protects": [
+        "Unconfirmed takeover timeout without recognized body ends the original owner as an actionable failure, never a user Cancel or a completed transcript.",
+        "With audio retention enabled, the exact received WAV and request-owned control/ASR diagnostics remain associated with one failed History record. Disabled retention writes no audio or diagnostic file.",
+        "True cancellation, old timeout/new owner isolation, live recognized body, and actual predecessor EOF keep their existing contracts. No additional capture, automatic cloud retry or editor output.",
+        "Five shipped locales identify failed recordings; available audio exports exactly, missing audio has no export, and an empty failure has no Copy action.",
+        "This handles failure visibility/recovery only. The real Windows GATT write timeout and historical power/cross-PC/long-term scope are not claimed fixed."
+      ],
+      "guards": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib capture_control_timeout -- --test-threads=1",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib expired_ensure_cannot -- --test-threads=1",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib ended_ensure -- --test-threads=1",
+        "python scripts/check-recording-failure-history-ui.py --url <controlled-ui> --report <result>",
+        "npm test",
+        "npm run build"
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-29T01:34:47.400667+08:00",
@@ -9585,14 +9608,15 @@
     {
       "id": "wake-continuation",
       "baseline_state": "exact_failure_not_human_accepted",
-      "accepted_scope": "No human-accepted good commit is registered for these unconfirmed ENSURE/source-EOF failure branches. Keep actual source replay evidence separate from field acceptance; normal endpoint/latency guards do not prove this boundary. Type136: stopped-predecessor PCM routing and matching device-cancel product-state closure verified in production-core replay; physical field attribution remains pending. Type137: an old takeover timeout cannot cancel a newer product owner or queue a second shared abort; production replay and exact package verified, full field attribution pending. Type138: ownerless malformed-stream failure cannot end an unrelated active recording; owned errors retain scoped cleanup. Production counterexample and exact package verified; historical physical failure attribution remains pending.",
+      "accepted_scope": "No human-accepted good commit is registered for these unconfirmed ENSURE/source-EOF failure branches. Keep actual source replay evidence separate from field acceptance; normal endpoint/latency guards do not prove this boundary. Type136: stopped-predecessor PCM routing and matching device-cancel product-state closure verified in production-core replay; physical field attribution remains pending. Type137: an old takeover timeout cannot cancel a newer product owner or queue a second shared abort; production replay and exact package verified, full field attribution pending. Type138: ownerless malformed-stream failure cannot end an unrelated active recording; owned errors retain scoped cleanup. Production counterexample and exact package verified; historical physical failure attribution remains pending. Current source: technical capture-control failure has scoped Error/History/received-audio recovery, verified by production lifecycle and controlled React. Matching installed build and actual field failure recovery remain pending; no GATT root-cause repair claim.",
       "guard_entries": [
         "firmware_same_predecessor_ensure_source_lease",
         "type_session_capture_control_archive",
         "type_optional_capability_nonblocking_recovery",
         "type136_pending_predecessor_tail_and_device_cancel_ownership",
         "type137_expired_takeover_cancel_stays_with_original_owner",
-        "type138_unowned_stream_error_preserves_current_recording"
+        "type138_unowned_stream_error_preserves_current_recording",
+        "capture_control_timeout_visible_failure_and_recording_recovery"
       ],
       "paths": {
         "type": [
@@ -9622,7 +9646,8 @@
         "2026-10-17 15:05 Type34/FW19: ENSURE writes25/22ms, no matching marker, original VoiceActivationMaxDuration then ended_source_without_continuation. Same binaries natural15:09 ENSURE confirmed/long recording completed. Original device rejection/omission not retained; not proven root-fixed. FW20 candidate adds persistent actor result only, no endpoint policy workaround.",
         "2026-10-17 FW20c2 source3cb8221 same-predecessor tail-drain/Idle path did not reserve original PCM. Original controller plus actual capture selector fails at a 2.2s readiness wait within its existing 3s deadline; FW21 source376e9749e81361bb7ebb69429ce5f1d354b71554 pins the same source/request and passes. Installed 57431b05a4e7d6e9, field pending; do not label all early termination fixed.",
         "20:08 Type42/FW22 physical7548 ended at6s without newer retained device ENSURE. Actual write outcome rotated out.43 adds session-owned control evidence only; not root-fixed.",
-        "21:06 Type43/FW22 natural7583: real WinRT ENSURE write timeout2004ms, no firmware execution/marker, other control writes also timeout, later notify/GATT discovery retries. Prior7582 sent202ms/confirmed237ms on same capture. Optional capability recovery not observed,44 is a separate blocking-branch repair."
+        "21:06 Type43/FW22 natural7583: real WinRT ENSURE write timeout2004ms, no firmware execution/marker, other control writes also timeout, later notify/GATT discovery retries. Prior7582 sent202ms/confirmed237ms on same capture. Optional capability recovery not observed,44 is a separate blocking-branch repair.",
+        "2026-10-29 installed223: three actual automatic endings retained recognized body; a separate ENSURE2000ms WinRT write timeout never appeared as a firmware actor execution. The host classified it as user Cancel and omitted a findable failed recording. a7c6d38b fixes failure classification/recovery, not the original intermittent GATT delivery cause."
       ]
     },
     {
