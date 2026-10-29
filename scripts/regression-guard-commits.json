@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T08:47:56.041532+08:00",
+  "updated_at": "2026-10-29T09:54:18.061422+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9175,7 +9175,10 @@
         "python scripts/check-workspace-action-visibility-ui.py --url <controlled-ui> --report <result>",
         "python scripts/check-local-translation-ui.py --url <controlled-ui> --report <result>",
         "python scripts/check-style-workspace-settings-return-ui.py --url <controlled-ui> --report <result>",
-        "npm run build"
+        "npm run build",
+        "python scripts/check-style-trial-layout-ui.py --url <controlled-ui> --report <result>",
+        "python scripts/check-style-trial-layout-ui.py --url <controlled-ui> --width 360 --height 640 --report <result>",
+        "python scripts/check-style-trial-readiness-identity-ui.py --url <controlled-ui> --report <result>"
       ],
       "machine_evidence": [
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\workspace214-action-visibility-before.json",
@@ -9202,6 +9205,26 @@
         "source": "f2c6453f800c125345c33ef943fe0fde04a1701f",
         "installed": true,
         "publicPrepared": true
+      },
+      "pending_source_checkpoint": {
+        "commit": "73fdabd1d1ac56357a87ffdbb5e03bc14c5d5875",
+        "state": "source_only_related_nonblocking_held_for_substantive_delivery",
+        "feedbackIds": [
+          "F224PS_FIRST_SUBMIT_CLARITY",
+          "F224AS_SUBMIT_LABEL"
+        ],
+        "scope": "Direct localized Process text/Generate draft/Preparing labels; fixed workspace height/content flex and stable setup action while readiness is pending keep actual submit origin steady in wide/narrow controlled React. No submission/request/save/provider protocol or native qualification change.",
+        "evidence": [
+          "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\submit-label-current224-readiness-motion-before.json",
+          "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\submit-label-stable-footer-after3.json",
+          "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\submit-stable-small-readiness-after4.json",
+          "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\submit-stable-final-style-trial-readiness-identity-ui.json",
+          "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\submit-stable-final-workspace-action-visibility-ui.json",
+          "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\submit-stable-after3-workspace-result-reachability-ui.json"
+        ],
+        "originalCustomerClickCauseProven": false,
+        "installed": false,
+        "published": false
       }
     },
     {
