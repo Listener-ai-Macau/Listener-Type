@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T15:58:28.954697+08:00",
+  "updated_at": "2026-10-29T16:28:59.193633+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9970,9 +9970,41 @@
         "installed": true,
         "publicPrepared": true
       }
+    },
+    {
+      "id": "long_audio_resume_and_explicit_translation_terms",
+      "repo": "type",
+      "commit": "1e1cb3a2a379cc7ba115f5637a67f81597cd9986",
+      "commit_subject": "Support resumable long audio and protect explicit translation terms",
+      "subject": "Keep long audio and explicit offline translation terms recoverable without silent loss",
+      "state": "232_controlled_and_real_light_model_candidate_native_and_delivery_pending",
+      "humanAccepted": false,
+      "protects": [
+        "55 second PCM segments overlap one second and cover the last sample; a failed or stopped segment retains completed text for explicit resume without replay. A skipped unrecognized segment is visibly labeled.",
+        "User-specified names and special terms are restored literally in local translation; missing, duplicated, mutated or classifier-corrupted markers fail closed without a cloud fallback.",
+        "File picker cancellation preserves the dialog; short recordings retain the existing service path."
+      ],
+      "guards": [
+        "node --experimental-strip-types src/lib/longAudio.test.ts",
+        "node --experimental-strip-types src/lib/protectedTranslation.test.ts",
+        "python scripts/check-long-audio-ui.py --url <controlled-ui> --long-mp3 <public-fixture>",
+        "python scripts/check-protected-translation-ui.py --url <controlled-ui>",
+        "python scripts/check-audio-file-cancel-ui.py --url <controlled-ui> --report <result>",
+        "npm run build"
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/protected232-actual-standard.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/audio232-cancel4.json"
+      ],
+      "machine_accepted_scope": [
+        "Controlled React, exact PCM samples and real existing light CPU translation model; matching native and real speech service tests pending."
+      ],
+      "pending_human_scope": [
+        "General translation accuracy, other PCs, real customers and intermittent physical fault causes remain unproven."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-29T15:58:28.954697+08:00",
+  "feature_routes_updated_at": "2026-10-29T16:28:59.193633+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -11352,7 +11384,8 @@
         "local_saved_draft_deleted_or_missing_record_never_becomes_another_draft",
         "local_translation_abbreviation_boundaries_and_reachable_workspace_exit",
         "optional_cpu_translation_source_fidelity_and_owned_worker_lifecycle",
-        "light_cpu_translation_source_clock_facts_and_explicit_years"
+        "light_cpu_translation_source_clock_facts_and_explicit_years",
+        "long_audio_resume_and_explicit_translation_terms"
       ],
       "paths": {
         "type": [
@@ -11389,7 +11422,10 @@
           "src-tauri/resources/translation/time_fidelity.py",
           "scripts/test_translation_time_fidelity.py",
           "scripts/test_translation_light_worker.py",
-          "src/i18n/localTranslation.ts"
+          "src/i18n/localTranslation.ts",
+          "src/lib/protectedTranslation.ts",
+          "src/lib/protectedTranslation.test.ts",
+          "scripts/check-protected-translation-ui.py"
         ]
       }
     },
@@ -11616,11 +11652,15 @@
         "customer107_explicit_audio_file_transcription",
         "audio_file_chooser_cancel_preserves_selected_recording",
         "audio_file_empty_vs_oversize_selection_errors",
-        "manual_fact_review_email_subject_compressed_audio_history"
+        "manual_fact_review_email_subject_compressed_audio_history",
+        "long_audio_resume_and_explicit_translation_terms"
       ],
       "paths": {
         "type": [
-          "src/components/AudioFileTrial.tsx"
+          "src/components/AudioFileTrial.tsx",
+          "src/lib/longAudio.ts",
+          "src/lib/longAudio.test.ts",
+          "scripts/check-long-audio-ui.py"
         ]
       },
       "known_failures": [
