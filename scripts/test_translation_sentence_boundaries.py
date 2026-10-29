@@ -54,6 +54,19 @@ class TranslationSentenceBoundaries(unittest.TestCase):
         self.assert_units('The ratio is 3.14. Keep A_102 intact.',
                           ['The ratio is 3.14.', 'Keep A_102 intact.'])
 
+    def test_numbered_item_prefix_stays_outside_model_without_touching_decimals(self):
+        for source, prefix, body in [
+            ('1. 测试账号名单', '1. ', '测试账号名单'),
+            ('  12)\t不要发送旧报价。', '  12)\t', '不要发送旧报价。'),
+            ('1.5 度', '', '1.5 度'),
+            ('2026. 10. 29', '', '2026. 10. 29'),
+            ('编号 1. 列表', '', '编号 1. 列表'),
+            ('1.', '', '1.'),
+        ]:
+            with self.subTest(source=source):
+                self.assertEqual(worker.split_numbered_list_prefix(source), (prefix, body))
+                self.assertEqual(prefix + body, source)
+
     def test_terminal_abbreviation_is_not_empty_translation(self):
         self.assert_units('Call at 3 p.m.', ['Call at 3 p.m.'])
 

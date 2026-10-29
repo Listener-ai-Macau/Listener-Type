@@ -42,6 +42,13 @@ def translation_sentences(value):
     return units
 
 
+def split_numbered_list_prefix(value):
+    """Separate only an ASCII numbered list marker with following spacing."""
+    match = re.match(r'^([ \t]*[0-9]{1,3}[.)][ \t]+)(?=\S)', value)
+    prefix = match.group(1) if match else ''
+    return prefix, value[len(prefix):]
+
+
 def translate(request):
     # Windows' extension discovery can otherwise omit a .pyd at MAX_PATH,
     # reporting a misleading circular import. The customer profile/cache may
@@ -114,9 +121,14 @@ def translate(request):
         if not value.strip():
             output.append(value)
             continue
-        translated, _ = preserve_explicit_years(value, paragraph(value), source)
-        translated, _ = preserve_explicit_times(value, translated, source)
-        output.append(value[:len(value) - len(value.lstrip())] + translated + value[len(value.rstrip()):])
+        # A sentence model can hallucinate unrelated phrases when a list
+        # number such as "1." is submitted as a sentence by itself. Keep
+        # actual line-leading list markers outside the model; decimals like
+        # "1.5" do not match because the marker requires following space.
+        prefix, body = split_numbered_list_prefix(value)
+        translated, _ = preserve_explicit_years(body, paragraph(body), source)
+        translated, _ = preserve_explicit_times(body, translated, source)
+        output.append(prefix + body[:len(body) - len(body.lstrip())] + translated + body[len(body.rstrip()):])
     return ''.join(output)
 
 
