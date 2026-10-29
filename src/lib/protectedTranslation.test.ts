@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import { protectTranslationTerms as protect } from './protectedTranslation.ts';
+
+const source='小林，请和小林及 Listener 确认；不要承诺完成。';
+const p=protect(source,'小林\nListener');
+assert.equal(p.input,'ZXQKEEP0ZXQ，请和ZXQKEEP1ZXQ及 ZXQKEEP2ZXQ 确认；不要承诺完成。');
+assert.equal(p.restore('ZXQKEEP0ZXQ and ZXQKEEP1ZXQ should confirm with ZXQKEEP2ZXQ.'),'小林 and 小林 should confirm with Listener.');
+for(const bad of ['ZXQKEEP0ZXQ only','ZXQKEEP0ZXQ ZXQKEEP0ZXQ ZXQKEEP2ZXQ','zxqkeep0zxq ZXQKEEP1ZXQ ZXQKEEP2ZXQ','ZXQKEEP0ZXQ ZXQKEEP1ZXQ ZXQKEEP2ZXQ ZXQKEEP8ZXQ'])assert.throws(()=>p.restore(bad));
+assert.equal(protect('小林和林','林\n小林').input,'ZXQKEEP0ZXQ和ZXQKEEP1ZXQ');
+assert.equal(protect('No name here.','小林').restore('No name here.'),'No name here.');
+assert.throws(()=>protect('Existing ZXQKEEP0ZXQ','name'));
+assert.equal(protect('😀小林','小林').restore('😀 ZXQKEEP0ZXQ'),'😀 小林');
+assert.equal(protect('Li uses Listener and Li.','Li').input,'ZXQKEEP0ZXQ uses Listener and ZXQKEEP1ZXQ.');
+const en=protect('Maya, meet Maya.','Maya','en');
+assert.equal(en.input,'987651234567, meet 987651234569.');
+assert.equal(en.restore('987651234567，请见987651234569。'),'Maya，请见Maya。');
+assert.throws(()=>en.restore('987651234567，请见987651234567。'));
+assert.throws(()=>en.restore('987651234567，请见987651234569号。'));
+assert.throws(()=>protect('The number is 987650000000.','Maya','en'));
+console.log('PASS explicit terms are restored literally; duplicate, missing, mutated and injected markers fail closed');

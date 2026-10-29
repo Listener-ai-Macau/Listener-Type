@@ -18,6 +18,7 @@ import type { TranslationEngine, LocalTranslationReadiness, LocalTranslationQual
 import { SavedTextDraftsDialog } from './SavedTextDraftsDialog';
 import { BufferedSourceFactError, preserveBufferedSourceFacts, preserveTranslatedSourceFacts } from '../lib/bufferedSourceFacts';
 import { isEmailDraftStyle, isMessageDraftStyle, removeUnrequestedEmailSignaturePlaceholder } from '../lib/messageDraftStyle';
+import { protectTranslationTerms } from '../lib/protectedTranslation';
 
 function withDraftOriginName(origin: string, suffix: string): string {
   const room = Math.max(0, 80 - Array.from(suffix).length - 3);
@@ -56,6 +57,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const [translationEngine, setTranslationEngine] = useState<TranslationEngine>(initialTranslationEngine ?? 'local');
   const [translationSource, setTranslationSource] = useState(initialTranslationSource ?? '');
   const [translationQuality, setTranslationQuality] = useState<LocalTranslationQuality>(initialTranslationQuality ?? 'standard');
+  const [protectedTerms, setProtectedTerms] = useState('');
   const localRequest = useRef<string | null>(null);
   const [optionsOpen, setOptionsOpen] = useState(true);
   const lastTranslationTarget = useRef(translationTarget || 'English');
@@ -102,7 +104,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   // exact fresh result through the selection, rather than calling it a restore
   // merely because it has just been added to the comparison cache.
   const freshSelectionResult = useRef<{ packId: string; signature: string; result: StyleTextTrialResult } | null>(null);
-  const signature = JSON.stringify(translationTarget ? [draft, pack.prompt, translationEngine, translationSource, translationQuality] : [draft, pack.prompt]);
+  const signature = JSON.stringify(translationTarget ? [draft, pack.prompt, translationEngine, translationSource, translationQuality, offline ? protectedTerms : ''] : [draft, pack.prompt]);
   const result = storedResult?.packId === pack.id && resultSignature === signature ? storedResult : null;
   const savedForPack = completed.current.get(cacheKey(pack.id));
   const earlier = !result && savedForPack && savedForPack.signature !== signature ? savedForPack : null;
@@ -245,13 +247,14 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
       const target = prepare ? await prepare() : pack;
       // Closing the workspace while preparing must not start a paid request.
       if (generation.current !== request) return;
-      const targetSignature = JSON.stringify(translationTarget ? [draft, target.prompt, translationEngine, translationSource, translationQuality] : [draft, target.prompt]);
+      const targetSignature = JSON.stringify(translationTarget ? [draft, target.prompt, translationEngine, translationSource, translationQuality, offline ? protectedTerms : ''] : [draft, target.prompt]);
       const cached = prepare ? completed.current.get(cacheKey(target.id)) : null;
       const matching = cached?.signature === targetSignature ? cached : null;
+      const protection = offline && !matching ? protectTranslationTerms(draft, protectedTerms, translationSource) : null;
       const localId = offline && !matching ? crypto.randomUUID() : undefined;
       if (localId) localRequest.current = localId;
       const returned = matching?.result ?? await (translationTarget
-        ? offline ? tryLocalTranslationText(draft, translationSource, translationTarget, translationQuality, localId) : tryTranslationText(draft, translationTarget)
+        ? offline ? tryLocalTranslationText(protection?.input ?? draft, translationSource, translationTarget, translationQuality, localId) : tryTranslationText(draft, translationTarget)
         : tryStylePackText(target.id, draft));
       // The backend receipt identifies the route; workspace identity also binds
       // the captured source/method signature, so late results cannot cross it.
@@ -259,7 +262,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         // This response belongs to this exact current input. Validate before
         // caching/display/save, never by rewriting later manual edits or by
         // secretly sending an earlier workflow original back to a service.
-        const routedValue = offline ? { ...returned, packId: target.id, packName: target.name } : returned;
+        const routedValue = offline ? { ...returned, outputText: protection ? protection.restore(returned.outputText) : returned.outputText, packId: target.id, packName: target.name } : returned;
         const baseValue = !translationTarget && isEmailDraftStyle(target) && returned.usedTextService
           ? { ...routedValue, outputText: removeUnrequestedEmailSignaturePlaceholder(draft, routedValue.outputText) }
           : routedValue;
@@ -572,6 +575,13 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
             <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || draftSaving || translationPreparing}
               onClick={() => setTranslationSource('zh')}>{t('textWorkspace.confirmChinese')}</Btn>
           </div>} />}
+        {offline && <details className="ol-style-trial-details" data-protected-translation-terms>
+          <summary>{t('offlineTranslation.protectedTerms')}</summary>
+          <p className="ol-style-trial-hint">{t('offlineTranslation.protectedTermsHint')}</p>
+          <textarea aria-label={t('offlineTranslation.protectedTerms')} rows={3} value={protectedTerms}
+            disabled={pending || copying || delivering || draftSaving || translationPreparing}
+            onChange={event => setProtectedTerms(event.target.value)} />
+        </details>}
       </>}
       {packs && onSelectPack && <label className="ol-style-trial-picker">
         <span>{t('style.trial.styleLabel')}</span>

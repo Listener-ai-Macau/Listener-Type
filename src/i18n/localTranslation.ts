@@ -116,4 +116,10 @@ const ko: Copy = {
   downloadFailed:'다운로드하지 못했습니다. 연결을 확인하고 다시 시도하세요. 원문과 기존 설정은 유지됩니다.',busy:'다른 로컬 번역이 종료 중입니다. 잠시 후 다시 시도하세요.',timeout:'로컬 번역 시간이 초과되었습니다. 원문은 유지되며 클라우드 번역을 요청하지 않았습니다.',
   invalidText:'최대 4,000자를 입력하세요. 번역하거나 보내지 않았습니다.',failed:'로컬 번역을 완료하지 못했습니다. 원문은 남아 있습니다. 구성 요소를 확인 / 복구한 뒤 다시 시도하세요.',statusFailed:'구성 요소 상태를 읽지 못했습니다. 다운로드하거나 번역하지 않았습니다.',result:'로컬 번역 · {{seconds}}초',run:'번역',voiceHint:'음성 번역을 명시적으로 시작할 때도 이 설정을 사용합니다. 일반 녹음은 원래 언어를 유지합니다.',
 };
-export const localTranslationMessages = { en, 'zh-CN': zhCN, 'zh-TW': zhTW, ja, ko };
+export const localTranslationMessages = {
+  en: { ...en, protectedTerms: 'Keep names or terms unchanged (optional)', protectedTermsHint: 'Enter exact source names or terms, one per line. Matched terms stay in their original spelling in the local result. If a marker is lost, the result is not adopted. Review the rest of the translation too.', protectedTermsFailed: 'The model did not preserve every selected term reliably. Your original is retained; revise the terms or try another translation method.' },
+  'zh-CN': { ...zhCN, protectedTerms: '原样保留姓名或专有词（可选）', protectedTermsHint: '每行填写一个与原文完全相同的姓名或词语。匹配到的内容在本机译文中保留原写法；若模型未保留标记，不会采用结果。其他内容也请对照原文。', protectedTermsFailed: '模型未可靠保留所有指定词语，未采用译文；原文已保留，可调整词语或选择其他翻译方式。' },
+  'zh-TW': { ...zhTW, protectedTerms: '原樣保留姓名或專有詞（可選）', protectedTermsHint: '每行輸入一個與原文完全相同的姓名或詞語。匹配內容在本機譯文中保留原寫法；若模型未保留標記，不會採用結果。其他內容也請對照原文。', protectedTermsFailed: '模型未可靠保留所有指定詞語，未採用譯文；原文已保留，可調整詞語或選擇其他翻譯方式。' },
+  ja: { ...ja, protectedTerms: '名前・用語を原文のまま保つ（任意）', protectedTermsHint: '原文と完全に同じ名前や用語を1行に1つ入力します。一致した語はローカル翻訳で原文のまま保持します。マーカーが失われた結果は採用しません。ほかの部分も原文と照合してください。', protectedTermsFailed: '指定した語を確実に保持できなかったため、結果は採用していません。原文は残っています。指定語を変更するか別の翻訳方法を選んでください。' },
+  ko: { ...ko, protectedTerms: '이름 또는 용어 원문 유지 (선택)', protectedTermsHint: '원문과 정확히 같은 이름이나 용어를 한 줄에 하나씩 입력하세요. 일치한 항목은 로컬 번역에서 원문 그대로 유지합니다. 표시가 사라진 결과는 적용하지 않습니다. 나머지도 원문과 비교하세요.', protectedTermsFailed: '지정한 용어를 확실하게 유지하지 못해 번역을 적용하지 않았습니다. 원문은 유지됩니다. 용어를 바꾸거나 다른 번역 방법을 선택하세요.' },
+};

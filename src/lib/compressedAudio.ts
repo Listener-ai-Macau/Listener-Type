@@ -9,8 +9,10 @@ export async function compressedAudioToWav(buffer: ArrayBuffer): Promise<Uint8Ar
     throw new Error('audio_file_compressed_format');
   }
   if (!Number.isFinite(decoded.duration) || decoded.duration <= 0) throw new Error('audio_file_compressed_format');
-  if (decoded.duration > 60) throw new Error('audio_file_too_long');
   const length = Math.ceil(decoded.duration * 16_000);
+  // RIFF's data and file size fields are 32-bit; do not wrap them and
+  // silently discard audio for extremely long decoded recordings.
+  if (!Number.isSafeInteger(length) || length * 2 > 0xffff_ffff - 36) throw new Error('audio_file_container_limit');
   const renderer = new OfflineAudioContext(1, length, 16_000);
   const source = renderer.createBufferSource();
   source.buffer = decoded;

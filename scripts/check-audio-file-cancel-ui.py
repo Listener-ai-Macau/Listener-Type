@@ -25,8 +25,6 @@ with sync_playwright() as playwright:
           sessionStorage.setItem('ol.providerSetupPromptDeferredThisSession','1');
         """)
         page.goto(args.url, wait_until='networkidle')
-        page.get_by_role('button', name='Tools', exact=True).first.click()
-        page.locator('details > summary').get_by_text('More tools', exact=True).click()
         page.get_by_role('button', name='Transcribe recorded audio', exact=True).click()
         dialog = page.get_by_role('dialog', name='Transcribe recorded audio', exact=True)
         file_input = dialog.get_by_label('Choose WAV file', exact=True)
@@ -43,10 +41,6 @@ with sync_playwright() as playwright:
         # must not disable the normal close behavior.
         dialog.press('Escape')
         expect(dialog).not_to_be_visible()
-        page.get_by_role('button', name='Tools', exact=True).first.click()
-        details = page.locator('details').filter(has=page.get_by_text('More tools', exact=True))
-        if details.get_attribute('open') is None:
-            details.locator('summary').click()
         page.get_by_role('button', name='Transcribe recorded audio', exact=True).click()
         expect(dialog).to_be_visible()
         expect(dialog.get_by_text('No audio selected.', exact=True)).to_be_visible()
