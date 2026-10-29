@@ -1,9 +1,17 @@
-/** Explicit user-provided names/terms stay local and are restored literally.
+/** Explicit user-provided names/terms stay local and use their chosen spelling.
  * A missing, duplicated or altered token fails closed instead of silently
  * claiming that the name survived translation. */
 export interface ProtectedTranslation { input: string; restore: (output: string) => string }
 export function protectTranslationTerms(source: string, list: string, sourceLanguage: string = 'zh'): ProtectedTranslation {
-  const terms = [...new Set(list.split(/\r?\n/u).map(x => x.trim()).filter(Boolean))].sort((a, b) => b.length - a.length);
+  const mappings = new Map<string, string>();
+  for (const line of list.split(/\r?\n/u).map(x => x.trim()).filter(Boolean)) {
+    const match = line.match(/^(.*?)\s*(?:->|→)\s*(.*?)$/u);
+    const term = (match ? match[1] : line).trim(), replacement = (match ? match[2] : line).trim();
+    if (!term || !replacement || (mappings.has(term) && mappings.get(term) !== replacement))
+      throw new Error('local_translation_protected_terms_failed');
+    mappings.set(term, replacement);
+  }
+  const terms = [...mappings.keys()].sort((a, b) => b.length - a.length);
   if (!terms.length) return { input: source, restore: output => output };
   // The shipped en→zh tokenizer can turn rare Latin marker characters into
   // unknown glyphs; its tested numeric tokens survive. The opposite direction
@@ -11,7 +19,7 @@ export function protectTranslationTerms(source: string, list: string, sourceLang
   const numeric = sourceLanguage === 'en';
   const markerPattern = numeric ? /(?<!\d)98765\d{7}(?!\d)/gu : /ZXQKEEP\d+ZXQ/giu;
   if (markerPattern.test(source)) throw new Error('local_translation_protected_terms_failed');
-  const entries: Array<{ marker: string; term: string }> = [];
+  const entries: Array<{ marker: string; term: string; replacement: string }> = [];
   let input = '';
   for (let i = 0; i < source.length;) {
     const term = terms.find(value => source.startsWith(value, i)
@@ -21,7 +29,7 @@ export function protectTranslationTerms(source: string, list: string, sourceLang
     // An odd, non-zero suffix avoids the tested model's removal of trailing
     // zeroes while remaining unique for inputs within the existing 4k limit.
     const marker = numeric ? `98765${1234567 + entries.length * 2}` : `ZXQKEEP${entries.length}ZXQ`;
-    entries.push({ marker, term }); input += marker; i += term.length;
+    entries.push({ marker, term, replacement: mappings.get(term)! }); input += marker; i += term.length;
   }
   return { input, restore: output => {
     const seen = output.match(markerPattern) ?? [];
@@ -32,6 +40,7 @@ export function protectTranslationTerms(source: string, list: string, sourceLang
     if (numeric && entries.some(({ marker, term }) => !/^\d+$/u.test(term)
       && /^[ \t]*(?:号|號|个|個|元|项|項|位|名|台|次|年|月|日|岁|歲)/u.test(output.slice(output.indexOf(marker) + marker.length))))
       throw new Error('local_translation_protected_terms_failed');
-    return entries.reduce((text, { marker, term }) => text.replace(marker, () => term), output);
+    const replacements = new Map(entries.map(({ marker, replacement }) => [marker, replacement]));
+    return output.replace(markerPattern, marker => replacements.get(marker)!);
   } };
 }

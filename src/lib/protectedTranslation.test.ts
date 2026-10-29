@@ -17,4 +17,13 @@ assert.equal(en.restore('987651234567，请见987651234569。'),'Maya，请见Ma
 assert.throws(()=>en.restore('987651234567，请见987651234567。'));
 assert.throws(()=>en.restore('987651234567，请见987651234569号。'));
 assert.throws(()=>protect('The number is 987650000000.','Maya','en'));
-console.log('PASS explicit terms are restored literally; duplicate, missing, mutated and injected markers fail closed');
+const glossary=protect('Maya, confirm the quotation.','Maya\nquotation -> 报价','en');
+assert.equal(glossary.input,'987651234567, confirm the 987651234569.');
+assert.equal(glossary.restore('987651234567，请确认987651234569。'),'Maya，请确认报价。');
+assert.throws(()=>glossary.restore('987651234567，请确认987651234569项。'));
+assert.throws(()=>protect('quotation','quotation -> 报价\nquotation -> 引文','en'));
+assert.throws(()=>protect('quotation','quotation ->','en'));
+assert.equal(protect('报价和价格','报价 → quotation\n价格 → price').restore('ZXQKEEP0ZXQ and ZXQKEEP1ZXQ'),'quotation and price');
+// Inserted replacement text must never be treated as another output marker.
+assert.equal(protect('甲乙','甲 -> ZXQKEEP1ZXQ\n乙 -> B').restore('ZXQKEEP0ZXQ ZXQKEEP1ZXQ'),'ZXQKEEP1ZXQ B');
+console.log('PASS explicit names and preferred translations restore correctly; conflicting, missing, duplicate, mutated and injected markers fail closed');
