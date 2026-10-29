@@ -41,6 +41,13 @@ function isQaSession(session: DictationSession): boolean {
   return session.errorCode === 'qaSession';
 }
 
+function emptyHistoryTitleKey(session: DictationSession): string {
+  if (session.errorCode === 'recordingConnectionFailed') return 'recordingFailure.title';
+  if (session.errorCode === 'asrUnavailable') return 'history.asrUnavailable';
+  if (session.errorCode === 'asrTimeout') return 'history.asrTimeout';
+  return 'history.rawEmpty';
+}
+
 export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void }) {
   const { t } = useTranslation();
   const os = detectOS();
@@ -189,7 +196,7 @@ export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void 
   };
 
   const onCopy = async () => {
-    if (!item || copyPendingRef.current) return;
+    if (!item || !item.finalText.trim() || copyPendingRef.current) return;
     // Capture the actual clipboard payload: selection may change before writeText resolves.
     const entry = { id: item.id, text: item.finalText };
     copyPendingRef.current = true;
@@ -406,7 +413,7 @@ export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void 
                   </span>
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--ol-ink-2)', lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                  {s.finalText.split('\n')[0] || (s.errorCode === 'asrUnavailable' ? t('history.asrUnavailable') : s.errorCode === 'asrTimeout' ? t('history.asrTimeout') : t('history.rawEmpty'))}
+                  {s.finalText.split('\n')[0] || t(emptyHistoryTitleKey(s))}
                 </div>
                 <div><Pill size="sm" tone={s.mode === 'raw' ? 'outline' : 'default'}>{isQaSession(s) ? t('history.qaLabel') : MODE_LABEL[s.mode]}</Pill></div>
               </button>
@@ -424,7 +431,7 @@ export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void 
                   <span style={{ fontSize: 11, color: 'var(--ol-ink-4)' }}>{formatDuration(item.durationMs, t)}</span>
                 </div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                  <Btn icon={justCopied ? 'check' : 'copy'} variant="ghost" size="sm" disabled={copying} onClick={() => void onCopy()}>{justCopied ? t('common.copied') : t('common.copy')}</Btn>
+                  <Btn icon={justCopied ? 'check' : 'copy'} variant="ghost" size="sm" disabled={copying || !item.finalText.trim()} onClick={() => void onCopy()}>{justCopied ? t('common.copied') : t('common.copy')}</Btn>
                   {item.hasAudioRecording && !audioMissingIds.has(item.id) && (
                     <Btn icon="download" variant="ghost" size="sm" onClick={() => void onExportAudio()}>{t('history.exportRecording')}</Btn>
                   )}
@@ -448,8 +455,13 @@ export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void 
                 <div style={{ padding: 14, border: '0.5px solid var(--ol-blue)', borderRadius: 10, background: 'var(--ol-blue-soft)', minWidth: 0, overflow: 'hidden' }}>
                   <Pill size="sm" tone="blue" style={{ marginBottom: 10 }}>{isQaSession(item) ? t('history.answerLabel') : MODE_LABEL[item.mode]}</Pill>
                   <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7, color: 'var(--ol-ink)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-                    {item.finalText || (item.errorCode === 'asrUnavailable' ? t('history.asrUnavailable') : item.errorCode === 'asrTimeout' ? t('history.asrTimeout') : t('history.rawEmpty'))}
+                    {item.finalText || t(emptyHistoryTitleKey(item))}
                   </p>
+                  {item.errorCode === 'recordingConnectionFailed' && (
+                    <p style={{ margin: '8px 0 0', fontSize: 12, lineHeight: 1.6, color: 'var(--ol-ink-2)' }}>
+                      {t(item.hasAudioRecording && !audioMissingIds.has(item.id) ? 'recordingFailure.withAudio' : 'recordingFailure.withoutAudio')}
+                    </p>
+                  )}
                 </div>
               </div>
               <div style={{ marginTop: 18, paddingTop: 14, borderTop: '0.5px solid var(--ol-line-soft)', display: 'flex', gap: 18, fontSize: 11, color: 'var(--ol-ink-4)', flexWrap: 'wrap' }}>
@@ -555,7 +567,7 @@ function RecentRow({
         <Pill size="sm" tone="default">{isQaSession(session) ? t('history.qaLabel') : modeLabel[session.mode]}</Pill>
       </div>
       <div style={{ minWidth: 0, fontSize: 12.5, color: 'var(--ol-ink-2)', whiteSpace: 'pre-line', lineHeight: 1.55, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflowWrap: 'anywhere' }}>
-        {session.finalText.split('\n')[0] || (session.errorCode === 'asrUnavailable' ? t('history.asrUnavailable') : session.errorCode === 'asrTimeout' ? t('history.asrTimeout') : t('history.rawEmpty'))}
+        {session.finalText.split('\n')[0] || t(emptyHistoryTitleKey(session))}
       </div>
       <span style={{ fontSize: 10.5, color: 'var(--ol-ink-4)', fontFamily: 'var(--ol-font-mono)', whiteSpace: 'nowrap' }}>
         {formatDuration(session.durationMs ?? 0, t)}

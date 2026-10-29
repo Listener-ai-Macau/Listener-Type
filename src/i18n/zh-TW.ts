@@ -1,3 +1,4 @@
+import { recordingFailureTranslations } from './recordingFailure.ts';
 import { shortcutDefaultsTranslations } from './shortcutDefaults.ts';
 import { textWorkspaceTranslations } from './textWorkspace.ts';
 import { firstUseTranslations } from './firstUse.ts';
@@ -16,6 +17,7 @@ import type { zhCN } from './zh-CN';
 import { networkHealthTranslations } from './networkHealth.ts';
 import { settingsFeedbackTranslations } from './settingsFeedback.ts';
 export const zhTW: typeof zhCN = {
+  recordingFailure: recordingFailureTranslations['zh-TW'],
   settingsFeedback: settingsFeedbackTranslations['zh-TW'],
   networkHealth: networkHealthTranslations['zh-TW'],
   politeEdits: politeEditsTranslations['zh-TW'],

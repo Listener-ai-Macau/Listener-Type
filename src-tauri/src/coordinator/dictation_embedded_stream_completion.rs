@@ -113,8 +113,97 @@ impl EmbeddedStreamingDictation {
         // recording is current when the async takeover deadline is polled.
         // The actor consumes this cancellation now; do not queue a shared
         // abort that a later owner would consume on its next loop iteration.
-        self.cancel_owned_streaming_session(inner);
+        self.fail_owned_capture_control_session(inner);
         true
+    }
+
+    fn fail_owned_capture_control_session(&mut self, inner: &Arc<Inner>) {
+        const ERROR_CODE: &str = "recordingConnectionFailed";
+        self.close_owned_product_lifecycle(inner);
+        self.activation_segment_race_guard = None;
+        let Some(mut session) = self.session.take() else {
+            self.reset_for_next_session();
+            return;
+        };
+        let owner = session.session_id;
+        let user_cancelled = {
+            let state = inner.state.lock();
+            state.session_id == owner && state.cancelled
+        };
+        // Claim the error through the existing identity/phase transition. A
+        // delayed timeout cannot publish an error or append History for a
+        // newer recording, or turn an actual user cancellation into failure.
+        let finished = finish_dictation_pipeline_error(inner, owner, ERROR_CODE.into());
+        self.preserve_session_candidate_fact_ledger(&mut session);
+        clear_embedded_source_integrity_ledger(inner, owner);
+        let received_bytes = session.archive_pcm.as_ref().map_or(
+            session.normalized_pcm_bytes,
+            Vec::len,
+        );
+        let mut audio_saved = false;
+        if record_embedded_audio_for_debug_enabled(inner) {
+            if let Some(pcm) = session.archive_pcm.as_deref().filter(|pcm| !pcm.is_empty()) {
+                audio_saved = archive_embedded_audio_if_enabled(inner, owner, pcm);
+            }
+            if let Ok(path) = crate::persistence::asr_trace_path_for_session(&owner.to_string()) {
+                let payload = serde_json::json!({
+                    "sessionId": owner.to_string(),
+                    "cancelled": user_cancelled,
+                    "terminationReason": if user_cancelled { "user_cancel" } else { ERROR_CODE },
+                    "finalCoordinatorTextAvailable": false,
+                    "finalizationSucceeded": false,
+                    "finalizationError": ERROR_CODE,
+                    "streamedPcmBytes": session.streamed_pcm_bytes,
+                    "normalizedPcmBytes": session.normalized_pcm_bytes,
+                    "archivePcmBytes": session.archive_pcm.as_ref().map_or(0, Vec::len),
+                    "audioDelivery": session.volcengine_asr.as_ref().map(|asr| asr.diagnostic_audio_delivery()),
+                    "captureControl": session.capture_control_trace.as_ref().map(CaptureControlTrace::snapshot),
+                    "trace": session.volcengine_asr.as_ref().map(|asr| asr.take_diagnostic_trace()),
+                });
+                if let Ok(bytes) = serde_json::to_vec(&payload) {
+                    if let Err(error) = std::fs::write(path, bytes) {
+                        log::warn!("[coord] capture-control failure diagnostic archive failed: {error}");
+                    }
+                }
+            }
+        }
+        cancel_asr_for_session(inner, owner);
+        restore_prepared_windows_ime_session(inner, owner);
+        native_composition_retire(inner, owner);
+        if finished {
+            let prefs = inner.prefs.get();
+            let record = DictationSession {
+                id: owner.to_string(),
+                created_at: Utc::now().to_rfc3339(),
+                raw_transcript: String::new(),
+                final_text: String::new(),
+                mode: prefs.default_mode,
+                app_bundle_id: None,
+                app_name: None,
+                insert_status: InsertStatus::Failed,
+                error_code: Some(ERROR_CODE.into()),
+                duration_ms: Some((received_bytes / 32) as u64),
+                dictionary_entry_count: Some(enabled_phrases(inner).len() as u32),
+                has_audio_recording: Some(audio_saved),
+                embedded_audio_stats: Some(self.collector.inner().stats()),
+            };
+            if let Err(error) = inner.history.append_with_retention(
+                record, prefs.history_retention_days, prefs.history_max_entries,
+            ) {
+                log::error!("[coord] capture-control failure history append failed: {error}");
+            }
+            store_embedded_audio_final_result(inner, crate::embedded_audio::EmbeddedAudioTranscriptResult {
+                session_id: owner.to_string(),
+                raw_transcript: String::new(),
+                final_text: String::new(),
+                error_code: Some(ERROR_CODE.into()),
+            });
+            let state = inner.state.lock();
+            if state.session_id == owner {
+                clear_embedded_audio_stats(inner);
+            }
+        }
+        self.reset_for_next_session();
     }
 
     /// Close only lifecycle identity owned by this actor instance. A transport

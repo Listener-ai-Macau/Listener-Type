@@ -438,7 +438,7 @@ function Pill({
       center = <CenterText os={os} kind="default" text={t('capsule.cancelled')} />;
       break;
     case 'error':
-      center = <CenterText os={os} kind="error" text={isCapsuleQuotaErrorMessage(message) ? t('capsule.asrQuotaExceeded', '识别额度不足') : message || t('capsule.error')} color="var(--ol-err)" />;
+      center = <CenterText os={os} kind="error" text={message === 'recordingConnectionFailed' ? t('recordingFailure.capsule') : isCapsuleQuotaErrorMessage(message) ? t('capsule.asrQuotaExceeded', '识别额度不足') : message || t('capsule.error')} color="var(--ol-err)" />;
       break;
     default:
       center = <AudioBars level={0} />;

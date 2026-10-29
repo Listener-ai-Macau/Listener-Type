@@ -22143,11 +22143,100 @@ async fn expired_ensure_cannot_cancel_or_queue_abort_for_a_later_owner() {
                 assert!(!state.cancelled);
             } else {
                 assert_eq!(state.phase, SessionPhase::Idle);
-                assert!(state.cancelled);
+                assert!(!state.cancelled, "technical takeover failure is distinct from user Cancel");
             }
             assert!(!session_abort.load(Ordering::SeqCst),
                 "a timeout already consumed by this actor must not queue an abort for the next owner");
+            let history = coordinator.history().list().unwrap();
+            let failures: Vec<_> = history.iter().filter(|row| row.id == old_id.to_string()).collect();
+            assert_eq!(failures.len(), if newer_owner { 0 } else { 1 },
+                "a stale timeout must not create a completed failure for the later owner");
         }
+    }
+}
+
+#[tokio::test]
+async fn capture_control_timeout_keeps_a_findable_failed_recording_instead_of_user_cancel() {
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let owner = new_session_id();
+    {
+        let mut state = inner.state.lock();
+        state.session_id = owner;
+        state.phase = SessionPhase::Listening;
+        state.cancelled = false;
+    }
+    let mut prefs = inner.prefs.get();
+    prefs.record_audio_for_debug = true;
+    inner.prefs.set(prefs).unwrap();
+    let pcm: Vec<u8> = (0..1600).flat_map(|n| (n as i16).to_le_bytes()).collect();
+    let consumer: Arc<dyn crate::recorder::AudioConsumer> = Arc::new(CountingConsumer::default());
+    let mut stream = EmbeddedStreamingDictation::background_listener();
+    stream.session = Some(embedded_audio_test_session(owner, consumer));
+    stream.session.as_mut().unwrap().archive_pcm = Some(pcm.clone());
+    stream.embedded_session_id = Some(93);
+    let trace = stream.arm_owned_capture_ensure(11, 93);
+    trace.write_started();
+    trace.write_completed(&Err("BLE accepted wake capture ensure write timed out after 2000 ms".into()));
+    stream.accepted_wake_capture_ensure.as_mut().unwrap().deadline_at = Instant::now() - Duration::from_millis(1);
+
+    assert!(stream.expire_accepted_wake_capture_if_due(inner));
+    {
+        let state = inner.state.lock();
+        assert_eq!(state.phase, SessionPhase::Idle);
+        assert!(!state.cancelled, "a failed control transaction is not a user cancellation");
+    }
+    assert!(stream.session.is_none());
+    assert!(!stream.expire_accepted_wake_capture_if_due(inner));
+    let history = coordinator.history().list().unwrap();
+    let records: Vec<_> = history.iter().filter(|row| row.id == owner.to_string()).collect();
+    assert_eq!(records.len(), 1, "the failed recording must be findable once under its own id");
+    assert_eq!(records[0].error_code.as_deref(), Some("recordingConnectionFailed"));
+    assert_eq!(records[0].insert_status, crate::types::InsertStatus::Failed);
+    assert_eq!(records[0].has_audio_recording, Some(true));
+    assert!(records[0].final_text.is_empty(), "a failed takeover must not fabricate a finished transcript");
+    let path = crate::persistence::recording_path_for_session(&owner.to_string()).unwrap();
+    let saved_pcm = crate::embedded_audio::read_wav_pcm16le(&std::fs::read(path).unwrap()).unwrap();
+    assert_eq!(saved_pcm, pcm, "only the actual received recording is retained, byte for byte");
+    let diagnostic: serde_json::Value = serde_json::from_slice(&std::fs::read(
+        crate::persistence::asr_trace_path_for_session(&owner.to_string()).unwrap()).unwrap()).unwrap();
+    assert_eq!(diagnostic["cancelled"], false);
+    assert_eq!(diagnostic["terminationReason"], "recordingConnectionFailed");
+    assert_eq!(diagnostic["captureControl"]["requestId"], 11);
+}
+
+#[tokio::test]
+async fn capture_control_timeout_respects_audio_retention_and_actual_user_cancel() {
+    for user_cancelled in [false, true] {
+        let coordinator = Coordinator::new();
+        let inner = &coordinator.inner;
+        let owner = new_session_id();
+        {
+            let mut state = inner.state.lock();
+            state.session_id = owner;
+            state.phase = SessionPhase::Listening;
+            state.cancelled = user_cancelled;
+        }
+        let mut prefs = inner.prefs.get();
+        prefs.record_audio_for_debug = false;
+        inner.prefs.set(prefs).unwrap();
+        let consumer: Arc<dyn crate::recorder::AudioConsumer> = Arc::new(CountingConsumer::default());
+        let mut stream = EmbeddedStreamingDictation::background_listener();
+        stream.session = Some(embedded_audio_test_session(owner, consumer));
+        stream.session.as_mut().unwrap().archive_pcm = Some(vec![7; 3200]);
+        stream.embedded_session_id = Some(93);
+        stream.arm_owned_capture_ensure(11, 93);
+        stream.accepted_wake_capture_ensure.as_mut().unwrap().deadline_at = Instant::now() - Duration::from_millis(1);
+        assert!(stream.expire_accepted_wake_capture_if_due(inner));
+        assert_eq!(inner.state.lock().cancelled, user_cancelled);
+        let history = coordinator.history().list().unwrap();
+        let failures: Vec<_> = history.iter().filter(|row| row.id == owner.to_string()).collect();
+        assert_eq!(failures.len(), if user_cancelled { 0 } else { 1 });
+        if !user_cancelled {
+            assert_eq!(failures[0].has_audio_recording, Some(false));
+        }
+        assert!(!crate::persistence::recording_path_for_session(&owner.to_string()).unwrap().exists());
+        assert!(!crate::persistence::asr_trace_path_for_session(&owner.to_string()).unwrap().exists());
     }
 }
 
