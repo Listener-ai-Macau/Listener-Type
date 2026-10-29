@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T09:54:18.061422+08:00",
+  "updated_at": "2026-10-29T10:41:26.838106+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9610,6 +9610,43 @@
         "installed": true,
         "publicPrepared": true
       }
+    },
+    {
+      "id": "wake_takeover_cancellation_follows_asr_startup_scope",
+      "repo": "type",
+      "commit": "34a4fd4915414e31dea8aea2dc9b9e7913780ee3",
+      "commit_subject": "Cancel device takeover when automatic recording startup retires",
+      "subject": "Retire the actual queued takeover on failed ASR startup and clean up an already-sent original request without affecting a later capture",
+      "state": "compiled_production_scope_queue_and_affected_lifecycle_verified_matching_package_pending",
+      "humanAccepted": false,
+      "protects": [
+        "Every uncommitted startup return retires its shared actual-control cancellation token; a queued ENSURE must not dispatch after startup failure/cancellation.",
+        "A detached observer is installed before ASR startup, sees all outcomes and matches cleanup to original ENSURE request/capture only after the writer settles. Actor does not await its own queue.",
+        "Successful startup commits ownership and preserves existing command bytes, current capture, matching ABORT, FIFO/deadline policy, accepted body and actual EOF.",
+        "No new microphone/cloud/desktop work is introduced by cleanup. This software scope is separate from the original field GATT timeout cause."
+      ],
+      "guards": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib accepted_wake_capture_startup_tests -- --test-threads=1",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib wake_startup -- --test-threads=1",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib active_audio_control -- --test-threads=1",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib automatic_activation_does_not_await_its_own_ble_actor_queue -- --test-threads=1",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib automatic_start_never_bypasses_hidden_candidate_gate -- --test-threads=1",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib capture_control_timeout -- --test-threads=1",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib ended_ensure -- --test-threads=1"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\owner-control223-20261029\\startup-scope\\baseline-and-finding.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\owner-control223-20261029\\startup-scope\\final-affected-run-summary.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\outputs\\Listener-wake-startup-scope-source.json"
+      ],
+      "machine_accepted_scope": [
+        "Actual compiled native production cancellation scope/control queue and affected lifecycle tests, private offline profile. No WinRT radio write/live microphone/provider/playback/Owner desktop/clipboard.",
+        "Five new scope/queue cases and existing affected controls/lifecycle total23 unique passing cases; two stale source-text guard failures retained,0-test filter is not coverage."
+      ],
+      "pending_human_scope": [
+        "Matching ordinary package/native regression and usable delivery are pending.",
+        "Original0750 GATT write-timeout cause, matched radio/hardware/brownout/OS/cross-PC/long-term conditions remain separate and unqualified."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-29T08:47:56.041532+08:00",
@@ -9647,7 +9684,7 @@
     {
       "id": "wake-continuation",
       "baseline_state": "exact_failure_not_human_accepted",
-      "accepted_scope": "No human-accepted good commit is registered for these unconfirmed ENSURE/source-EOF failure branches. Keep actual source replay evidence separate from field acceptance; normal endpoint/latency guards do not prove this boundary. Type136: stopped-predecessor PCM routing and matching device-cancel product-state closure verified in production-core replay; physical field attribution remains pending. Type137: an old takeover timeout cannot cancel a newer product owner or queue a second shared abort; production replay and exact package verified, full field attribution pending. Type138: ownerless malformed-stream failure cannot end an unrelated active recording; owned errors retain scoped cleanup. Production counterexample and exact package verified; historical physical failure attribution remains pending. Current source: technical capture-control failure has scoped Error/History/received-audio recovery, verified by production lifecycle and controlled React. Matching installed build and actual field failure recovery remain pending; no GATT root-cause repair claim. Type224 handles an expired recording takeover as an owned actionable failure with one History entry and the exact already-received WAV when retention is enabled. Matching MSI native seeded-failure read/UI and explicit draft/translation/Light/native v1 continuation retain their bounded scopes; no new radio, live fault, clipboard or root-cause acceptance.",
+      "accepted_scope": "No human-accepted good commit is registered for these unconfirmed ENSURE/source-EOF failure branches. Keep actual source replay evidence separate from field acceptance; normal endpoint/latency guards do not prove this boundary. Type136: stopped-predecessor PCM routing and matching device-cancel product-state closure verified in production-core replay; physical field attribution remains pending. Type137: an old takeover timeout cannot cancel a newer product owner or queue a second shared abort; production replay and exact package verified, full field attribution pending. Type138: ownerless malformed-stream failure cannot end an unrelated active recording; owned errors retain scoped cleanup. Production counterexample and exact package verified; historical physical failure attribution remains pending. Current source: technical capture-control failure has scoped Error/History/received-audio recovery, verified by production lifecycle and controlled React. Matching installed build and actual field failure recovery remain pending; no GATT root-cause repair claim. Type224 handles an expired recording takeover as an owned actionable failure with one History entry and the exact already-received WAV when retention is enabled. Matching MSI native seeded-failure read/UI and explicit draft/translation/Light/native v1 continuation retain their bounded scopes; no new radio, live fault, clipboard or root-cause acceptance. Current source adds an ASR-startup cancellation scope bound to the existing actual control queue and a request-owned detached cleanup observer. Compiled private production queue/lifecycle proof only; matching package and physical root-cause scope remain pending.",
       "guard_entries": [
         "firmware_same_predecessor_ensure_source_lease",
         "type_session_capture_control_archive",
@@ -9655,7 +9692,8 @@
         "type136_pending_predecessor_tail_and_device_cancel_ownership",
         "type137_expired_takeover_cancel_stays_with_original_owner",
         "type138_unowned_stream_error_preserves_current_recording",
-        "capture_control_timeout_visible_failure_and_recording_recovery"
+        "capture_control_timeout_visible_failure_and_recording_recovery",
+        "wake_takeover_cancellation_follows_asr_startup_scope"
       ],
       "paths": {
         "type": [
@@ -9669,7 +9707,12 @@
           "src-tauri/src/coordinator/dictation_tests.rs",
           "src/pages/History.tsx",
           "src/components/Capsule.tsx",
-          "src/i18n/recordingFailure.ts"
+          "src/i18n/recordingFailure.ts",
+          "src-tauri/src/coordinator/dictation.rs",
+          "src-tauri/src/coordinator/dictation_wake_capture_startup.rs",
+          "src-tauri/src/embedded_ble/mod.rs",
+          "src-tauri/src/embedded_ble/windows_ble/recording_control.rs",
+          "src-tauri/src/embedded_ble/windows_ble_tests.rs"
         ],
         "firmware": [
           "ports/esp32/audio_capture",
