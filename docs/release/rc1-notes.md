@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build229 / Firmware38
+# Listener v1.0.6-rc1 · Type build230 / Firmware38
 
 | Download | File |
 | --- | --- |
@@ -7,21 +7,21 @@
 
 ## In this app update
 
-Unmatched text-service results are retained alongside the input for explicit human review; they are never adopted automatically. An optional email drafting choice requests a subject and body; check the generated text. History makes saved drafts easier to find. MP3 and M4A up to 60 seconds are decoded locally using available system codecs before an explicit speech-service submission. The previous WAV route remains. Local translation now highlights the need to check names, dates, negation and commitments; model accuracy is not guaranteed.
+The optional enhanced CPU translator now attempts the request without a fixed 4.4 GB available-memory admission gate. It can take time and uses memory; if system memory becomes critically low, its owned process stops and the original text remains, without cloud fallback. Two retained examples improved against the light model, but accuracy is not guaranteed. The optional email drafting style discourages invented prior interactions and removes only a trailing empty sender placeholder when none was requested; existing and custom styles stay available. Review all generated text.
 
 ## Before using
 
 US$49 is the hardware price. Type is free and open source. Recognition and optional text services require preparation and separate usage charges; this release does not provide a ready-to-use official cloud account or allowance. USB flashing and Bluetooth OTA use the same firmware ZIP.
 
-Local translation can mistranslate or omit meaning, including names and negated commitments; review against the original. A result flagged by the conservative fact check can still contain errors even if a user chooses to adopt it. Compressed audio needs compatible Windows system codecs and is limited to 60 seconds; longer recordings are rejected without truncation. Service credentials and provider charges remain separate. Existing recording recovery is retained; historical intermittent GATT timeout and brownout causes remain unresolved. No all-PC, all-input-target or long-term physical qualification is claimed.
+Both local translation models may mistranslate or omit names, negation, commitments or other meaning; compare the output to the original. Enhanced needs optional downloaded components and CPU time; performance and available memory vary. A critically low-memory task stops without cloud fallback. Email generation may still invent or omit facts. MP3/M4A decoding depends on system codecs and remains limited to 60 seconds. Existing GATT timeout and brownout causes, real other-PC and long-term physical behavior remain unresolved. Cloud services require separate credentials and charges.
 
 ## File identity
 
-- Type source: `013c93245bb18dac2ef6c66d54cd18155640445f` · `build-source/type229-20261029`
-- MSI: 299900928 bytes · SHA256 `f206f432e33eb80839db535d92bbd009d99a748b02546b3d496ccba15f120384`
+- Type source: `4090f9e065ac54d5b50731b9def9ebba4ec9de96` · `build-source/type230-20261029`
+- MSI: 299896832 bytes · SHA256 `ed6424774ea039fbeb99575fac8d69b265745ea7f84e715a21ff0f5427e7a624`
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`
 - ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`
 
 ## 中文说明
 
-事实检查未能匹配时，结果和原文可供人工对照，只有明确选择才采用。新增可选邮件主题与正文起草，生成内容需核对；历史页更容易找到已保存成稿。最长60秒 MP3/M4A 在本机使用可用系统解码器转换，明确转写前不上传；原 WAV 路径保留。本机翻译结果旁提醒核对姓名、日期、否定和承诺，不能保证模型准确。
+可选增强翻译仍在本机 CPU 上运行，不再按固定4.4GB可用内存提前拒绝；执行时内存实际紧张会停止并保留原文，不自动转云端。两个保留案例较轻量模型改善，但不保证任意译文准确。可选邮件起草更明确避免虚构此前互动，并只清理未要求的末尾空签名占位；原有和自定义风格保留。所有生成文字仍需核对。
