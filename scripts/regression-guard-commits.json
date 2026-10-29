@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T11:02:04.750872+08:00",
+  "updated_at": "2026-10-29T11:42:36.790835+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9642,14 +9642,16 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\source225-ci-jobs.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native225-snapshot-20261029-105736\\recording-recovery225-native.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build225\\type-artifact-verification.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build225\\type225-installed.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build225\\type225-installed.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/outputs/Listener-build225-delivery.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/customer225-aftersale-feedback-handling.json"
       ],
       "machine_accepted_scope": [
         "Actual compiled native production cancellation scope/control queue and affected lifecycle tests, private offline profile. No WinRT radio write/live microphone/provider/playback/Owner desktop/clipboard.",
-        "Five new scope/queue cases and existing affected controls/lifecycle total23 unique passing cases; two stale source-text guard failures retained,0-test filter is not coverage."
+        "Five new scope/queue cases and existing affected controls/lifecycle total23 unique passing cases; two stale source-text guard failures retained,0-test filter is not coverage.",
+        "Exact225 matching MSI recovery/native regressions, installation, public paired hashes/tags and exact-source CI verified;225 PS/assumed-AS written purposes and3 original/final native saved drafts verified. Original radio root and physical scopes remain unqualified."
       ],
       "pending_human_scope": [
-        "Matching ordinary package/native regression and usable delivery are pending.",
         "Original0750 GATT write-timeout cause, matched radio/hardware/brownout/OS/cross-PC/long-term conditions remain separate and unqualified."
       ],
       "delivery": {
@@ -9658,6 +9660,40 @@
         "installed": true,
         "publicPrepared": true
       }
+    },
+    {
+      "id": "workspace_pending_elapsed_and_adjacent_source_confirmation",
+      "repo": "type",
+      "commit": "7d4740c2b47751405e753a2af96c53e0ec621f22",
+      "commit_subject": "Show actual text request wait and keep source confirmation beside language choice",
+      "subject": "Show real elapsed wait for explicit text submissions and place Chinese confirmation next to its source selector",
+      "state": "source_checkpoint_affected_React_and_frontend_build_verified_not_packaged",
+      "humanAccepted": false,
+      "protects": [
+        "Pending seconds measure the current explicit submission with a monotonic clock; no fake progress, estimated completion, new request or service-stage claim.",
+        "Completion/unmount removes the timer; a new request resets it and a late closed-workspace result cannot enter its replacement. Existing charging notice and local/cloud routes stay explicit.",
+        "Chinese confirmation is adjacent to the source language choice, preserves exact source, and does not download or submit.",
+        "Pending local Cancel and cloud Close remain reachable at narrow and wide sizes; named save/retrieval, cached edits and source remain unchanged."
+      ],
+      "guards": [
+        "python scripts/check-workspace-action-visibility-ui.py --url http://127.0.0.1:2003 --report affected-workspace-ui.json",
+        "python scripts/check-style-trial-readiness-identity-ui.py --url http://127.0.0.1:2003 --report readiness-ui.json",
+        "npm run build"
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/workspace-pending225-affected-ui-after2.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/workspace-pending225-readiness-ui.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/workspace-pending225-frontend-build.log",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/customer225-local-translation-attribution.json"
+      ],
+      "machine_accepted_scope": [
+        "Headless actual React with controlled IPC:10 viewport/zoom/scroll measurements, local/cloud explicit pending/completion and late closed-workspace reply, immutable edited save/retrieval, source confirmation and readiness privacy boundary.",
+        "Five locale strings typechecked and frontend bundled; no actual cloud, new capture, clipboard, hardware or native delivery in this source checkpoint."
+      ],
+      "pending_human_scope": [
+        "Source checkpoint not installed/published; retain public/daily225. No independent customer has used this change.",
+        "Original radio/GATT cause, brownout, remaining real OS target and second-computer/long-term scopes remain open."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-29T11:02:04.750872+08:00",
@@ -10868,7 +10904,8 @@
         "fresh_workspace_result_actions_revealed_without_losing_submit_or_cached_edits",
         "workspace_result_toolbar_survives_name_save_return_and_resize",
         "buffered_current_input_facts_and_audio_result_action_reachability",
-        "buffered_cloud_translation_recognized_facts_and_unchanged_notice"
+        "buffered_cloud_translation_recognized_facts_and_unchanged_notice",
+        "workspace_pending_elapsed_and_adjacent_source_confirmation"
       ],
       "paths": {
         "type": [
