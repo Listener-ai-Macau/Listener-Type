@@ -9,6 +9,7 @@ import { SaveTextDraft } from './SaveTextDraft';
 import { QuickStyleTextTrial } from './QuickStyleTextTrial';
 import { ProviderSettingsDialog } from './ProviderSettingsDialog';
 import './StyleTextTrial.css';
+import { compressedAudioToWav } from '../lib/compressedAudio';
 
 const MAX_WAV = 60 * 32_000 + 65_536;
 function validateSelectedFileLength(length: number): void {
@@ -68,20 +69,21 @@ export function AudioFileTrial({ onClose }: { onClose: () => void }) {
     if (result && text.trim() && !copied && savedText !== text) setCloseConfirm(true);
     else onClose();
   };
-  const select = async (name: string, read: () => Promise<ArrayBuffer>, size?: number, sample = false) => {
+  const select = async (name: string, read: () => Promise<ArrayBuffer>, size?: number, sample = false, compressed = false) => {
     if (selecting.current || requestId.current || copyBusy.current || saveBusy.current || result) return;
     selecting.current = true; setLoading(true); setError('');
     const version = ++generation.current;
     try {
-      if (size !== undefined) validateSelectedFileLength(size);
-      const bytes = new Uint8Array(await read());
+      if (size !== undefined && !compressed) validateSelectedFileLength(size);
+      const raw = await read();
+      const bytes = compressed ? await compressedAudioToWav(raw) : new Uint8Array(raw);
       validateSelectedFileLength(bytes.length);
       if (generation.current === version) setSelection({ name, bytes: Array.from(bytes), sample });
     } catch (cause) {
       if (generation.current === version) {
         const code = cause instanceof Error ? cause.message : String(cause);
         setSelection(null);
-        setError(t(code === 'audio_file_empty_file' ? 'audioFile.emptyFile' : code === 'audio_file_too_long' ? 'audioFile.tooLong' : 'audioFile.loadFailed'));
+        setError(t(code === 'audio_file_empty_file' ? 'audioFile.emptyFile' : code === 'audio_file_too_long' ? compressed ? 'audioFile.compressedTooLong' : 'audioFile.tooLong' : code === 'audio_file_compressed_format' ? 'audioFile.compressedFormat' : 'audioFile.loadFailed'));
       }
     } finally {
       selecting.current = false;
@@ -140,10 +142,16 @@ export function AudioFileTrial({ onClose }: { onClose: () => void }) {
         if (file) void select(file.name, () => file.arrayBuffer(), file.size);
         event.target.value = '';
       }} /></label>
+      <label>{t('audioFile.chooseCompressed')} <input aria-label={t('audioFile.chooseCompressed')} type="file" accept=".mp3,.m4a,audio/mpeg,audio/mp4" disabled={loading || pending || !!result || copying} onChange={event => {
+        const file = event.target.files?.[0];
+        if (file) void select(file.name, () => file.arrayBuffer(), file.size, false, true);
+        event.target.value = '';
+      }} /></label>
       <Btn size="sm" variant="ghost" disabled={loading || pending || !!result || copying} onClick={() => void select(t('audioFile.sampleName'), async () => {
         const response = await fetch(sampleUrl); if (!response.ok) throw Error('sample'); return response.arrayBuffer();
       }, undefined, true)}>{t('audioFile.sample')}</Btn>
     </div>
+    <p className="ol-style-trial-hint">{t('audioFile.compressedHint')}</p>
     <p className="ol-style-trial-hint">{loading ? t('audioFile.loading') : selection?.name ?? t('audioFile.noFile')}</p>
     {selection?.sample && <details className="ol-style-trial-details"><summary>{t('audioFile.sampleWords')}</summary><p>Hi Sam, let's meet on Thursday at three. I'll send the notes before lunch. Please keep the budget at fifty dollars, and tell me if the time needs to change.</p><audio controls preload="none" src={sampleUrl} aria-label={t('audioFile.sampleName')} /></details>}
     {result && <section ref={resultArea} aria-label={t('audioFile.result')} style={{ marginTop: 16 }}>

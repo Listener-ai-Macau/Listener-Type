@@ -271,13 +271,16 @@ export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void 
         desc={items.length === 0 && !loading && !loadError ? undefined : t('history.desc')}
         right={
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {onOpenSavedDrafts && <Btn size="sm" variant="ghost" onClick={onOpenSavedDrafts}>{t('textDraft.title')}</Btn>}
             <Btn icon="trash" variant="ghost" size="sm" disabled={loading || !!loadError || items.length === 0 || clearing}
               onClick={() => { setActionError(null); setClearRequested(true); }}>{t('common.clear')}</Btn>
             <Btn icon="refresh" variant="ghost" size="sm" disabled={clearing} onClick={() => void refresh(true)}>{t('common.refresh')}</Btn>
           </div>
         }
       />
+      {onOpenSavedDrafts && <div className="ol-history-draft-entry">
+        <span>{t('firstUse.historyDraftHint')}</span>
+        <Btn size="sm" onClick={onOpenSavedDrafts}>{t('textDraft.title')}</Btn>
+      </div>}
       {!isTauri && (
         <div role="note" style={{ padding: '10px 14px', marginBottom: 14, borderRadius: 10, background: 'var(--ol-blue-soft)', color: 'var(--ol-ink-2)', fontSize: 12, lineHeight: 1.6, flexShrink: 0 }}>
           {t('history.illustrationNotice')}
@@ -288,10 +291,6 @@ export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void 
           <Icon name="history" size={28} />
           <h2>{t('firstUse.emptyHistoryTitle')}</h2>
           <p>{historyEmptyHint}</p>
-          {onOpenSavedDrafts && <div className="ol-history-draft-entry">
-            <p>{t('firstUse.historyDraftHint')}</p>
-            <Btn size="sm" variant="ghost" onClick={onOpenSavedDrafts}>{t('textDraft.title')}</Btn>
-          </div>}
         </section>
       ) : <>
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 0.9fr) minmax(300px, 1.35fr)', gap: 12, marginBottom: 14, flexShrink: 0 }}>

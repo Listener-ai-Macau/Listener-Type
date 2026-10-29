@@ -15,7 +15,24 @@ For an existing message, make only changes needed for the requested writing task
 Return only the usable message body. No writing advice, instruction list, explanation, preface or code fence.`;
 
 export function isMessageDraftStyle(pack: StylePack): boolean {
+  return isMessageBodyDraftStyle(pack) || isEmailDraftStyle(pack);
+}
+export function isMessageBodyDraftStyle(pack: StylePack): boolean {
   return pack.kind === 'imported' && pack.baseMode === 'formal' && pack.prompt === MESSAGE_DRAFT_PROMPT;
+}
+
+/** A separate explicit choice; existing body-only drafts remain unchanged. */
+export const EMAIL_DRAFT_PROMPT = MESSAGE_DRAFT_PROMPT.replace(
+  'Return only the usable message body. No writing advice, instruction list, explanation, preface or code fence.',
+  'Return one concise email subject followed by the usable message body. Label the subject in the output language and place it on its own line, then a blank line and the body. The subject must reflect only the supplied facts. No writing advice, instruction list, explanation, preface or code fence.'
+);
+export function isEmailDraftStyle(pack: StylePack): boolean {
+  return pack.kind === 'imported' && pack.baseMode === 'formal' && pack.prompt === EMAIL_DRAFT_PROMPT;
+}
+export function emailDraftStyle(t: TFunction): StylePack {
+  return { id: '', name: t('messageDraft.emailName'), description: t('messageDraft.emailDescription'),
+    version: '1.0.0', kind: 'imported', baseMode: 'formal', prompt: EMAIL_DRAFT_PROMPT,
+    examples: [], tags: [], enabled: true, active: false };
 }
 
 export function messageDraftStyle(t: TFunction): StylePack {

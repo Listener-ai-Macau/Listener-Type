@@ -1,7 +1,7 @@
 export const sourceFactMessages = {
-  en: { unmatched: 'The result’s recognized times, dates or quantities could not be matched safely to this input, so this result was not adopted. Your input is kept; you can edit it directly or use the original.' },
-  'zh-CN': { unmatched: '结果中识别到的时间、日期或数量未能与本次输入可靠对应，未采用这份结果。输入已保留，可直接修改或使用原文。' },
-  'zh-TW': { unmatched: '結果中辨識到的時間、日期或數量未能與本次輸入可靠對應，未採用這份結果。輸入已保留，可直接修改或使用原文。' },
-  ja: { unmatched: '結果内の認識できた時刻・日付・数量を今回の入力と安全に対応付けられないため、この結果は採用していません。入力は残っています。そのまま編集するか原文を使えます。' },
-  ko: { unmatched: '결과에서 인식한 시간, 날짜 또는 수량을 이번 입력과 안전하게 대조할 수 없어 이 결과를 적용하지 않았습니다. 입력은 유지됩니다. 직접 편집하거나 원문을 사용할 수 있습니다.' },
+  en: { translationReview: 'Compare names, dates, negation and commitments with the input. Local models can omit or change them even when the translation looks fluent.', unmatched: 'Times, dates or quantities could not be matched reliably. The result has not been adopted.', reviewTitle: 'Review the unverified result', reviewHint: 'The check can be mistaken. Compare the input and result, especially times, dates, quantities and negation. Adopt only if you have checked it; you can edit it afterwards.', adopt: 'I checked; use this result' },
+  'zh-CN': { translationReview: '请对照原文检查姓名、日期、否定和承诺。本机模型即使译文通顺，也可能漏掉或改变这些内容。', unmatched: '时间、日期或数量未能可靠对应，这份结果尚未采用。', reviewTitle: '核对未通过检查的结果', reviewHint: '检查可能误判。请对照原文和结果，特别检查时间、日期、数量和否定意思；确认后可采用并继续修改。', adopt: '已核对，采用此结果' },
+  'zh-TW': { translationReview: '請對照原文檢查姓名、日期、否定與承諾。本機模型即使譯文通順，也可能遺漏或改變這些內容。', unmatched: '時間、日期或數量未能可靠對應，尚未採用此結果。', reviewTitle: '核對未通過檢查的結果', reviewHint: '檢查可能誤判。請對照原文與結果，特別檢查時間、日期、數量和否定意思；確認後可採用並繼續修改。', adopt: '已核對，採用此結果' },
+  ja: { translationReview: '原文と照らして名前、日付、否定、約束を確認してください。自然な訳でも、ローカルモデルは内容を落としたり変えたりすることがあります。', unmatched: '時刻・日付・数量を確実に対応できないため、結果はまだ採用していません。', reviewTitle: '未確認の結果を比較', reviewHint: 'チェックが誤判定することもあります。原文と結果を比較し、特に時刻・日付・数量・否定を確認してください。採用後も編集できます。', adopt: '確認して結果を使う' },
+  ko: { translationReview: '원문과 비교하여 이름, 날짜, 부정과 약속을 확인하세요. 문장이 자연스러워도 로컬 모델이 내용을 빠뜨리거나 바꿀 수 있습니다.', unmatched: '시간, 날짜 또는 수량을 확실하게 대조할 수 없어 결과를 아직 적용하지 않았습니다.', reviewTitle: '확인되지 않은 결과 비교', reviewHint: '검사가 틀릴 수도 있습니다. 원문과 결과를 비교하고 특히 시간, 날짜, 수량과 부정을 확인하세요. 적용 후에도 수정할 수 있습니다.', adopt: '확인하고 결과 사용' },
 };

@@ -12,8 +12,21 @@
 .ol-history-empty > svg { color: var(--ol-ink-4); }
 .ol-history-empty h2 { margin: 16px 0 8px; font-size: 20px; font-weight: 600; color: var(--ol-ink); }
 .ol-history-empty p { margin: 0; max-width: 420px; font-size: 13px; line-height: 1.7; }
-.ol-history-draft-entry { margin-top: 26px; }
-.ol-history-draft-entry p { margin-bottom: 10px; font-size: 12px; }
+.ol-history-draft-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border: 1px solid var(--ol-line);
+  border-radius: 10px;
+  color: var(--ol-ink-2);
+  font-size: 12px;
+  line-height: 1.5;
+  flex-shrink: 0;
+}
 .ol-history-clear-dialog {
   width: min(440px, calc(100vw - 40px));
   box-sizing: border-box;

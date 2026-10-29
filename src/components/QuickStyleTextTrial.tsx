@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { createStylePackFromTemplate, listStylePacks } from '../lib/ipc';
 import { everydayListStyle, isEverydayListStyle } from '../lib/everydayListStyle';
 import { conciseDraftStyle, isConciseDraftStyle } from '../lib/conciseDraftStyle';
-import { isMessageDraftStyle, messageDraftStyle } from '../lib/messageDraftStyle';
+import { emailDraftStyle, isEmailDraftStyle, isMessageBodyDraftStyle, isMessageDraftStyle, messageDraftStyle } from '../lib/messageDraftStyle';
 import type { StylePack } from '../lib/types';
 import { Btn } from '../pages/_atoms';
 import { StyleTextTrial } from './StyleTextTrial';
@@ -29,8 +29,8 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTran
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const [adding, setAdding] = useState<'list' | 'concise' | 'draft' | null>(null);
-  const [addFailed, setAddFailed] = useState<'list' | 'concise' | 'draft' | null>(null);
+  const [adding, setAdding] = useState<'list' | 'concise' | 'draft' | 'email' | null>(null);
+  const [addFailed, setAddFailed] = useState<'list' | 'concise' | 'draft' | 'email' | null>(null);
   const addingRef = useRef(false);
   const mounted = useRef(false);
   useEffect(() => {
@@ -52,7 +52,8 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTran
   const selected = packs.find(pack => pack.id === selectedId);
   const savedEverydayList = packs.find(isEverydayListStyle);
   const savedConcise = packs.find(isConciseDraftStyle);
-  const savedMessageDraft = packs.find(isMessageDraftStyle);
+  const savedMessageDraft = packs.find(isMessageBodyDraftStyle);
+  const savedEmailDraft = packs.find(isEmailDraftStyle);
   const prepareConcise = async (): Promise<StylePack> => {
     if (savedConcise) return savedConcise;
     if (addingRef.current) throw new Error('style_trial_prepare_shorter_failed');
@@ -89,6 +90,19 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTran
       if (mounted.current) setAdding(null);
     }
   };
+  const chooseEmailDraft = async () => {
+    if (addingRef.current) return;
+    if (savedEmailDraft) { setSelectedId(savedEmailDraft.id); return; }
+    addingRef.current = true; setAdding('email'); setAddFailed(null);
+    try {
+      const created = await createStylePackFromTemplate(emailDraftStyle(t), true);
+      if (mounted.current) {
+        setPacks(current => [...current.filter(pack => pack.id !== created.id), created]);
+        setSelectedId(created.id);
+      }
+    } catch { if (mounted.current) setAddFailed('email'); }
+    finally { addingRef.current = false; if (mounted.current) setAdding(null); }
+  };
   const chooseEverydayList = async () => {
     if (addingRef.current) return;
     if (savedEverydayList) { setSelectedId(savedEverydayList.id); return; }
@@ -119,10 +133,15 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTran
       const refinement = packs.find(pack => pack.id === 'builtin.light');
       if (refinement) setSelectedId(refinement.id);
     } : undefined}
-    draftingChoice={!translationTarget && selected && !isMessageDraftStyle(selected) ? {
+    draftingChoice={!translationTarget && selected && !isMessageBodyDraftStyle(selected) ? {
       label: t(savedMessageDraft ? 'messageDraft.choose' : 'messageDraft.add'),
       hint: t('messageDraft.hint'), pending: adding !== null,
       error: addFailed === 'draft' ? t('messageDraft.failed') : '', onChoose: () => void chooseMessageDraft(),
+    } : undefined}
+    emailDraftingChoice={!translationTarget && selected && !isEmailDraftStyle(selected) ? {
+      label: t(savedEmailDraft ? 'messageDraft.emailChoose' : 'messageDraft.emailAdd'),
+      hint: t('messageDraft.emailHint'), pending: adding !== null,
+      error: addFailed === 'email' ? t('messageDraft.emailFailed') : '', onChoose: () => void chooseEmailDraft(),
     } : undefined}
     extraStyleChoice={!translationTarget && selected?.id === 'builtin.structured' ? {
       label: t(savedEverydayList ? 'style.everydayList.choose' : 'style.everydayList.add'),

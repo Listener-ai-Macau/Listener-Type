@@ -16,7 +16,7 @@ import { LocalTranslationSetup } from './LocalTranslationSetup';
 import { canSuggestChineseSource, localTargetCode, localTranslationErrorKey, localTranslationKey, translationLanguageLabel } from '../lib/localTranslation';
 import type { TranslationEngine, LocalTranslationReadiness, LocalTranslationQuality } from '../lib/localTranslation';
 import { SavedTextDraftsDialog } from './SavedTextDraftsDialog';
-import { preserveBufferedSourceFacts, preserveTranslatedSourceFacts } from '../lib/bufferedSourceFacts';
+import { BufferedSourceFactError, preserveBufferedSourceFacts, preserveTranslatedSourceFacts } from '../lib/bufferedSourceFacts';
 import { isMessageDraftStyle } from '../lib/messageDraftStyle';
 
 function withDraftOriginName(origin: string, suffix: string): string {
@@ -25,12 +25,13 @@ function withDraftOriginName(origin: string, suffix: string): string {
   return prefix ? `${prefix} · ${suffix}` : suffix;
 }
 
-export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, draftingChoice, prepareShorter, translationTarget, onTranslationTargetChange, onRefineTranslation, initialTranslationEngine, initialTranslationSource, initialTranslationQuality, inputOriginName, inputOriginal, suspended = false, onOpenSavedDraft, draft, onDraftChange, onClose }: {
+export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, draftingChoice, emailDraftingChoice, prepareShorter, translationTarget, onTranslationTargetChange, onRefineTranslation, initialTranslationEngine, initialTranslationSource, initialTranslationQuality, inputOriginName, inputOriginal, suspended = false, onOpenSavedDraft, draft, onDraftChange, onClose }: {
   pack: StylePack;
   packs?: StylePack[];
   onSelectPack?: (id: string) => void;
   extraStyleChoice?: { label: string; hint: string; pending: boolean; error: string; onChoose: () => void };
   draftingChoice?: { label: string; hint: string; pending: boolean; error: string; onChoose: () => void };
+  emailDraftingChoice?: { label: string; hint: string; pending: boolean; error: string; onChoose: () => void };
   prepareShorter?: () => Promise<StylePack>;
   translationTarget?: string;
   onTranslationTargetChange?: (language: string) => void;
@@ -64,7 +65,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const offline = !!translationTarget && translationEngine === 'local';
   const offlineReady = offlineReadiness?.key === localTranslationKey(translationSource, translationTarget ?? '', translationQuality) && offlineReadiness.ready;
   const cacheKey = (id: string) => translationTarget ? JSON.stringify([id, translationEngine, translationSource, translationQuality]) : id;
-  const styleChangePending = extraStyleChoice?.pending || draftingChoice?.pending;
+  const styleChangePending = extraStyleChoice?.pending || draftingChoice?.pending || emailDraftingChoice?.pending;
   const presentation = stylePackPresentation(pack, t);
   const savedExamples = pack.examples
     .filter(example => example.input.trim() && example.output.trim())
@@ -118,6 +119,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const [copiedResult, setCopiedResult] = useState<StyleTextTrialResult | null>(null);
   const [copyError, setCopyError] = useState(false);
   const [error, setError] = useState('');
+  const [unmatched, setUnmatched] = useState<{ input: string; signature: string; target: StylePack; value: StyleTextTrialResult } | null>(null);
   const [readinessAttempt, setReadinessAttempt] = useState(0);
   const readinessKey = JSON.stringify([pack.id, pack.baseMode, pack.prompt, readinessAttempt, translationTarget, translationEngine]);
   const [readinessResponse, setReadinessResponse] = useState<{
@@ -171,7 +173,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
     freshSelectionResult.current = null;
     const newlyCompleted = arriving?.packId === pack.id && arriving.signature === signature && arriving.result === matching?.result;
     setResult(matching?.result ?? null); setResultSignature(signature); setEditedOutput(matching?.edited ?? null); setRestored(!!matching && !newlyCompleted);
-    setCopiedResult(null); setCopyError(false); setError(''); setDeliveryMessage('');
+    setCopiedResult(null); setCopyError(false); setError(''); setUnmatched(null); setDeliveryMessage('');
     if (deliveryRequest.current) {
       void cancelStyleTrialInsert(deliveryRequest.current).catch(() => {});
       deliveryRequest.current = null; setDeliveryStarted(null);
@@ -237,6 +239,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
     setCopiedResult(null);
     setCopyError(false);
     setError('');
+    setUnmatched(null);
     setDeliveryMessage('');
     try {
       const target = prepare ? await prepare() : pack;
@@ -261,7 +264,18 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
           ? translationTarget && localTargetCode(translationTarget) ? preserveTranslatedSourceFacts
             : !translationTarget && target.baseMode !== 'raw' && !isMessageDraftStyle(target) ? preserveBufferedSourceFacts : null
           : null;
-        const value = review ? { ...baseValue, outputText: review(draft, returned.outputText).outputText } : baseValue;
+        let value = baseValue;
+        try {
+          if (review) value = { ...baseValue, outputText: review(draft, returned.outputText).outputText };
+        } catch (cause) {
+          if (!(cause instanceof BufferedSourceFactError)) throw cause;
+          // The guard is conservative and can reject a correct paraphrase. Keep
+          // this exact response for explicit human comparison, without caching,
+          // copying, inserting, saving or issuing another service request.
+          setUnmatched({ input: draft, signature: targetSignature, target, value: baseValue });
+          setError(t('sourceFacts.unmatched'));
+          return;
+        }
         if (translationTarget) setOptionsOpen(false);
         completed.current.delete(cacheKey(target.id));
         completed.current.set(cacheKey(target.id), { signature: targetSignature, input: draft, result: value, edited: matching?.edited ?? null });
@@ -295,6 +309,22 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         setPending(false);
         setShortening(false);
       }
+    }
+  };
+
+  const adoptUnmatched = () => {
+    if (!unmatched || unmatched.input !== draft || pending || copying || delivering || draftSaving) return;
+    const { input, signature: targetSignature, target, value } = unmatched;
+    completed.current.delete(cacheKey(target.id));
+    completed.current.set(cacheKey(target.id), { signature: targetSignature, input, result: value, edited: null });
+    if (completed.current.size > 8) completed.current.delete(completed.current.keys().next().value!);
+    setUnmatched(null); setError('');
+    if (translationTarget) setOptionsOpen(false);
+    if (target.id !== pack.id && onSelectPack) {
+      freshSelectionResult.current = { packId: target.id, signature: targetSignature, result: value };
+      onSelectPack(target.id);
+    } else {
+      setResult(value); setResultSignature(targetSignature); setEditedOutput(null); setRestored(false);
     }
   };
 
@@ -467,6 +497,12 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         <p className="ol-style-trial-hint">{draftingChoice.hint}</p>
         {draftingChoice.error && <p role="alert" className="ol-style-trial-hint">{draftingChoice.error}</p>}
       </div>}
+      {emailDraftingChoice && <div className="ol-style-trial-drafting-choice" data-email-drafting-entry>
+        <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || draftSaving || translationPreparing || styleChangePending}
+          onClick={emailDraftingChoice.onChoose}>{emailDraftingChoice.label}</Btn>
+        <p className="ol-style-trial-hint">{emailDraftingChoice.hint}</p>
+        {emailDraftingChoice.error && <p role="alert" className="ol-style-trial-hint">{emailDraftingChoice.error}</p>}
+      </div>}
       {inputOriginName && <p role="note" className="ol-style-trial-hint" data-saved-draft-origin>{t('textWorkspace.savedDraftInput', { name: inputOriginName })}</p>}
       {!translationTarget && previousStep?.translated && <p role="note" className="ol-style-trial-hint" data-translation-refine-hint>{t('textWorkspace.refineTranslationHint')}</p>}
       {!translationTarget && translationReference && onTranslationTargetChange && <div className="ol-style-trial-hint" data-refinement-original-translation>
@@ -573,6 +609,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
               onClick={openLocalModelHelp}>{t('offlineTranslation.modelHelp')}</Btn>}
           </div>
           {result.usedTextService && result.outputText === draft && editedOutput === null && <p role="note" className="ol-style-trial-hint">{t('politeEdits.unchangedResult', { seconds: (result.elapsedMs / 1000).toFixed(1) })}</p>}
+          {offline && <p role="note" className="ol-style-trial-hint" data-local-translation-review>{t('sourceFacts.translationReview')}</p>}
           <textarea className="ol-style-trial-result-body ol-style-trial-result-editor ol-thinscroll"
             aria-label={t('style.trial.resultInput')} value={resultOutput} rows={8} maxLength={100000}
             disabled={copying || delivering || draftSaving}
@@ -612,7 +649,14 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
           {copyError && <p role="alert" className="ol-style-trial-hint">{t('style.trial.copyFailed')}</p>}
         </section>
       )}
-      {!result && <div className="ol-style-trial-placeholder" data-style-trial-placeholder>
+      {unmatched && unmatched.input === draft && <section className="ol-style-trial-comparisons" aria-label={t('sourceFacts.reviewTitle')} data-source-facts-review>
+        <h3>{t('sourceFacts.reviewTitle')}</h3>
+        <p className="ol-style-trial-hint">{t('sourceFacts.reviewHint')}</p>
+        <h4>{t('earlierTrial.input')}</h4><pre>{unmatched.input}</pre>
+        <h4>{t('style.trial.output')}</h4><pre>{unmatched.value.outputText}</pre>
+        <Btn size="sm" disabled={pending || copying || delivering || draftSaving} onClick={adoptUnmatched}>{t('sourceFacts.adopt')}</Btn>
+      </section>}
+      {!result && !unmatched && <div className="ol-style-trial-placeholder" data-style-trial-placeholder>
         <h3>{t('style.trial.output')}</h3>
         <p className="ol-style-trial-hint">{t(pending ? 'style.trial.running' : 'style.trial.resultPlaceholder')}</p>
       </div>}
