@@ -1771,6 +1771,7 @@ fn take_latest_embedded_audio_final_result(
 }
 
 include!("dictation_capture_control_trace.rs");
+include!("dictation_wake_capture_startup.rs");
 
 struct EmbeddedAudioDictationSession {
     session_id: SessionId,

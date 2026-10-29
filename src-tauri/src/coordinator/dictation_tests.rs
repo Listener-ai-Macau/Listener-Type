@@ -15256,10 +15256,12 @@ fn automatic_start_never_bypasses_hidden_candidate_gate() {
         include_str!("dictation_embedded_stream_completion.rs")
     );
     assert!(
-        source.contains("crate::speaker_verification::is_enrolled_for_phrase(&phrase)")
+        source.contains("crate::speaker_verification::is_enrolled_for_phrase(&candidate.enrollment_phrase)")
             && source.contains("fn owner_verification_window_ready"),
         "no-voiceprint path must skip the owner speech window delay for the configured phrase"
     );
+    assert!(super::owner_verification_window_ready(0, false));
+    assert!(!super::owner_verification_window_ready(0, true));
     // Hidden ACTIVE must be marked before StreamingDetector::new (~1–2s init)
     // so device-key Start promotes instead of toggle-stop during that window.
     let mark_hidden = source
@@ -15270,10 +15272,15 @@ fn automatic_start_never_bypasses_hidden_candidate_gate() {
         .map(|offset| mark_hidden + offset)
         .expect("wake detector init after hidden ACTIVE mark");
     let wake_window = &source[wake_init..wake_init + 1200.min(source.len() - wake_init)];
+    assert!(wake_window.contains("crate::wake_voice_commands::VoiceCommandDetector::new("));
+    let command_detector = include_str!("../wake_voice_commands.rs");
+    let primary_setup = command_detector.split("impl VoiceCommandDetector {").nth(1)
+        .expect("voice command detector implementation")
+        .split("let mut detector =").next().unwrap();
     assert!(
-        wake_window.contains("StreamingDetector::new(&phrase)")
-            && !wake_window.contains("StreamingDetector::new_strict"),
-        "primary automatic wake must use StreamingDetector::new (sensitive), not new_strict"
+        primary_setup.contains("StreamingDetector::new(&dictation_phrase)")
+            && !primary_setup.contains("StreamingDetector::new_strict"),
+        "primary automatic wake must keep its sensitive detector; only optional question may fork strict"
     );
     let start = source
         .find("async fn try_release_automatic_candidate")
@@ -15300,7 +15307,7 @@ fn automatic_start_never_bypasses_hidden_candidate_gate() {
             < body.find("begin_embedded_audio_dictation_session")
     );
     assert!(
-        body.find("session.consume_streaming_pcm") < body.find("let _recording_control_observer")
+        body.find("let _recording_control_observer") < body.find("begin_embedded_audio_dictation_session")
     );
     assert!(
         body.find("let _recording_control_observer") < body.find("recording_control_task.await")
@@ -15337,8 +15344,11 @@ fn automatic_activation_does_not_await_its_own_ble_actor_queue() {
         .find("recording_control_task.await")
         .expect("detached observer must retain activation result logging");
 
-    assert!(actor_pcm < detached_observer);
+    assert!(detached_observer < actor_pcm);
     assert!(detached_observer < control_await);
+    assert!(body.contains("startup_outcome.await.is_err()"));
+    assert!(body.contains("send_recording_control_ensure_wake_capture_cancellable"));
+    assert!(body.find("startup_control.commit()") > Some(actor_pcm));
     assert!(body.contains("tauri::async_runtime::spawn(async move"));
     assert!(body.contains("recording_control=detached"));
     assert!(!body.contains("let recording_control_ms = match recording_control_task.await"));

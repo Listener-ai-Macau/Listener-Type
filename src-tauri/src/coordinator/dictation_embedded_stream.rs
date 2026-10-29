@@ -4145,16 +4145,46 @@ impl EmbeddedStreamingDictation {
         let previous_segment_id = embedded_session_id;
         let capture_control_trace = CaptureControlTrace::new(ensure_request_id, previous_segment_id);
         let control_trace_for_write = capture_control_trace.clone();
+        let (startup_control, startup_outcome) = AcceptedWakeCaptureStartup::new();
+        let startup_cancelled = startup_control.cancellation();
         let recording_control_task = tauri::async_runtime::spawn_blocking(move || {
             let started = Instant::now();
             control_trace_for_write.write_started();
-            let result = crate::embedded_ble::send_recording_control_ensure_wake_capture(
+            let result = crate::embedded_ble::send_recording_control_ensure_wake_capture_cancellable(
                 ensure_request_id,
                 previous_segment_id,
                 Duration::from_secs(2),
+                startup_cancelled,
             );
             control_trace_for_write.write_completed(&result);
             (result, started.elapsed().as_millis() as u64)
+        });
+        // Awaiting actor-drained control here deadlocks PCM/VREC:SPEECH; observe it detached.
+        let _recording_control_observer = tauri::async_runtime::spawn(async move {
+            match recording_control_task.await {
+                Ok((Ok(()), elapsed_ms)) => log::info!(
+                    "[wake-phrase] accepted wake capture ensure sent request_id={ensure_request_id} previous_segment_id={previous_segment_id} elapsed_ms={elapsed_ms}",
+                ),
+                Ok((Err(err), elapsed_ms)) => log::warn!(
+                    "[wake-phrase] accepted wake capture ensure failed request_id={ensure_request_id} previous_segment_id={previous_segment_id} elapsed_ms={elapsed_ms}: {err}"
+                ),
+                Err(err) => log::warn!(
+                    "[wake-phrase] accepted wake capture ensure task failed request_id={ensure_request_id} previous_segment_id={previous_segment_id}: {err}"
+                ),
+            }
+            if startup_outcome.await.is_err() {
+                // The write may already have reached the device before ASR
+                // startup failed. Retire only this exact request/capture;
+                // never send an unscoped CANCEL to a later recording.
+                tauri::async_runtime::spawn_blocking(move || {
+                    match crate::embedded_ble::send_recording_control_abort_wake_capture(
+                        ensure_request_id, Duration::from_secs(2),
+                    ) {
+                        Ok(()) => log::info!("[wake-phrase] failed startup takeover retired request_id={ensure_request_id}"),
+                        Err(error) => log::warn!("[wake-phrase] failed startup takeover retirement request_id={ensure_request_id}: {error}"),
+                    }
+                });
+            }
         });
         let mut candidate = self
             .speaker_candidate
@@ -4524,20 +4554,9 @@ impl EmbeddedStreamingDictation {
         );
         session.candidate_id = Some(candidate.candidate_id);
         session.candidate_fact_ledger = Some(std::mem::take(&mut candidate.fact_ledger));
-        // Awaiting actor-drained control here deadlocks PCM/VREC:SPEECH; observe it detached.
-        let _recording_control_observer = tauri::async_runtime::spawn(async move {
-            match recording_control_task.await {
-                Ok((Ok(()), elapsed_ms)) => log::info!(
-                    "[wake-phrase] accepted wake capture ensure sent request_id={ensure_request_id} previous_segment_id={previous_segment_id} elapsed_ms={elapsed_ms}",
-                ),
-                Ok((Err(err), elapsed_ms)) => log::warn!(
-                    "[wake-phrase] accepted wake capture ensure failed request_id={ensure_request_id} previous_segment_id={previous_segment_id} elapsed_ms={elapsed_ms}: {err}"
-                ),
-                Err(err) => log::warn!(
-                    "[wake-phrase] accepted wake capture ensure task failed request_id={ensure_request_id} previous_segment_id={previous_segment_id}: {err}"
-                ),
-            }
-        });
+        // Ownership transfers only after the full startup/release succeeds.
+        // Every earlier return drops the guard and cancels the queued write.
+        startup_control.commit();
         log::info!(
             "[wake-phrase] live automatic session activated and released embedded_session_id={} phrase={} phrase_signal={:?} wake_end_s={:.3} post_wake_pcm_bytes={} released_accepted_pcm_bytes={} released_unaccepted_pcm_bytes={} kws_ms={} local_confirmation_ms={} voiceprint_ms={} gate_total_ms={} recording_control=detached wake_to_capsule_request_ms={} latency_target_ms=1200 latency_target_pass={} latency_ceiling_ms=1500 latency_ceiling_pass={} phrase_tail_to_capsule_ms={} phrase_tail_target_ms=350 phrase_tail_target_pass={} phrase_tail_ceiling_ms=500 phrase_tail_ceiling_pass={}",
             embedded_session_id,

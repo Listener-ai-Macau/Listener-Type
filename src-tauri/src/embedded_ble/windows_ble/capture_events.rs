@@ -366,8 +366,22 @@ fn send_audio_control_via_sender(
     timeout: Duration,
     label: &str,
 ) -> Result<(), String> {
+    send_audio_control_via_sender_with_cancellation(
+        active, bytes, timeout, label, Arc::new(AtomicBool::new(false)),
+    )
+}
+
+fn send_audio_control_via_sender_with_cancellation(
+    active: ActiveAudioControlSender,
+    bytes: &[u8],
+    timeout: Duration,
+    label: &str,
+    cancelled: Arc<AtomicBool>,
+) -> Result<(), String> {
+    if cancelled.load(Ordering::Acquire) {
+        return Err(format!("active Listener BLE audio control request cancelled: {label}"));
+    }
     let (result_tx, result_rx) = mpsc::channel();
-    let cancelled = Arc::new(AtomicBool::new(false));
     let request = AudioControlRequest {
         bytes: bytes.to_vec(),
         label: label.to_string(),

@@ -571,6 +571,18 @@ pub fn send_recording_control_ensure_wake_capture(
 }
 
 #[cfg(target_os = "windows")]
+pub fn send_recording_control_ensure_wake_capture_cancellable(
+    request_id: u32,
+    previous_segment_id: u32,
+    timeout: Duration,
+    cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(), String> {
+    windows_ble::send_recording_control_ensure_wake_capture_cancellable(
+        request_id, previous_segment_id, timeout, cancelled,
+    )
+}
+
+#[cfg(target_os = "windows")]
 pub fn send_recording_control_abort_wake_capture(
     request_id: u32,
     timeout: Duration,
@@ -1264,6 +1276,16 @@ pub fn send_recording_control_ensure_wake_capture(
     _request_id: u32,
     _previous_segment_id: u32,
     _timeout: Duration,
+) -> Result<(), String> {
+    Err("Embedded BLE wake capture ensure is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn send_recording_control_ensure_wake_capture_cancellable(
+    _request_id: u32,
+    _previous_segment_id: u32,
+    _timeout: Duration,
+    _cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(), String> {
     Err("Embedded BLE wake capture ensure is only supported on Windows".to_string())
 }

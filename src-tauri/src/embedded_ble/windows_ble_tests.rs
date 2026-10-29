@@ -3017,6 +3017,78 @@ fn accepted_wake_abort_is_scoped_to_ensure_capture_generation() {
 }
 
 #[test]
+fn cancelled_wake_startup_expires_its_actual_queued_takeover_without_losing_capture() {
+    let _guard = active_audio_control_test_lock().lock().unwrap();
+    *active_audio_control_slot().lock().unwrap() = None;
+    *accepted_wake_capture_owner_slot().lock().unwrap() = None;
+    let (tx, rx) = mpsc::channel();
+    let registration = install_test_audio_control(807, tx.clone());
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let caller_cancelled = Arc::clone(&cancelled);
+    let caller = std::thread::spawn(move || {
+        send_recording_control_ensure_wake_capture_cancellable(
+            0x1234, 0x5678, Duration::from_secs(2), caller_cancelled,
+        )
+    });
+    let queued = rx.recv_timeout(Duration::from_secs(1)).expect("real control queue request");
+    assert_eq!(queued.bytes, b"VREC:ENSURE:00001234:00005678\n");
+    assert!(Arc::ptr_eq(&queued.cancelled, &cancelled));
+    // ASR startup retires while the BLE actor has not dispatched the request.
+    cancelled.store(true, Ordering::Release);
+    assert!(tx.send(queued).is_ok());
+    assert!(next_live_audio_control_request(&rx).is_none());
+    assert!(caller.join().unwrap().unwrap_err().contains("expired in queue"));
+    assert_eq!(active_audio_control_sender().unwrap().capture_id, 807);
+    drop(registration);
+}
+
+#[test]
+fn retired_wake_startup_never_enters_a_later_capture_queue() {
+    let _guard = active_audio_control_test_lock().lock().unwrap();
+    *active_audio_control_slot().lock().unwrap() = None;
+    let (tx, rx) = mpsc::channel();
+    let registration = install_test_audio_control(808, tx);
+    let cancelled = Arc::new(AtomicBool::new(true));
+    let error = send_recording_control_ensure_wake_capture_cancellable(
+        0x1234, 0x5678, Duration::from_secs(2), cancelled,
+    ).unwrap_err();
+    assert!(error.contains("startup was cancelled"));
+    assert!(rx.try_recv().is_err());
+    assert_eq!(active_audio_control_sender().unwrap().capture_id, 808);
+    drop(registration);
+}
+
+#[test]
+fn successful_wake_startup_keeps_exact_control_and_matching_abort() {
+    let _guard = active_audio_control_test_lock().lock().unwrap();
+    *active_audio_control_slot().lock().unwrap() = None;
+    *accepted_wake_capture_owner_slot().lock().unwrap() = None;
+    let (tx, rx) = mpsc::channel();
+    let registration = install_test_audio_control(809, tx);
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let caller_cancelled = Arc::clone(&cancelled);
+    let caller = std::thread::spawn(move || {
+        send_recording_control_ensure_wake_capture_cancellable(
+            0x1234, 0x5678, Duration::from_secs(2), caller_cancelled,
+        )
+    });
+    let ensure = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_eq!(ensure.bytes, b"VREC:ENSURE:00001234:00005678\n");
+    ensure.result_tx.send(Ok(())).unwrap();
+    caller.join().unwrap().unwrap();
+    assert!(!cancelled.load(Ordering::Acquire));
+    let abort = std::thread::spawn(|| {
+        send_recording_control_abort_wake_capture(0x1234, Duration::from_secs(2))
+    });
+    let queued_abort = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_eq!(queued_abort.bytes, b"VREC:ABORT:00001234\n");
+    queued_abort.result_tx.send(Ok(())).unwrap();
+    abort.join().unwrap().unwrap();
+    assert_eq!(active_audio_control_sender().unwrap().capture_id, 809);
+    drop(registration);
+}
+
+#[test]
 fn device_settings_command_prefers_active_capture() {
     let _guard = active_audio_control_test_lock().lock().unwrap();
     *active_audio_control_slot().lock().unwrap() = None;

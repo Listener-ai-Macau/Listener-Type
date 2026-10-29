@@ -213,6 +213,27 @@ pub fn send_recording_control_ensure_wake_capture(
     )
 }
 
+pub fn send_recording_control_ensure_wake_capture_cancellable(
+    request_id: u32,
+    previous_segment_id: u32,
+    timeout: Duration,
+    cancelled: Arc<AtomicBool>,
+) -> Result<(), String> {
+    if cancelled.load(Ordering::Acquire) {
+        return Err("accepted wake capture startup was cancelled".to_string());
+    }
+    // This startup scope belongs to the current capture generation. Opening
+    // an independent GATT path here would lose both its cancellation token
+    // and the capture owner needed for a matching ABORT.
+    let active = active_audio_control_sender()
+        .ok_or_else(|| "accepted wake capture has no live capture owner".to_string())?;
+    remember_accepted_wake_capture_owner(request_id, active.capture_id);
+    let command = format!("VREC:ENSURE:{request_id:08X}:{previous_segment_id:08X}\n");
+    send_audio_control_via_sender_with_cancellation(
+        active, command.as_bytes(), timeout, "accepted wake capture ensure", cancelled,
+    )
+}
+
 pub fn send_recording_control_abort_wake_capture(
     request_id: u32,
     timeout: Duration,
