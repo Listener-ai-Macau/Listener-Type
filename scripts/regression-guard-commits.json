@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T17:12:57.347497+08:00",
+  "updated_at": "2026-10-29T17:23:23.072153+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -10141,9 +10141,38 @@
       "pending_human_scope": [
         "Provider behavior and semantic quality are not guaranteed."
       ]
+    },
+    {
+      "id": "wording_suggestion_sentence_punctuation_boundary",
+      "repo": "type",
+      "commit": "1c584ab170bd7e0bd6b38d85de8e1a37d9460a17",
+      "commit_subject": "Include adjacent punctuation in reviewed wording edits",
+      "subject": "Keep a provider wording suggestion from duplicating adjacent sentence punctuation",
+      "state": "actual_provider_reply_replayed_and_controlled_ui_candidate_native_delivery_pending",
+      "humanAccepted": false,
+      "protects": [
+        "When an exact unique local edit adds a question or exclamation mark immediately before an existing full stop, the reviewed visible old span includes that full stop.",
+        "Whole-draft rewrite rejection, facts and explicit user selection continue; ambiguous or oversized expansions are skipped."
+      ],
+      "guards": [
+        "node --experimental-strip-types src/lib/politeEdits.test.ts",
+        "python scripts/check-polite-edit-suggestions-ui.py --url <controlled-ui> --report <result>",
+        "npm run build"
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/suggestions235-actual-replay.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/polite235-ui.json",
+        "E:/ListenerAnalysisState/listener-repair-handoff/work/customer-onboarding-20261020/isolated-native234-snapshot-20261029-171843/multi-suggestions234-actual.json"
+      ],
+      "machine_accepted_scope": [
+        "Actual provider response replay and controlled React UI; matching native MSI pending."
+      ],
+      "pending_human_scope": [
+        "Model meaning and all future suggestions still require human review."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-29T17:12:57.347497+08:00",
+  "feature_routes_updated_at": "2026-10-29T17:23:23.072153+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -11363,7 +11392,8 @@
         "manual_fact_review_email_subject_compressed_audio_history",
         "enhanced_cpu_actual_pressure_and_email_fact_boundary",
         "workspace_help_visible_and_history_draft_count",
-        "wording_suggestions_use_explicit_structured_contract"
+        "wording_suggestions_use_explicit_structured_contract",
+        "wording_suggestion_sentence_punctuation_boundary"
       ],
       "paths": {
         "type": [
