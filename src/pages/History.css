@@ -27,6 +27,7 @@
   line-height: 1.5;
   flex-shrink: 0;
 }
+.ol-history-count-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .ol-history-clear-dialog {
   width: min(440px, calc(100vw - 40px));
   box-sizing: border-box;

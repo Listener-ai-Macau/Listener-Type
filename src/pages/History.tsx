@@ -7,7 +7,7 @@ import { Icon } from '../components/Icon';
 import { detectOS } from '../components/WindowChrome';
 import { formatComboLabel } from '../lib/hotkey';
 import { subscribeHistoryUpdates } from '../lib/historyUpdates';
-import { clearHistory, copyHistoryEntry, deleteHistoryEntry, isTauri, listHistory, readAudioRecording } from '../lib/ipc';
+import { clearHistory, copyHistoryEntry, deleteHistoryEntry, isTauri, listHistory, listSavedTextDrafts, readAudioRecording } from '../lib/ipc';
 import type { DictationSession, PolishMode } from '../lib/types';
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import { Btn, Card, PageHeader, Pill } from './_atoms';
@@ -48,12 +48,22 @@ function emptyHistoryTitleKey(session: DictationSession): string {
   return 'history.rawEmpty';
 }
 
-export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void }) {
+export function History({ onOpenSavedDrafts, savedDraftsOpen = false }: { onOpenSavedDrafts?: () => void; savedDraftsOpen?: boolean }) {
   const { t } = useTranslation();
   const os = detectOS();
   const FILTERS = useFilters();
   const MODE_LABEL = useModeLabel();
   const [filter, setFilter] = useState<'all' | PolishMode>('all');
+  const [savedDraftCount, setSavedDraftCount] = useState<number | null>(null);
+  const hasSavedDraftEntry = !!onOpenSavedDrafts;
+  useEffect(() => {
+    if (!hasSavedDraftEntry || savedDraftsOpen) return;
+    let current = true;
+    setSavedDraftCount(null);
+    void listSavedTextDrafts().then(rows => { if (current) setSavedDraftCount(rows.length); })
+      .catch(() => { if (current) setSavedDraftCount(null); });
+    return () => { current = false; };
+  }, [hasSavedDraftEntry, savedDraftsOpen]);
   const [items, setItems] = useState<DictationSession[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -279,7 +289,8 @@ export function History({ onOpenSavedDrafts }: { onOpenSavedDrafts?: () => void 
       />
       {onOpenSavedDrafts && <div className="ol-history-draft-entry">
         <span>{t('firstUse.historyDraftHint')}</span>
-        <Btn size="sm" onClick={onOpenSavedDrafts}>{t('textDraft.title')}</Btn>
+        <Btn size="sm" onClick={onOpenSavedDrafts}>{t('textDraft.title')}{savedDraftCount !== null && <span aria-hidden="true">({savedDraftCount})</span>}</Btn>
+        {savedDraftCount !== null && <span className="ol-history-count-status" role="status">{t('textDraft.count', { count: savedDraftCount })}</span>}
       </div>}
       {!isTauri && (
         <div role="note" style={{ padding: '10px 14px', marginBottom: 14, borderRadius: 10, background: 'var(--ol-blue-soft)', color: 'var(--ol-ink-2)', fontSize: 12, lineHeight: 1.6, flexShrink: 0 }}>

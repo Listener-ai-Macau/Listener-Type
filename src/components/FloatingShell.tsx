@@ -476,7 +476,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                       color: 'var(--ol-ink-3)', font: 'inherit', fontSize: 12, cursor: 'pointer' }}>
                     <Icon name="chevLeft" size={14} />{t('nav.tools')}
                   </button>}
-                  {currentTab === 'history' ? <History onOpenSavedDrafts={() => setSavedDraftsOpen(true)} /> : <Page />}
+                  {currentTab === 'history' ? <History onOpenSavedDrafts={() => setSavedDraftsOpen(true)} savedDraftsOpen={savedDraftsOpen} /> : <Page />}
                 </>
               )}
             </div>

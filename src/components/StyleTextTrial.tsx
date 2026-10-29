@@ -493,7 +493,18 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         <Btn size="sm" variant="ghost" disabled={draftSaving} onClick={() => { if (!draftSaving) onClose(); }}>{t('common.close')}</Btn>
       </div>
       <div ref={workspaceScroll} className="ol-style-trial-scroll ol-thinscroll" data-workspace-scroll>
+      <div className="ol-style-trial-intro">
       <p id={`${workspaceId}-description`} className="ol-style-trial-hint" data-style-trial-service-notice>{t(offline ? 'offlineTranslation.localNotice' : readiness?.requiresTextService === false ? prepareShorter ? 'textWorkspace.localWithShorterNotice' : 'textWorkspace.localNotice' : 'textWorkspace.cloudNotice')}</p>
+      <details className="ol-style-trial-details" data-workspace-use-help>
+        <summary>{t('style.trial.detailsSummary')}</summary>
+        <p className="ol-style-trial-hint">{t('style.trial.shortNotice')}</p>
+        <p className="ol-style-trial-hint">{t('style.trial.description')}</p>
+        <p className="ol-style-trial-hint">{t('style.trial.serviceNotice')}</p>
+        {prepareShorter && <p className="ol-style-trial-hint">{t('conciseDraft.runHint')}</p>}
+        <p className="ol-style-trial-hint">{t('style.trial.editHint')}</p>
+        <p className="ol-style-trial-hint">{t('textDraft.retention')}</p>
+      </details>
+      </div>
       {draftingChoice && <div className="ol-style-trial-drafting-choice" data-drafting-entry>
         <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || draftSaving || translationPreparing || styleChangePending}
           onClick={draftingChoice.onChoose}>{draftingChoice.label}</Btn>
@@ -696,15 +707,6 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         <p className="ol-style-trial-hint">{extraStyleChoice.hint}</p>
         {extraStyleChoice.error && <p role="alert" className="ol-style-trial-hint">{extraStyleChoice.error}</p>}
       </div>}
-      <details className="ol-style-trial-details">
-        <summary>{t('style.trial.detailsSummary')}</summary>
-        <p className="ol-style-trial-hint">{t('style.trial.shortNotice')}</p>
-        <p className="ol-style-trial-hint">{t('style.trial.description')}</p>
-        <p className="ol-style-trial-hint">{t('style.trial.serviceNotice')}</p>
-        {prepareShorter && <p className="ol-style-trial-hint">{t('conciseDraft.runHint')}</p>}
-        <p className="ol-style-trial-hint">{t('style.trial.editHint')}</p>
-        <p className="ol-style-trial-hint">{t('textDraft.retention')}</p>
-      </details>
       {readiness?.requiresTextService && savedExamples.length > 0 && (
         <details className="ol-style-saved-examples" data-style-saved-examples>
           <summary>{t('style.trial.exampleSummary')}</summary>
