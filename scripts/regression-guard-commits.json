@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T17:29:40.526435+08:00",
+  "updated_at": "2026-10-29T17:42:56.967144+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -10187,6 +10187,33 @@
       "pending_human_scope": [
         "Model meaning and all future suggestions still require human review."
       ]
+    },
+    {
+      "id": "local_translation_explicit_negative_number_guard",
+      "repo": "type",
+      "commit": "41c753612b68886cd0c4f4df6338f6e96a8378d1",
+      "commit_subject": "Reject local translations that lose explicit negative signs",
+      "subject": "Reject an unverified explicit negative numeral rather than showing the opposite sign",
+      "state": "actual_light_cpu_and_ui_fixture_verified_native_delivery_pending",
+      "humanAccepted": false,
+      "protects": [
+        "Explicit negative numerals lost in translation are rejected with source retained; dates and identifiers are not treated as negative numerals."
+      ],
+      "guards": [
+        "python scripts/test_translation_signed_number_fidelity.py",
+        "python scripts/test_translation_time_fidelity.py",
+        "python scripts/test_translation_sentence_boundaries.py"
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/translation236-signed-actual.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/translation236-ui.json"
+      ],
+      "machine_accepted_scope": [
+        "Actual light CPU model reproduced sign loss and candidate rejected it; equivalent signed outputs, dates and existing numbered-list source passed. UI is a controlled fixture."
+      ],
+      "pending_human_scope": [
+        "Not a general semantic or number-association guarantee; natural enhanced model, exact native build and broader usage remain to be tested."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-29T17:29:40.526435+08:00",
@@ -11578,7 +11605,8 @@
         "light_cpu_translation_source_clock_facts_and_explicit_years",
         "long_audio_resume_and_explicit_translation_terms",
         "offline_translation_explicit_preferred_terms",
-        "light_translation_numbered_items_not_independent_sentences"
+        "light_translation_numbered_items_not_independent_sentences",
+        "local_translation_explicit_negative_number_guard"
       ],
       "paths": {
         "type": [
