@@ -147,8 +147,8 @@ pub(super) fn translate(root: &Path, source: &str, target: &str, text: &str, own
         owner.check()?;
         if !manifest_ready(&root.join(id), true) { return Err("local_translation_not_ready".into()); }
     }
-    let script = format!("__name__='listener_translation_worker'\n{WORKER}\n{}\n{}\n{}\n{}\nenhanced_main()\n",
-        include_str!("../../resources/translation/date_fidelity.py"), include_str!("../../resources/translation/result_fidelity.py"), include_str!("../../resources/translation/signed_number_fidelity.py"), include_str!("../../resources/translation/enhanced_worker.py"));
+    let script = format!("__name__='listener_translation_worker'\n{WORKER}\n{}\n{}\n{}\n{}\n{}\nenhanced_main()\n",
+        include_str!("../../resources/translation/date_fidelity.py"), include_str!("../../resources/translation/result_fidelity.py"), include_str!("../../resources/translation/signed_number_fidelity.py"), include_str!("../../resources/translation/currency_fidelity.py"), include_str!("../../resources/translation/enhanced_worker.py"));
     supervised::run(&root.join(RUNTIME), &script, serde_json::json!({"text": text, "source": source, "target": target,
         "runtime": root.join(assets.runtime.id), "model": root.join(assets.model.id).join(MODEL_FILE)}), Duration::from_secs(180), owner)
 }

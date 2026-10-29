@@ -236,6 +236,12 @@ with sync_playwright() as pw:
   expect(page.locator('.ol-style-trial-result-editor')).to_have_count(0)
   expect(engine).to_have_value('local');assert calls('try_translation_text')==[]
   checks.append('Negative-number fidelity failure explains the issue, retains the source and never silently uses the cloud')
+  page.evaluate("window.__offlineFail='local_translation_currency_fidelity'");run.click()
+  expect(page.locator('dialog[open] [role=alert]')).to_contain_text('currency')
+  expect(page.locator('.ol-style-trial-input')).to_have_value('另一份原文，不要丢失。')
+  expect(page.locator('.ol-style-trial-result-editor')).to_have_count(0)
+  expect(engine).to_have_value('local');assert calls('try_translation_text')==[]
+  checks.append('Currency fidelity failure retains the source and never silently uses the cloud')
   page.evaluate("window.__offlineFail='local_translation_memory_low'");run.click()
   expect(page.locator('dialog[open] [role=alert]')).to_contain_text('not enough available memory')
   expect(page.locator('.ol-style-trial-input')).to_have_value('另一份原文，不要丢失。')

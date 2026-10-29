@@ -368,10 +368,11 @@ impl Preparation {
 }
 
 fn worker_request_owned(runtime: &Path, model: &Path, source: &str, text: &str, timeout: Duration, owner: &supervised::Request) -> Result<String, String> {
-    let script = format!("{}\n{}\n{}\n{WORKER}",
+    let script = format!("{}\n{}\n{}\n{}\n{WORKER}",
         include_str!("../resources/translation/date_fidelity.py"),
         include_str!("../resources/translation/time_fidelity.py"),
-        include_str!("../resources/translation/signed_number_fidelity.py"));
+        include_str!("../resources/translation/signed_number_fidelity.py"),
+        include_str!("../resources/translation/currency_fidelity.py"));
     supervised::run(runtime, &script, serde_json::json!({"text": text, "source": source, "model": model.join("model"), "tokenizer": model.join("sentencepiece.model")}), timeout, owner)
 }
 

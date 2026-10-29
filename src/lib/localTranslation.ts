@@ -44,6 +44,7 @@ export function localTranslationErrorKey(error: unknown): string {
   if (value.includes('memory_low')) return 'memoryLow';
   if (value.includes('protected_terms_failed')) return 'protectedTermsFailed';
   if (value.includes('signed_number_fidelity')) return 'signedNumberFidelity';
+  if (value.includes('currency_fidelity')) return 'currencyFidelity';
   if (value.includes('context_limit') || value.includes('output_limit')) return 'capacity';
   if (value.includes('_fidelity')) return 'fidelity';
   if (value.includes('invalid_text')) return 'invalidText';
