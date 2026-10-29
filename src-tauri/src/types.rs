@@ -2122,6 +2122,15 @@ const OUTPUT_BLOCK: &str = "# 输出\n\
     - \u{4E0D}加修饰副词或铺垫句（\u{201C}\u{503C}\u{5F97}\u{4E00}\u{63D0}\u{7684}\u{662F}\u{201D}\u{201C}\u{503C}\u{5F97}\u{6CE8}\u{610F}\u{201D}\u{201C}\u{503C}\u{5F97}\u{8003}\u{8651}\u{201D}\u{7B49}\u{6F2B}\u{8C08}\u{8FC7}\u{6E21}\u{53E5}）\u{3002}";
 
 pub fn default_style_system_prompt_for_mode(mode: PolishMode) -> String {
+    build_default_style_system_prompt(mode, true)
+}
+
+/// Exact prior factory value, used only to recognize an unmodified saved default.
+pub(crate) fn previous_factory_formal_style_prompt() -> String {
+    build_default_style_system_prompt(PolishMode::Formal, false)
+}
+
+fn build_default_style_system_prompt(mode: PolishMode, formal_rewrite: bool) -> String {
     let task_and_example = match mode {
         PolishMode::Raw => "# 任务（原文）\n\
             仅做最小化整理：补全标点、必要分句。\n\
@@ -2321,9 +2330,17 @@ pub fn default_style_system_prompt_for_mode(mode: PolishMode) -> String {
     //
     // 用户在 Style Pack 编辑器自定义 prompt 时可以保留 / 移动 / 删除 `{{HOTWORDS}}`：
     // 含 → 替换位置；不含 → fallback 拼在末尾（兼容历史 prompt）。
+    let role = if formal_rewrite && mode == PolishMode::Formal {
+        ROLE_BLOCK.replace(
+            "措辞优先用原句字面词；理解到的用户意图用来贴近原话表达，不要替用户重写或扩写。",
+            "可以重写措辞、句式和分段，把口语整理为自然、专业的书面表达；保留原意、事实、条件、不确定性和人称，不扩写事实。",
+        )
+    } else {
+        ROLE_BLOCK.to_string()
+    };
     format!(
         "{}\n\n{}\n\n{}\n\n{}\n\n{}",
-        ROLE_BLOCK, HOTWORDS_PLACEHOLDER, task_and_example, COMMON_RULES, OUTPUT_BLOCK
+        role, HOTWORDS_PLACEHOLDER, task_and_example, COMMON_RULES, OUTPUT_BLOCK
     )
 }
 

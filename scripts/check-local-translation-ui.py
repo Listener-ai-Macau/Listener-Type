@@ -6,7 +6,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright,expect
 p=argparse.ArgumentParser(description=__doc__);p.add_argument('--url',required=True);p.add_argument('--report',type=Path,required=True);p.add_argument('--screenshot',type=Path);p.add_argument('--expected-build');a=p.parse_args();checks=[]
 with sync_playwright() as pw:
- browser=pw.chromium.launch(headless=True,channel='msedge')
+ browser=pw.chromium.launch(headless=True,channel='msedge',args=['--disable-gpu'])
  try:
   page=browser.new_page(viewport={'width':1180,'height':900})
   page.add_init_script("""
@@ -56,6 +56,15 @@ with sync_playwright() as pw:
   expect(page.get_by_role('combobox',name='Translation method',exact=True)).to_have_value('local')
   expect(page.get_by_role('combobox',name='Original language',exact=True)).to_have_value('')
   page.locator('.ol-style-trial-input').fill('保留这份输入')
+  help=page.locator('[data-local-model-help]')
+  expect(help.locator('summary')).to_have_text('Choosing light or enhanced')
+  help.locator('summary').click()
+  expect(help).to_contain_text('about 1.2 GB')
+  expect(help).to_contain_text('about 4.4 GB')
+  expect(help).to_contain_text('Both can misread or omit names, addresses and specialist terms')
+  expect(help).to_contain_text('Selection does not download or translate')
+  expect(page.locator('.ol-style-trial-input')).to_have_value('保留这份输入')
+  checks.append('Light-model selection already exposes model comparison, enhanced size/CPU/RAM tradeoff and explicit preparation help without switching, downloading or translating; current source is retained')
   assert calls('prepare_local_translation')==[] and calls('try_local_translation_text')==[] and calls('try_translation_text')==[]
   close_trial();open_trial()
   expect(page.get_by_role('combobox',name='What would you like to do?',exact=True)).to_have_value('text')
@@ -125,8 +134,8 @@ with sync_playwright() as pw:
   output=page.locator('.ol-style-trial-result-editor');expect(output).to_have_value('Do not send the email; save the draft only.')
   options=page.locator('[data-text-options-panel]')
   expect(options).not_to_have_attribute('open','')
-  expect(options.locator('summary')).to_contain_text('Chinese → English')
-  expect(options.locator('summary')).to_contain_text('no translation API fee')
+  expect(options.locator(':scope > summary')).to_contain_text('Chinese → English')
+  expect(options.locator(':scope > summary')).to_contain_text('no translation API fee')
   for width,height in [(1180,900),(900,700)]:
    page.set_viewport_size({'width':width,'height':height})
    page.locator('[data-workspace-scroll]').evaluate('(e)=>e.scrollTop=0')
@@ -134,10 +143,10 @@ with sync_playwright() as pw:
   page.set_viewport_size({'width':520,'height':760})
   assert page.locator('dialog[open]').evaluate('(e)=>e.scrollWidth<=e.clientWidth+1')
   page.set_viewport_size({'width':1180,'height':900})
-  options.locator('summary').click()
+  options.locator(':scope > summary').click()
   expect(source_picker).to_have_value('zh');expect(engine).to_have_value('local')
   expect(page.get_by_role('combobox',name='Translate output to',exact=True)).to_have_value('English')
-  options.locator('summary').click()
+  options.locator(':scope > summary').click()
   expect(output).to_have_value('Do not send the email; save the draft only.')
   checks.append('Successful translation folds selected settings with truthful route summary; Save stays in view at desktop/laptop sizes, narrow view has no horizontal overflow, reopening retains selections')
   expect(page.locator('.ol-style-trial-result-meta')).to_contain_text('Local translation')
@@ -184,7 +193,7 @@ with sync_playwright() as pw:
   expect(page.locator('[data-style-trial-retention]')).to_contain_text('Not saved')
   checks.append('Explicit save opens the returned draft directly even when the list starts with an older record; closing keeps the edited workspace')
   checks.append('Missing requested draft never silently selects another; explicit deletion clears workspace saved state while retaining text')
-  options.locator('summary').click()
+  options.locator(':scope > summary').click()
   page.get_by_role('combobox',name='Original language',exact=True).select_option('en')
   expect(run).to_be_disabled();expect(output).to_have_count(0)
   page.get_by_role('combobox',name='Original language',exact=True).select_option('zh')
@@ -232,7 +241,7 @@ with sync_playwright() as pw:
   page.locator('.ol-style-trial-input').fill('保留此原文，先比较模型再取消。')
   run=page.get_by_role('button',name='Translate',exact=True);run.click();page.wait_for_function('window.__offlinePending.length===1');page.evaluate('window.__offlinePending.shift()()')
   expect(page.locator('.ol-style-trial-result-editor')).to_have_value('Do not send the email; save the draft only.')
-  options=page.locator('[data-text-options-panel]');options.locator('summary').click()
+  options=page.locator('[data-text-options-panel]');options.locator(':scope > summary').click()
   quality=page.get_by_role('combobox',name='Local model',exact=True);count=len(calls('prepare_local_translation'));translated=len(calls('try_local_translation_text'))
   quality.select_option('enhanced');expect(run).to_be_disabled();expect(page.locator('.ol-style-trial-result-editor')).to_have_count(0)
   expect(page.locator('[data-local-translation-setup]')).to_contain_text('available RAM')

@@ -1,4 +1,7 @@
 const en = {
+  modelHelp: "Choosing light or enhanced",
+  modelChoice: "Light has a smaller download and runs faster, for an editable first draft. Enhanced also uses the CPU; its name does not guarantee an accurate translation. Both can misread or omit names, addresses and specialist terms. Check the original before using the result; choose your cloud service explicitly if needed, with its fees.",
+  modelPreparation: "Select a model and language pair to see whether its components are ready and the required download size. Selection does not download or translate. Use the download button only when you want to prepare it; existing completed drafts are kept.",
   quality: "Local model",
   standard: "Light · smaller download, faster",
   enhanced: "Enhanced · CPU, no dedicated GPU needed",
@@ -29,6 +32,9 @@ const en = {
 };
 type Copy = { [K in keyof typeof en]: string };
 const zhCN: Copy = {
+  modelHelp: "轻量与增强怎么选",
+  modelChoice: "轻量下载较小、速度较快，适合先得到可编辑初稿。增强也使用CPU，名称不代表译文一定准确。两者都可能误译或漏掉姓名、地址和专业词，请对照原文核对后使用；需要时可明确选择云端服务，并按其规则计费。",
+  modelPreparation: "选择模型和语言对后，可查看组件是否已就绪及需要下载的大小。选择本身不会下载或翻译；确定需要准备时再点下载，已有成稿会保留。",
   quality: "本机模型",
   standard: "轻量 · 下载较小、速度较快",
   enhanced: "增强 · CPU 运行，无需独显",
@@ -50,6 +56,9 @@ const zhCN: Copy = {
   result:'本机翻译 · {{seconds}} 秒',run:'翻译',voiceHint:'这些选择也用于你明确启动的语音翻译。普通录音仍保留原语言。',
 };
 const zhTW: Copy = {
+  modelHelp: "輕量與增強怎麼選",
+  modelChoice: "輕量下載較小、速度較快，適合先取得可編輯初稿。增強也使用CPU，名稱不代表譯文一定準確。兩者都可能誤譯或漏掉姓名、地址和專業詞，請對照原文檢查後使用；需要時可明確選擇雲端服務，並按其規則計費。",
+  modelPreparation: "選擇模型和語言對後，可查看元件是否已就緒及需要下載的大小。選擇本身不會下載或翻譯；確定需要準備時再點下載，已有成稿會保留。",
   quality: "本機模型",
   standard: "輕量 · 下載較小、速度較快",
   enhanced: "增強 · CPU 執行，無需獨顯",
@@ -68,6 +77,9 @@ const zhTW: Copy = {
   result:'本機翻譯 · {{seconds}} 秒',run:'翻譯',voiceHint:'這些選擇也用於你明確啟動的語音翻譯。普通錄音仍保留原語言。',
 };
 const ja: Copy = {
+  modelHelp: "軽量と拡張の選び方",
+  modelChoice: "軽量はダウンロードが小さく高速で、編集用の下書きに向いています。拡張もCPUで動作しますが、正確さを保証する名前ではありません。どちらも氏名、住所、専門用語の誤訳や欠落があり得るため、原文を確認してください。必要ならクラウドを明示的に選べますが、サービスの料金がかかります。",
+  modelPreparation: "モデルと言語の組を選ぶと、準備状態と必要なダウンロード容量を確認できます。選ぶだけではダウンロードも翻訳もしません。準備する場合にダウンロードを押してください。保存済みの文章は残ります。",
   quality: "ローカルモデル",
   standard: "軽量 · 小容量、より高速",
   enhanced: "拡張 · CPUで実行、専用GPU不要",
@@ -85,6 +97,9 @@ const ja: Copy = {
   invalidText:'4,000文字以内で入力してください。翻訳も送信もしていません。',failed:'ローカル翻訳を完了できませんでした。原文は残っています。構成要素を確認／修復して再試行できます。',statusFailed:'構成要素の状態を読めませんでした。ダウンロードも翻訳もしていません。',result:'ローカル翻訳 · {{seconds}}秒',run:'翻訳',voiceHint:'明示的に音声翻訳を開始した場合にも、この設定を使います。通常の録音は元の言語を保ちます。',
 };
 const ko: Copy = {
+  modelHelp: "경량과 향상 모델 선택 안내",
+  modelChoice: "경량 모델은 다운로드가 작고 빠르며 편집할 초안을 얻는 데 적합합니다. 향상 모델도 CPU를 사용하지만 이름이 정확한 번역을 보장하지는 않습니다. 두 모델 모두 이름, 주소, 전문 용어를 잘못 번역하거나 누락할 수 있으므로 원문과 대조하세요. 필요하면 클라우드를 직접 선택할 수 있으며 서비스 요금이 적용됩니다.",
+  modelPreparation: "모델과 언어 쌍을 선택하면 구성 요소의 준비 상태와 다운로드 크기를 확인할 수 있습니다. 선택만으로 다운로드하거나 번역하지 않습니다. 준비하려면 다운로드 버튼을 누르세요. 저장한 초안은 유지됩니다.",
   quality: "로컬 모델",
   standard: "경량 · 작은 다운로드, 빠른 처리",
   enhanced: "향상 · CPU 실행, 전용 GPU 불필요",

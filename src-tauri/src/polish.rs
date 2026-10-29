@@ -2051,7 +2051,15 @@ fn build_hotword_block(hotwords: &[String]) -> String {
 /// - hotwords 非空 → 末尾追加热词块（兼容历史 prompt 仍能拿到热词）
 /// - hotwords 空 → 不附加任何东西（用户决定自己 prompt 的内容，不强行注入）
 fn compose_system_prompt(style_system_prompt: &str, hotwords: &[String]) -> String {
-    let base = style_system_prompt.trim_end();
+    // Update only the exact previous factory Formal template, including in the
+    // effective-prompt preview. Saved bytes and every customized prompt stay intact.
+    let updated_factory;
+    let base = if style_system_prompt == crate::types::previous_factory_formal_style_prompt() {
+        updated_factory = crate::types::default_style_system_prompt_for_mode(PolishMode::Formal);
+        updated_factory.trim_end()
+    } else {
+        style_system_prompt.trim_end()
+    };
     if base.contains(crate::types::HOTWORDS_PLACEHOLDER) {
         let block = build_hotword_block(hotwords);
         return base.replace(crate::types::HOTWORDS_PLACEHOLDER, &block);
@@ -3261,6 +3269,32 @@ mod tests {
         let prompt = compose_system_prompt("像正式邮件，但结尾不要客套话", &[]);
 
         assert_eq!(prompt, "像正式邮件，但结尾不要客套话");
+    }
+
+    #[test]
+    fn formal_factory_role_allows_rewording_without_expanding_facts() {
+        let old = crate::types::previous_factory_formal_style_prompt();
+        let current = crate::types::default_style_system_prompt_for_mode(PolishMode::Formal);
+        assert!(old.contains("不要替用户重写或扩写"));
+        assert!(!current.contains("不要替用户重写或扩写"));
+        assert!(current.contains("保留原意、事实、条件、不确定性和人称，不扩写事实"));
+        assert_eq!(compose_system_prompt(&old, &["Listener".into()]),
+                   compose_system_prompt(&current, &["Listener".into()]));
+        assert!(old.contains("不要替用户重写或扩写"));
+        for mode in [PolishMode::Raw, PolishMode::Light, PolishMode::Structured] {
+            assert!(crate::types::default_style_system_prompt_for_mode(mode)
+                .contains("不要替用户重写或扩写"));
+        }
+    }
+
+    #[test]
+    fn formal_factory_compatibility_preserves_customized_rules() {
+        let old = crate::types::previous_factory_formal_style_prompt();
+        let custom = format!("{old}\n\n只改标点，不要分段。");
+        let result = compose_system_prompt(&custom, &[]);
+        assert!(result.contains("不要替用户重写或扩写"));
+        assert!(result.contains("只改标点，不要分段。"));
+        assert!(!result.contains("可以重写措辞、句式和分段"));
     }
 
     #[test]

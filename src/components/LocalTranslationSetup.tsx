@@ -83,6 +83,12 @@ export function LocalTranslationSetup({ source, target, onSourceChange, quality 
       </select>
     </label>}
     {quality === 'enhanced' && <p className="ol-style-trial-hint">{t('offlineTranslation.enhancedHint')}</p>}
+    {onQualityChange && <details className="ol-style-trial-details" data-local-model-help>
+      <summary>{t('offlineTranslation.modelHelp')}</summary>
+      <p className="ol-style-trial-hint">{t('offlineTranslation.modelChoice')}</p>
+      {quality !== 'enhanced' && <p className="ol-style-trial-hint">{t('offlineTranslation.enhancedHint')}</p>}
+      <p className="ol-style-trial-hint">{t('offlineTranslation.modelPreparation')}</p>
+    </details>}
     <label className="ol-style-trial-picker">
       <span>{t('offlineTranslation.source')}</span>
       <select aria-label={t('offlineTranslation.source')} value={source} disabled={disabled || busy}
