@@ -97,6 +97,14 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   const [settingsProviderFocus, setSettingsProviderFocus] = useState<'llm' | undefined>();
   const [blePairingPromptOpen, setBlePairingPromptOpen] = useState(false);
   const [demoModeSession, setDemoModeSession] = useState<DemoModeSession | null>(null);
+  const contentScrollRef = useRef<HTMLDivElement>(null);
+  // Opening the guide is an explicit navigation action. The banner is at the
+  // top of the page, which can otherwise remain above a scrolled viewport.
+  useLayoutEffect(() => {
+    if (demoModeSession && currentTab === 'overview' && contentScrollRef.current) {
+      contentScrollRef.current.scrollTop = 0;
+    }
+  }, [demoModeSession]);
   const [quickTrialOpen, setQuickTrialOpen] = useState(false);
   const [quickTrialDraft, setQuickTrialDraft] = useState('');
   const [quickTrialTarget, setQuickTrialTarget] = useState('');
@@ -419,6 +427,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                     两列内部各自的 overflow:auto 才能独立滚动 */}
             <div
               key={currentTab}
+              ref={contentScrollRef}
               // issue #243：所有 tab 都允许 overflow:auto，让窗口被压缩 / 文案
               //   变长时仍可触达底部内容（Codex P1：之前 overview 用 hidden
               //   会让缩窗后 Recent 卡彻底不可见）。
