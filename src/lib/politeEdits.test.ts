@@ -75,6 +75,15 @@ assert.deepEqual(result, { edits, skipped: 0 });
 assert.equal(applyPoliteEdits(source, [edits[1]]), source.replace('send me your notes', 'please send me your notes'));
 assert.equal(applyPoliteEdits(source, edits), "Tomorrow's design review at 3 won't work for me. Could we please move it to 4? If not, please send me your notes and I'll reply by Friday. Thanks!");
 
+// Actual234 provider response omitted the existing sentence period while
+// adding a question mark. Show and apply the complete punctuation change.
+const punctuationSource = 'Hi Alex, send me the draft by Friday. Thanks.';
+const punctuationReply = JSON.stringify({ edits: [{ old: 'send me the draft by Friday', new: 'could you send me the draft by Friday?' }] });
+const punctuationReview = reviewPoliteEdits(punctuationSource, punctuationReply);
+assert.deepEqual(punctuationReview.edits, [{ old: 'send me the draft by Friday.', new: 'could you send me the draft by Friday?' }]);
+assert.equal(applyPoliteEdits(punctuationSource, punctuationReview.edits), 'Hi Alex, could you send me the draft by Friday? Thanks.');
+assert.equal(reviewPoliteEdits('Send it.', JSON.stringify({ edits: [{ old: 'Send it', new: 'Could you send it?' }] })).skipped, 1);
+
 // Actual118 cloud counterexample: preserve must, while keeping valid courtesy proposals.
 const mandatory = 'You must send the log by 18:00. Do not share the API Key. If validation fails, do not publish.';
 const proposed = [{ old: 'You must send the log by 18:00.', new: 'Please send the log by 18:00.' }, { old: 'Do not share the API Key.', new: 'Please do not share the API Key.' }, { old: 'If validation fails, do not publish.', new: 'If validation fails, please do not publish.' }];

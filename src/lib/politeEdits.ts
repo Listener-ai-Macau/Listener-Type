@@ -84,12 +84,24 @@ export function reviewPoliteEdits(source: string, json: string): PoliteEditRevie
     if (!candidate || typeof candidate.old !== 'string' || typeof candidate.new !== 'string') {
       throw new Error('polite_edits_invalid_response');
     }
-    const old: string = candidate.old, replacement: string = candidate.new;
+    let old: string = candidate.old;
+    const replacement: string = candidate.new;
     const start = source.indexOf(old);
     if (!old || Array.from(old).length > 80 || Array.from(replacement).length > 240 || old === source || start < 0 || start !== source.lastIndexOf(old)) {
       throw new Error('polite_edits_invalid_response');
     }
-    const end = start + old.length;
+    let end = start + old.length;
+    // Providers sometimes omit the original full stop from the selected span
+    // while adding a question mark. Include that adjacent sentence terminator
+    // in the visible proposed edit, so accepting it cannot produce "?.".
+    if (/[?!？！]\s*$/u.test(replacement) && /[.。]/u.test(source[end] ?? '')
+      && (end + 1 === source.length || /\s/u.test(source[end + 1]))) {
+      const expanded = old + source[end];
+      if (expanded === source || Array.from(expanded).length > 80 || source.indexOf(expanded) !== start || source.lastIndexOf(expanded) !== start) {
+        skipped += 1; continue;
+      }
+      old = expanded; end += 1;
+    }
     if (spans.some(span => start < span.end && end > span.start)) throw new Error('polite_edits_invalid_response');
     spans.push({ start, end });
     if (!replacement.trim()) throw new Error('polite_edits_invalid_response');
