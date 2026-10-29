@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T18:49:39.975333+08:00",
+  "updated_at": "2026-10-29T18:57:00.301431+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -10260,7 +10260,7 @@
       "commit": "f2a9f47cd73babb6bb628db9866581c3726ece55",
       "commit_subject": "Reject ungrounded dollar symbols in local translation",
       "subject": "Retain the source when an unspecified 元 amount acquires an ungrounded dollar currency",
-      "state": "actual_light_cpu_and_ui_fixture_native_delivery_pending",
+      "state": "238_exact_native_light_model_verified_installed",
       "humanAccepted": false,
       "protects": [
         "Reject ungrounded dollar translations of a generic Chinese 元 amount without assuming the intended currency; keep the original and offer an explicit recovery choice."
@@ -10273,17 +10273,31 @@
       "machine_evidence": [
         "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/translation238-currency-baseline.json",
         "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/translation238-currency-actual-comparison.json",
-        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/translation238-ui.json"
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/translation238-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\translation237-negative-actual-comparison.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\translation238-currency-actual-comparison.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\translation238-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native238-snapshot-20261029-185544\\currency238-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native238-snapshot-20261029-185544\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native238-snapshot-20261029-185544\\recording-recovery238-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build238\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build238\\type238-installed.json"
       ],
       "machine_accepted_scope": [
         "Real CPU light-model currency contrast and controlled React UI pass; explicitly named currencies retained in those examples."
       ],
       "pending_human_scope": [
         "Does not prove currency-to-amount association, mixed-currency or general semantic accuracy. Native and enhanced actual inference remain separately scoped."
-      ]
+      ],
+      "delivery": {
+        "build": 238,
+        "source": "bb621b2f1e0010e4e9bd95ce8222bd82f756cedf",
+        "installed": true,
+        "publicPrepared": true
+      }
     }
   ],
-  "feature_routes_updated_at": "2026-10-29T17:50:13.709283+08:00",
+  "feature_routes_updated_at": "2026-10-29T18:57:00.301431+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -11659,7 +11673,7 @@
     },
     {
       "id": "offline-text-translation",
-      "accepted_scope": "Existing213 ordinary native scope remains. Optional818ed43 CPU candidate has19 worker inputs,13 affected native controls and React quality/cancellation/save checks; new matching MSI/whole-app native use/independent feedback pending. Ordinary214 private native default-light preparation/translation/edit/save/reread/return and owned Cancel/Close source-retention proof added; original evidence and remaining physical/global/other-model limits retained. 8de658fd source checkpoint adds recognized time/year checks to the actual light CPU route; matching native host/package and natural feedback pending. All old semantic and original22 limits remain. Exact220 ordinary MSI private UI verifies full original/edit/translation/cache/v1 save and reread, with the known time-range/after2PM source translated using the existing light CPU assets and saved/reopened exactly. Source CPU checks cover9 complete inputs plus14 retained cases;51 source tests and scoped Rust host/process controls retain their explicit source receipts. Bounded clock parsing and fact guards do not certify all translation semantics or new physical/global/cross-PC behavior. 233 accepts explicit source -> preferred target terms locally; exact marker preservation is checked, but surrounding model meaning still needs review. 234 retains numbered line markers outside the light model, preventing their separate translation on the observed customer example. 236 rejects outputs when an explicit negative numeral cannot be verified; this is not a general numeric association or translation accuracy guarantee.",
+      "accepted_scope": "Existing213 ordinary native scope remains. Optional818ed43 CPU candidate has19 worker inputs,13 affected native controls and React quality/cancellation/save checks; new matching MSI/whole-app native use/independent feedback pending. Ordinary214 private native default-light preparation/translation/edit/save/reread/return and owned Cancel/Close source-retention proof added; original evidence and remaining physical/global/other-model limits retained. 8de658fd source checkpoint adds recognized time/year checks to the actual light CPU route; matching native host/package and natural feedback pending. All old semantic and original22 limits remain. Exact220 ordinary MSI private UI verifies full original/edit/translation/cache/v1 save and reread, with the known time-range/after2PM source translated using the existing light CPU assets and saved/reopened exactly. Source CPU checks cover9 complete inputs plus14 retained cases;51 source tests and scoped Rust host/process controls retain their explicit source receipts. Bounded clock parsing and fact guards do not certify all translation semantics or new physical/global/cross-PC behavior. 233 accepts explicit source -> preferred target terms locally; exact marker preservation is checked, but surrounding model meaning still needs review. 234 retains numbered line markers outside the light model, preventing their separate translation on the observed customer example. 236 rejects outputs when an explicit negative numeral cannot be verified; this is not a general numeric association or translation accuracy guarantee. 238 checks common written negative forms and blocks ungrounded dollars for generic Chinese 元 amounts; mixed-currency associations and general meaning still require review.",
       "baseline_state": "214_installed_exact_light_workflow_passed_public_prepared",
       "guard_entries": [
         "offline_translation_optional_verified_worker_no_cloud_fallback",
@@ -11721,7 +11735,9 @@
           "src-tauri/src/polish.rs",
           "src-tauri/src/llm_gemini.rs",
           "src-tauri/resources/translation/signed_number_fidelity.py",
-          "scripts/test_translation_signed_number_fidelity.py"
+          "scripts/test_translation_signed_number_fidelity.py",
+          "src-tauri/resources/translation/currency_fidelity.py",
+          "scripts/test_translation_currency_fidelity.py"
         ]
       }
     },
