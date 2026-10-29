@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T16:37:23.600690+08:00",
+  "updated_at": "2026-10-29T16:53:10.505729+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -10017,9 +10017,35 @@
         "installed": true,
         "publicPrepared": true
       }
+    },
+    {
+      "id": "usage_guide_visible_after_scrolled_open",
+      "repo": "type",
+      "commit": "ab6a90d4403fbd13e14a08e3f249dd6c7afd164d",
+      "commit_subject": "Reveal usage guide when opened from scrolled overview",
+      "subject": "Bring the usage guide into view after explicit opening from a scrolled overview",
+      "state": "controlled_scrolled_overview_candidate_native_and_delivery_pending",
+      "humanAccepted": false,
+      "protects": [
+        "Opening the usage guide explicitly from below moves the overview scroll position to the guide; closing and reopening remain possible at desktop and narrow viewport sizes."
+      ],
+      "guards": [
+        "python scripts/check-guide-scroll-ui.py --url <controlled-ui>",
+        "npm run build"
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/outputs/Listener-FIRST_USE232-aftersale-20261029/customer-experience.md",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/outputs/Listener-FIRST_USE232-aftersale-20261029/10-guide.png"
+      ],
+      "machine_accepted_scope": [
+        "Actual React controlled desktop and narrow viewport; native build and delivery not yet verified."
+      ],
+      "pending_human_scope": [
+        "No human customer or physical qualification."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-29T16:37:23.600690+08:00",
+  "feature_routes_updated_at": "2026-10-29T16:53:10.505729+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -11180,7 +11206,8 @@
       "accepted_scope": "UI-first-use choice and existing utility accessibility only; backend/firmware unchanged.",
       "baseline_state": "affected_ui_exact_native_installed_verified_not_customer_or_physical_qualified",
       "guard_entries": [
-        "first_use133_dismissible_overview_preserves_utility_access"
+        "first_use133_dismissible_overview_preserves_utility_access",
+        "usage_guide_visible_after_scrolled_open"
       ],
       "paths": {
         "type": [
@@ -11189,7 +11216,8 @@
           "src/pages/Tools.tsx",
           "src/lib/firstUseOverview.ts",
           "src/lib/firstUseOverview.test.ts",
-          "scripts/check-first-use-overview-ui.py"
+          "scripts/check-first-use-overview-ui.py",
+          "scripts/check-guide-scroll-ui.py"
         ]
       }
     },
@@ -11198,7 +11226,8 @@
       "accepted_scope": "First-use/workspace/history UI layout and saved-draft discovery only; voice/BLE/firmware unchanged.",
       "baseline_state": "affected_ui_exact_native_installed_verified_not_customer_or_physical_qualified",
       "guard_entries": [
-        "ui134_clearer_guide_workspace_and_history_draft_access"
+        "ui134_clearer_guide_workspace_and_history_draft_access",
+        "usage_guide_visible_after_scrolled_open"
       ],
       "paths": {
         "type": [
@@ -11211,7 +11240,8 @@
           "src/components/StyleTextTrial.css",
           "src/i18n/firstUse.ts",
           "scripts/check-ui-clarity-ui.py",
-          "scripts/check-saved-text-drafts-ui.py"
+          "scripts/check-saved-text-drafts-ui.py",
+          "scripts/check-guide-scroll-ui.py"
         ]
       }
     },
