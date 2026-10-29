@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T18:12:38.033463+08:00",
+  "updated_at": "2026-10-29T18:49:39.975333+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -10253,6 +10253,34 @@
       "pending_human_scope": [
         "Matching native package and broader semantic, hardware and cross-PC behavior remain unverified."
       ]
+    },
+    {
+      "id": "local_translation_unprovided_dollar_symbol_guard",
+      "repo": "type",
+      "commit": "f2a9f47cd73babb6bb628db9866581c3726ece55",
+      "commit_subject": "Reject ungrounded dollar symbols in local translation",
+      "subject": "Retain the source when an unspecified 元 amount acquires an ungrounded dollar currency",
+      "state": "actual_light_cpu_and_ui_fixture_native_delivery_pending",
+      "humanAccepted": false,
+      "protects": [
+        "Reject ungrounded dollar translations of a generic Chinese 元 amount without assuming the intended currency; keep the original and offer an explicit recovery choice."
+      ],
+      "guards": [
+        "python scripts/test_translation_currency_fidelity.py",
+        "python scripts/test_translation_signed_number_fidelity.py",
+        "python scripts/test_translation_time_fidelity.py"
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/translation238-currency-baseline.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/translation238-currency-actual-comparison.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/translation238-ui.json"
+      ],
+      "machine_accepted_scope": [
+        "Real CPU light-model currency contrast and controlled React UI pass; explicitly named currencies retained in those examples."
+      ],
+      "pending_human_scope": [
+        "Does not prove currency-to-amount association, mixed-currency or general semantic accuracy. Native and enhanced actual inference remain separately scoped."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-29T17:50:13.709283+08:00",
@@ -11646,7 +11674,8 @@
         "offline_translation_explicit_preferred_terms",
         "light_translation_numbered_items_not_independent_sentences",
         "local_translation_explicit_negative_number_guard",
-        "local_translation_written_negative_numeral_guard"
+        "local_translation_written_negative_numeral_guard",
+        "local_translation_unprovided_dollar_symbol_guard"
       ],
       "paths": {
         "type": [
