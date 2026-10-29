@@ -51,6 +51,20 @@ window.__workspaceFixture=(cmd,args,mock)=>{
         dialog = page.locator('dialog.ol-style-trial[open]')
         original = 'Please keep the original deadline. Do not send this email yet.'
         entry = dialog.locator('.ol-style-trial-input')
+        entry.fill('请在周五前核对截图。')
+        source_choice = dialog.get_by_role('combobox', name='Original language', exact=True)
+        suggestion = dialog.locator('[data-local-source-suggestion]')
+        expect(dialog.locator('[data-local-translation-setup] [data-local-source-suggestion]')).to_have_count(1)
+        for width, height in [(900, 700), (360, 640)]:
+            page.set_viewport_size({'width': width, 'height': height})
+            source_choice.scroll_into_view_if_needed()
+            expect(suggestion.get_by_role('button', name='Use Chinese as the source', exact=True)).to_be_in_viewport(ratio=1)
+        suggestion.get_by_role('button', name='Use Chinese as the source', exact=True).click()
+        expect(source_choice).to_have_value('zh')
+        expect(entry).to_have_value('请在周五前核对截图。')
+        assert not page.evaluate("window.__workspaceCalls.some(x=>['prepare_local_translation','try_local_translation_text','try_translation_text'].includes(x.cmd))")
+        report['checks'].append('Chinese confirmation stays with the source-language selector at both widths; explicit choice keeps input and sends/downloads nothing')
+        page.set_viewport_size({'width': 900, 'height': 700})
         entry.fill(original)
         dialog.get_by_role('combobox', name='Translate output to', exact=True).select_option('简体中文')
         dialog.get_by_role('combobox', name='Original language', exact=True).select_option('en')
@@ -85,6 +99,10 @@ window.__workspaceFixture=(cmd,args,mock)=>{
             page.evaluate("document.documentElement.style.zoom='1';document.documentElement.style.setProperty('--ol-font-scale','1')")
             run.click()
             page.wait_for_function('window.__workspacePending.length===1')
+            timer = dialog.locator('[data-text-request-elapsed]')
+            expect(timer).to_have_attribute('aria-live', 'off')
+            expect(timer).to_have_text(re.compile(r'Waiting · [1-9]\d* s'), timeout=3500)
+            assert page.evaluate("window.__workspaceCalls.filter(x=>x.cmd==='try_local_translation_text').length") == 1
             cancel = dialog.get_by_role('button', name='Cancel', exact=True)
             for width, height in [(900, 700), (360, 640)]:
                 page.set_viewport_size({'width': width, 'height': height})
@@ -93,6 +111,8 @@ window.__workspaceFixture=(cmd,args,mock)=>{
             page.evaluate('window.__workspacePending.shift()()')
             output = dialog.get_by_role('textbox', name='Result text', exact=True)
             expect(output).to_have_value('本机初稿，保留完整原文。')
+            expect(timer).to_have_count(0)
+            report['checks'].append('An actual pending local request advances elapsed time without resubmission; completion removes the timer and retains reachable Cancel')
             edited = '人工修订稿。完整保留星期四与否定。'
             output.fill(edited)
             dialog.get_by_role('button', name='Switch to my cloud service…', exact=True).click()
@@ -117,11 +137,22 @@ window.__workspaceFixture=(cmd,args,mock)=>{
             engine.select_option('cloud')
             run.click()
             page.wait_for_function('window.__workspacePending.length===1')
+            assert int(timer.inner_text().split(' · ')[1].split(' ')[0]) <= 1
+            expect(timer).to_have_text(re.compile(r'Waiting · [1-9]\d* s'), timeout=3500)
+            expect(dialog.locator('[data-style-trial-pending]')).to_contain_text('may still be charged')
+            for width, height in [(900, 700), (360, 640)]:
+                page.set_viewport_size({'width': width, 'height': height})
+                assert geometry(dialog.get_by_role('button', name='Close', exact=True))['centerHitsButton']
+                assert timer.bounding_box()['y'] + timer.bounding_box()['height'] <= height
+            page.screenshot(path=str(args.report.with_name(args.report.stem + '-waiting-360.png')))
+            page.set_viewport_size({'width': 900, 'height': 700})
             assert page.evaluate("window.__workspaceCalls.filter(x=>x.cmd==='try_translation_text').length") == 1
             page.evaluate('window.__workspacePending.shift()()')
             expect(output).to_have_value('Cloud result from the original.')
+            expect(timer).to_have_count(0)
             expect(dialog.locator('[data-cloud-retranslation-ready]')).to_have_count(0)
             report['checks'].append('Switching back restores exact local edits; only explicit Translate makes one cloud request')
+            report['checks'].append('A new cloud submission resets and advances elapsed time, preserves the charge notice and Close at narrow/wide sizes, then clears on completion')
             output.fill('Reviewed cloud reply — 保留原文与条件。')
             dialog.get_by_label('Draft name', exact=True).fill('Visibility regression draft')
             dialog.get_by_role('button', name='Save draft', exact=True).click()
@@ -142,6 +173,18 @@ window.__workspaceFixture=(cmd,args,mock)=>{
             page.screenshot(path=str(args.report.with_suffix('.png')))
             dialog.get_by_role('button', name='Close', exact=True).click()
             expect(page.locator('dialog.ol-style-trial[open]')).to_have_count(0)
+            page.get_by_role('button', name='Chinese ↔ English on this PC', exact=True).click()
+            entry.fill(original)
+            dialog.get_by_role('combobox', name='Translation method', exact=True).select_option('cloud')
+            run.click()
+            page.wait_for_function('window.__workspacePending.length===1')
+            expect(timer).to_be_visible()
+            dialog.get_by_role('button', name='Close', exact=True).click()
+            page.get_by_role('button', name='Chinese ↔ English on this PC', exact=True).click()
+            page.evaluate('window.__workspacePending.shift()()')
+            expect(timer).to_have_count(0)
+            expect(dialog.get_by_role('textbox', name='Result text', exact=True)).to_have_count(0)
+            report['checks'].append('Closing a pending workspace removes its timer; a late result cannot replace the reopened workspace or cause another request')
             report['passed'] = True
     except Exception as error:
         report['failure'] = str(error)

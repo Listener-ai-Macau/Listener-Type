@@ -77,6 +77,8 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const running = useRef(false);
   const copyRunning = useRef(false);
   const [pending, setPending] = useState(false);
+  const requestStarted = useRef(0);
+  const [waitingSeconds, setWaitingSeconds] = useState(0);
   const [shortening, setShortening] = useState(false);
   const [draftSaving, setDraftSaving] = useState(false);
   const [savedDraftSignature, setSavedDraftSignature] = useState('');
@@ -148,6 +150,16 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
     previousStep?.translated && !previousStep.continued && !result && !pending;
 
   useEffect(() => {
+    if (!pending) return;
+    // Measure this submission, including preparation. The buffered service
+    // does not report connection/generation progress or a completion estimate.
+    const tick = () => setWaitingSeconds(Math.floor((performance.now() - requestStarted.current) / 1000));
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [pending]);
+
+  useEffect(() => {
     if (localRequest.current) { void cancelLocalTranslation(localRequest.current).catch(() => {}); localRequest.current = null; }
     ++generation.current;
     running.current = false;
@@ -214,6 +226,8 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
     if (prepare && !readiness?.textServiceConfigured) return;
     running.current = true;
     const request = ++generation.current;
+    requestStarted.current = performance.now();
+    setWaitingSeconds(0);
     setPending(true);
     setShortening(!!prepare);
     freshSelectionResult.current = null;
@@ -488,7 +502,12 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         </label>
         {offline && <LocalTranslationSetup key={translationQuality} quality={translationQuality} onQualityChange={setTranslationQuality} source={translationSource} target={translationTarget}
           onSourceChange={setTranslationSource} disabled={pending || copying || delivering || draftSaving}
-          onReadiness={setOfflineReadiness} onBusy={setTranslationPreparing} showNotice={false} />}
+          onReadiness={setOfflineReadiness} onBusy={setTranslationPreparing} showNotice={false}
+          sourceHint={!translationSource && canSuggestChineseSource(draft, translationTarget ?? '') && <div className="ol-style-trial-hint" data-local-source-suggestion>
+            <p>{t('textWorkspace.hanSourceHint')}</p>
+            <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || draftSaving || translationPreparing}
+              onClick={() => setTranslationSource('zh')}>{t('textWorkspace.confirmChinese')}</Btn>
+          </div>} />}
       </>}
       {packs && onSelectPack && <label className="ol-style-trial-picker">
         <span>{t('style.trial.styleLabel')}</span>
@@ -527,11 +546,6 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
           if (!value.trim()) { setWorkflowOriginal(null); setTranslationReference(null); setPreviousStep(null); setRefinementReturn(null); }
         }}
       />
-      {offline && !translationSource && canSuggestChineseSource(draft, translationTarget ?? '') && <div className="ol-style-trial-hint" data-local-source-suggestion>
-        <p>{t('textWorkspace.hanSourceHint')}</p>
-        <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || draftSaving || translationPreparing}
-          onClick={() => setTranslationSource('zh')}>{t('textWorkspace.confirmChinese')}</Btn>
-      </div>}
       </div>
       <div className="ol-style-trial-outputs">
       {result && (
@@ -678,6 +692,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         </div>
         {pending && <p role="status" className="ol-style-trial-hint" data-style-trial-pending>
           {t(offline ? 'offlineTranslation.pending' : !shortening && readiness?.requiresTextService === false ? 'textWorkspace.pendingLocal' : 'style.trial.pending')}
+          {' '}<span role="timer" aria-live="off" data-text-request-elapsed>{t('textWorkspace.waitingElapsed', { seconds: waitingSeconds })}</span>
           {offline && <Btn size="sm" variant="ghost" onClick={() => { if (localRequest.current) void cancelLocalTranslation(localRequest.current).catch(() => {}); }}>{t('common.cancel')}</Btn>}
         </p>}
         {error && <p role="alert" className="ol-style-trial-submit-error">{error}</p>}

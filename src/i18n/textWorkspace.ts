@@ -1,4 +1,5 @@
 const en = {
+  waitingElapsed: 'Waiting · {{seconds}} s',
   submitText: 'Process text', submitDraft: 'Generate draft', preparing: 'Preparing…',
   translateResult: 'Translate this result…', refineResult: 'Refine this translation…',
   retranslateOriginal: 'Switch to my cloud service…',
@@ -37,6 +38,7 @@ const en = {
 export const textWorkspaceTranslations = {
   en,
   'zh-CN': {
+    waitingElapsed: '已等待 {{seconds}} 秒',
     submitText: '处理文字', submitDraft: '生成正文', preparing: '正在准备…',
     translateResult: '接着翻译这份结果…', refineResult: '接着润色这份译文…',
     retranslateOriginal: '切换到云端翻译…',
@@ -68,6 +70,7 @@ export const textWorkspaceTranslations = {
     draftsIntro: '成稿保存在本机，与录音分别存放。', draftsDetails: '成稿保存说明',
   },
   'zh-TW': {
+    waitingElapsed: '已等待 {{seconds}} 秒',
     submitText: '處理文字', submitDraft: '產生正文', preparing: '正在準備…',
     translateResult: '接著翻譯這份結果…', refineResult: '接著潤飾這份譯文…',
     retranslateOriginal: '切換至雲端翻譯…',
@@ -99,6 +102,7 @@ export const textWorkspaceTranslations = {
     draftsIntro: '成稿儲存在本機，與錄音分開存放。', draftsDetails: '成稿儲存說明',
   },
   ja: {
+    waitingElapsed: '待機時間 · {{seconds}} 秒',
     submitText: 'テキストを処理', submitDraft: '本文を作成', preparing: '準備中…',
     translateResult: 'この結果を翻訳…', refineResult: 'この訳文を推敲…',
     retranslateOriginal: 'クラウド翻訳に切り替える…',
@@ -130,6 +134,7 @@ export const textWorkspaceTranslations = {
     draftsIntro: 'このPCに保存した文章です。録音とは別に保管されます。', draftsDetails: '下書きの保存について',
   },
   ko: {
+    waitingElapsed: '대기 시간 · {{seconds}}초',
     submitText: '텍스트 처리', submitDraft: '본문 생성', preparing: '준비 중…',
     translateResult: '이 결과 번역…', refineResult: '이 번역 다듬기…',
     retranslateOriginal: '클라우드 번역으로 전환…',

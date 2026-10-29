@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cancelLocalTranslationPreparation, getLocalTranslationStatus, prepareLocalTranslation } from '../lib/ipc';
 import type { LocalTranslationStatus } from '../lib/ipc';
@@ -7,7 +8,7 @@ import type { LocalTranslationReadiness, LocalTranslationQuality } from '../lib/
 import { Btn } from '../pages/_atoms';
 
 /** Explicit optional assets only: mounting or choosing a language never downloads. */
-export function LocalTranslationSetup({ source, target, onSourceChange, quality = 'standard', onQualityChange, disabled = false, onReadiness, onBusy, showNotice = true }: {
+export function LocalTranslationSetup({ source, target, onSourceChange, quality = 'standard', onQualityChange, disabled = false, onReadiness, onBusy, showNotice = true, sourceHint }: {
   source: string;
   target: string;
   onSourceChange: (source: string) => void;
@@ -17,6 +18,7 @@ export function LocalTranslationSetup({ source, target, onSourceChange, quality 
   onReadiness?: (state: LocalTranslationReadiness) => void;
   onBusy?: (busy: boolean) => void;
   showNotice?: boolean;
+  sourceHint?: ReactNode;
 }) {
   const { t } = useTranslation();
   const [status, setStatus] = useState<LocalTranslationStatus | null>(null);
@@ -89,6 +91,7 @@ export function LocalTranslationSetup({ source, target, onSourceChange, quality 
         <option value="zh">中文</option><option value="en">English</option>
       </select>
     </label>
+    {sourceHint}
     {showNotice && <p className="ol-style-trial-hint">{t('offlineTranslation.localNotice')}</p>}
     {!status && !failure && <p role="status">{t('common.loading')}</p>}
     {status && !status.supported && <p role="status">{t('offlineTranslation.platform')}</p>}
