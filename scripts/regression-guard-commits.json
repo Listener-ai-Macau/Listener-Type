@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T15:42:54.938799+08:00",
+  "updated_at": "2026-10-29T15:52:53.601525+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9929,9 +9929,40 @@
         "installed": true,
         "publicPrepared": true
       }
+    },
+    {
+      "id": "workspace_help_visible_and_history_draft_count",
+      "repo": "type",
+      "commit": "3033049d71effa934908747e21c05f4c326af758",
+      "commit_subject": "Keep text help reachable and show saved draft count",
+      "subject": "Keep text help reachable above the footer and distinguish the saved draft count from empty history",
+      "state": "controlled_ui_verified_native_delivery_pending",
+      "humanAccepted": false,
+      "protects": [
+        "Workspace help is initially mouse-accessible without being covered by the fixed action footer, while actions and the source editor remain usable.",
+        "The saved draft count appears when local loading succeeds, refreshes after the library closes, and remains unknown on failure. Existing saved content is not modified."
+      ],
+      "guards": [
+        "python scripts/check-saved-text-drafts-ui.py --url <controlled-ui> --report <result>",
+        "python scripts/check-style-trial-layout-ui.py --url <controlled-ui> --report <result>",
+        "controlled help and count browser test at 1240x800 and 360x640",
+        "npm run build"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\check-help-and-count231.py",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\drafts231-final.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\layout231-inline-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\outputs\\Listener-FIRST_USE230-aftersale-20261029\\customer-experience.md"
+      ],
+      "machine_accepted_scope": [
+        "Actual React mouse hit tests and draft-library state fixtures; matching native build still pending."
+      ],
+      "pending_human_scope": [
+        "No real customer, all screen sizes or physical qualification claim."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-29T15:42:54.938799+08:00",
+  "feature_routes_updated_at": "2026-10-29T15:52:53.601525+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -11145,7 +11176,8 @@
         "formal_factory_role_and_local_model_choice_help",
         "overview_status_loading_and_result_model_help_keep_customer_context",
         "manual_fact_review_email_subject_compressed_audio_history",
-        "enhanced_cpu_actual_pressure_and_email_fact_boundary"
+        "enhanced_cpu_actual_pressure_and_email_fact_boundary",
+        "workspace_help_visible_and_history_draft_count"
       ],
       "paths": {
         "type": [
