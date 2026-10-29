@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T16:28:59.193633+08:00",
+  "updated_at": "2026-10-29T16:37:23.600690+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9977,7 +9977,7 @@
       "commit": "1e1cb3a2a379cc7ba115f5637a67f81597cd9986",
       "commit_subject": "Support resumable long audio and protect explicit translation terms",
       "subject": "Keep long audio and explicit offline translation terms recoverable without silent loss",
-      "state": "232_controlled_and_real_light_model_candidate_native_and_delivery_pending",
+      "state": "232_exact_native_protected_name_and_real_76s_service_verified_installed",
       "humanAccepted": false,
       "protects": [
         "55 second PCM segments overlap one second and cover the last sample; a failed or stopped segment retains completed text for explicit resume without replay. A skipped unrecognized segment is visibly labeled.",
@@ -9994,17 +9994,32 @@
       ],
       "machine_evidence": [
         "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/protected232-actual-standard.json",
-        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/audio232-cancel4.json"
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/audio232-cancel4.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native232-snapshot-20261029-163520\\protected-translation232-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native232-snapshot-20261029-163605\\long-audio232-real-service.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native232-snapshot-20261029-163605\\setup-result.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\protected232-actual-enhanced-retry.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\protected232-actual-standard.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\audio232-cancel4.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native232-snapshot-20261029-163520\\recording-recovery232-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build232\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build232\\type232-installed.json"
       ],
       "machine_accepted_scope": [
         "Controlled React, exact PCM samples and real existing light CPU translation model; matching native and real speech service tests pending."
       ],
       "pending_human_scope": [
         "General translation accuracy, other PCs, real customers and intermittent physical fault causes remain unproven."
-      ]
+      ],
+      "delivery": {
+        "build": 232,
+        "source": "71de4e7247ca812c6865f4452ff3b91ff92e6069",
+        "installed": true,
+        "publicPrepared": true
+      }
     }
   ],
-  "feature_routes_updated_at": "2026-10-29T16:28:59.193633+08:00",
+  "feature_routes_updated_at": "2026-10-29T16:37:23.600690+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -11646,7 +11661,7 @@
     },
     {
       "id": "audio-file-native-picker",
-      "accepted_scope": "202 private exact-native Windows Open and actual product read;179 actual Cancel,186 empty/oversize/reselect boundaries retain their original scopes.",
+      "accepted_scope": "202 private exact-native Windows Open and actual product read;179 actual Cancel,186 empty/oversize/reselect boundaries retain their original scopes. 232 uses overlapping requests for longer recordings and retains completed segments on failure; 76-second public synthetic speech passed the actual configured service, while controlled tests cover failure and sample boundaries.",
       "baseline_state": "202_native_Open_179_native_Cancel_scoped_passed",
       "guard_entries": [
         "customer107_explicit_audio_file_transcription",
@@ -11660,7 +11675,8 @@
           "src/components/AudioFileTrial.tsx",
           "src/lib/longAudio.ts",
           "src/lib/longAudio.test.ts",
-          "scripts/check-long-audio-ui.py"
+          "scripts/check-long-audio-ui.py",
+          "src/lib/compressedAudio.ts"
         ]
       },
       "known_failures": [
