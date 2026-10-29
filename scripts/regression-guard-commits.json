@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T17:42:56.967144+08:00",
+  "updated_at": "2026-10-29T17:50:13.709283+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -10194,7 +10194,7 @@
       "commit": "41c753612b68886cd0c4f4df6338f6e96a8378d1",
       "commit_subject": "Reject local translations that lose explicit negative signs",
       "subject": "Reject an unverified explicit negative numeral rather than showing the opposite sign",
-      "state": "actual_light_cpu_and_ui_fixture_verified_native_delivery_pending",
+      "state": "236_exact_native_light_model_verified_installed",
       "humanAccepted": false,
       "protects": [
         "Explicit negative numerals lost in translation are rejected with source retained; dates and identifiers are not treated as negative numerals."
@@ -10206,17 +10206,30 @@
       ],
       "machine_evidence": [
         "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/translation236-signed-actual.json",
-        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/translation236-ui.json"
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/translation236-ui.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\translation236-signed-actual.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\translation236-ui.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native236-snapshot-20261029-174914\\signed236-native.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native236-snapshot-20261029-174914\\setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native236-snapshot-20261029-174914\\recording-recovery236-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build236\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build236\\type236-installed.json"
       ],
       "machine_accepted_scope": [
         "Actual light CPU model reproduced sign loss and candidate rejected it; equivalent signed outputs, dates and existing numbered-list source passed. UI is a controlled fixture."
       ],
       "pending_human_scope": [
         "Not a general semantic or number-association guarantee; natural enhanced model, exact native build and broader usage remain to be tested."
-      ]
+      ],
+      "delivery": {
+        "build": 236,
+        "source": "63cc08af33accfbe2ddcae25b9af14c92f858320",
+        "installed": true,
+        "publicPrepared": true
+      }
     }
   ],
-  "feature_routes_updated_at": "2026-10-29T17:29:40.526435+08:00",
+  "feature_routes_updated_at": "2026-10-29T17:50:13.709283+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -11592,7 +11605,7 @@
     },
     {
       "id": "offline-text-translation",
-      "accepted_scope": "Existing213 ordinary native scope remains. Optional818ed43 CPU candidate has19 worker inputs,13 affected native controls and React quality/cancellation/save checks; new matching MSI/whole-app native use/independent feedback pending. Ordinary214 private native default-light preparation/translation/edit/save/reread/return and owned Cancel/Close source-retention proof added; original evidence and remaining physical/global/other-model limits retained. 8de658fd source checkpoint adds recognized time/year checks to the actual light CPU route; matching native host/package and natural feedback pending. All old semantic and original22 limits remain. Exact220 ordinary MSI private UI verifies full original/edit/translation/cache/v1 save and reread, with the known time-range/after2PM source translated using the existing light CPU assets and saved/reopened exactly. Source CPU checks cover9 complete inputs plus14 retained cases;51 source tests and scoped Rust host/process controls retain their explicit source receipts. Bounded clock parsing and fact guards do not certify all translation semantics or new physical/global/cross-PC behavior. 233 accepts explicit source -> preferred target terms locally; exact marker preservation is checked, but surrounding model meaning still needs review. 234 retains numbered line markers outside the light model, preventing their separate translation on the observed customer example.",
+      "accepted_scope": "Existing213 ordinary native scope remains. Optional818ed43 CPU candidate has19 worker inputs,13 affected native controls and React quality/cancellation/save checks; new matching MSI/whole-app native use/independent feedback pending. Ordinary214 private native default-light preparation/translation/edit/save/reread/return and owned Cancel/Close source-retention proof added; original evidence and remaining physical/global/other-model limits retained. 8de658fd source checkpoint adds recognized time/year checks to the actual light CPU route; matching native host/package and natural feedback pending. All old semantic and original22 limits remain. Exact220 ordinary MSI private UI verifies full original/edit/translation/cache/v1 save and reread, with the known time-range/after2PM source translated using the existing light CPU assets and saved/reopened exactly. Source CPU checks cover9 complete inputs plus14 retained cases;51 source tests and scoped Rust host/process controls retain their explicit source receipts. Bounded clock parsing and fact guards do not certify all translation semantics or new physical/global/cross-PC behavior. 233 accepts explicit source -> preferred target terms locally; exact marker preservation is checked, but surrounding model meaning still needs review. 234 retains numbered line markers outside the light model, preventing their separate translation on the observed customer example. 236 rejects outputs when an explicit negative numeral cannot be verified; this is not a general numeric association or translation accuracy guarantee.",
       "baseline_state": "214_installed_exact_light_workflow_passed_public_prepared",
       "guard_entries": [
         "offline_translation_optional_verified_worker_no_cloud_fallback",
@@ -11650,7 +11663,9 @@
           "src/components/FloatingShell.tsx",
           "scripts/check-guide-scroll-ui.py",
           "src-tauri/src/polish.rs",
-          "src-tauri/src/llm_gemini.rs"
+          "src-tauri/src/llm_gemini.rs",
+          "src-tauri/resources/translation/signed_number_fidelity.py",
+          "scripts/test_translation_signed_number_fidelity.py"
         ]
       }
     },

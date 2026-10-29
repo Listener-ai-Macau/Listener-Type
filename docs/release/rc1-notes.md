@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build235 / Firmware38
+# Listener v1.0.6-rc1 · Type build236 / Firmware38
 
 | Download | File |
 | --- | --- |
@@ -7,21 +7,21 @@
 
 ## In this app update
 
-In light local translation, numbered list markers at the start of a line stay outside the model and are restored with the translated item. This prevents the observed case in which isolated list numbers became unrelated sentences. Explicit wording suggestions request structured edits; if a local suggestion adds a question mark just before the source full stop, the review includes that full stop so the accepted text does not contain duplicated punctuation. Suggestions still require review and explicit acceptance.
+Local translation checks explicit negative numerals. If a negative number in the source cannot be verified in the output, the app keeps the original and asks you to review or choose another method. This conservative check may reject some valid expressions.
 
 ## Before using
 
 US$49 is the hardware price. Type is free and open source. Recognition and optional text services require preparation and separate usage charges; this release does not provide a ready-to-use official cloud account or allowance. USB flashing and Bluetooth OTA use the same firmware ZIP.
 
-The list fix does not guarantee the rest of any translation, names, negation, dates or associations are accurate; compare against the source. Preferred terms are optional and unmatched entries have no effect. Enhanced CPU translation requires optional components and can stop under critical memory pressure. Speech-service calls and explicit wording suggestions may incur charges. Long files are split into overlapping segments; check boundaries and marked unrecognized segments. Closing the transcription window loses audio and resume progress, while copied or saved text remains. MP3/M4A depend on system codecs. Existing intermittent GATT timeout and historical brownout causes, real live recordings over 60 seconds, other-PC and long-term physical behavior remain unresolved. Whole-draft rewrites are rejected, so suggestions may be unavailable for a single-sentence draft. Wording suggestions may return no proposed edit or still need correction.
+This bounded check does not guarantee numeric associations or general translation meaning; compare the translation against the original. Some valid negative expressions may be rejected. Preferred terms are optional and unmatched entries have no effect. Enhanced CPU translation requires optional components and can stop under critical memory pressure. Speech-service calls and explicit wording suggestions may incur charges. Long files are split into overlapping segments; check boundaries and marked unrecognized segments. Closing the transcription window loses audio and resume progress, while copied or saved text remains. MP3/M4A depend on system codecs. Existing intermittent GATT timeout and historical brownout causes, real live recordings over 60 seconds, other-PC and long-term physical behavior remain unresolved. Wording suggestions require review and may be unavailable.
 
 ## File identity
 
-- Type source: `91e40c1561ce6c02425a986ae1c032af4476433e` · `build-source/type235-20261029`
-- MSI: 299913216 bytes · SHA256 `325e7bc1c8956b6d351f878ece8ce61fdd651f89db6f36f3360ac6a722025288`
+- Type source: `63cc08af33accfbe2ddcae25b9af14c92f858320` · `build-source/type236-20261029`
+- MSI: 299896832 bytes · SHA256 `481e647ea8c338b9bbf31b38f3efbc0bfd1b6fa18c1688da2901a2a480d58e52`
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`
 - ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`
 
 ## 中文说明
 
-轻量本机翻译会在模型外保留行首编号并放回对应条目，避免已复现的编号被单独译成无关句子。措辞建议请求结构化修改；建议新增问号且紧邻原句号时，预览中的原文范围会包含句号，避免采用后出现重复标点。建议仍需检查并明确采用。
+本机翻译会检查原文中明确写出的负数。如果无法在译文中核对，会保留原文并提示核对或选择其他方式；保守校验也可能拒绝部分正确表达。
