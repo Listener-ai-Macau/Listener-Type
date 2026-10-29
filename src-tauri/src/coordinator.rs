@@ -2694,17 +2694,10 @@ impl Coordinator {
         let prefs = self.inner.prefs.get();
         let proposal_json = tokio::time::timeout(
             std::time::Duration::from_secs(45),
-            polish_text(
+            polite_suggestions_text(
                 &text,
-                PolishMode::Formal,
-                &[],
                 PROMPT,
-                &[],
-                ChineseScriptPreference::Auto,
-                OutputLanguagePreference::Auto,
                 prefs.llm_thinking_enabled,
-                None,
-                &[],
             ),
         )
         .await
@@ -3912,6 +3905,32 @@ async fn polish_or_passthrough(
             (raw.text.clone(), Some(reason))
         }
     }
+}
+
+/// Request structured wording edits without the normal dictation envelope,
+/// which tells the model to return insertable prose instead of JSON.
+async fn polite_suggestions_text(raw: &str, prompt: &str, thinking: bool) -> anyhow::Result<String> {
+    let active_llm = CredentialsVault::get_active_llm();
+    if active_llm == "gemini" {
+        let (api_key, model, base_url) = read_gemini_credentials()?;
+        let proxy_config = read_llm_proxy_config(&active_llm)?;
+        let provider = GeminiProvider::new(
+            GeminiConfig::new(api_key, model, base_url)
+                .with_thinking_enabled(thinking)
+                .with_proxy_config(proxy_config),
+        );
+        return Ok(provider.polite_suggestions(prompt, raw).await?);
+    }
+    let auth_fingerprint = current_llm_auth_fingerprint()?;
+    if current_llm_auth_is_rejected(auth_fingerprint) {
+        anyhow::bail!("current LLM credentials were already rejected");
+    }
+    let provider = build_active_llm_provider(thinking)?;
+    let result = provider.polite_suggestions(prompt, raw).await;
+    if result.as_ref().is_err_and(llm_error_is_auth_rejection) {
+        note_llm_auth_rejection(auth_fingerprint);
+    }
+    Ok(result?)
 }
 
 async fn polish_text(

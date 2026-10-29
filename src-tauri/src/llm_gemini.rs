@@ -17,7 +17,7 @@ use serde_json::{json, Value};
 
 use crate::polish::{
     clean_polish_output, compose_polish_prompts, compose_qa_system_prompt,
-    compose_translate_prompts, http_client_builder_with_proxy, safe_str_slice, LLMError,
+    compose_translate_prompts, http_client_builder_with_proxy, polite_suggestions_user_prompt, safe_str_slice, LLMError,
     ProviderProxyConfig,
 };
 use crate::types::{ChineseScriptPreference, OutputLanguagePreference, PolishMode, QaChatMessage};
@@ -75,6 +75,14 @@ pub struct GeminiProvider {
 }
 
 impl GeminiProvider {
+    pub async fn polite_suggestions(&self, system_prompt: &str, draft: &str) -> Result<String, LLMError> {
+        let user_prompt = polite_suggestions_user_prompt(draft);
+        let contents = build_polish_history_contents(&[], &user_prompt);
+        let body = self.build_generate_body(system_prompt, contents);
+        let url = generate_content_url(&self.config.base_url, &self.config.model);
+        let body_text = self.send_unary(&url, &body).await?;
+        Ok(clean_polish_output(&extract_assistant_content(&body_text)?))
+    }
     pub fn new(config: GeminiConfig) -> Self {
         let client = http_client_builder_with_proxy(
             &config.base_url,
