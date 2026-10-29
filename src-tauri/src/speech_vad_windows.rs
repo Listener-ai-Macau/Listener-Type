@@ -85,6 +85,11 @@ const VAD_MIN_SILENCE_SECONDS: f32 = 0.25;
 pub(crate) const VAD_MIN_SPEECH_SECONDS: f32 = 0.25;
 const VAD_MAX_SPEECH_SECONDS: f32 = 60.0;
 const VAD_MODEL_NAME: &str = "silero_vad.onnx";
+const VAD_RUNTIME_FILES: [&str; 3] = [
+    "onnxruntime.dll",
+    "onnxruntime_providers_shared.dll",
+    "sherpa-onnx-c-api.dll",
+];
 pub(crate) const VAD_MODEL_SHA256: &str =
     "9E2449E1087496D8D4CABA907F23E0BD3F78D91FA552479BB9C23AC09CBB1FD6";
 
@@ -140,6 +145,7 @@ type DestroySpeechSegment = unsafe extern "C" fn(*const SpeechSegment);
 type DetectorReset = unsafe extern "C" fn(*const VoiceActivityDetector);
 
 pub(crate) struct VadRuntime {
+    runtime_root: PathBuf,
     _onnx: Library,
     _providers: Library,
     _sherpa: Library,
@@ -167,6 +173,26 @@ impl Drop for VadRuntime {
 
 impl VadRuntime {
     pub(crate) fn load(
+        root: &Path,
+        model_path: &Path,
+        min_speech_duration: f32,
+    ) -> Result<Self, String> {
+        let bundled = bundled_vad_runtime_root();
+        let selected = select_vad_runtime_root(root, bundled.as_deref());
+        match Self::load_from_directory(&selected, model_path, min_speech_duration) {
+            Ok(runtime) => Ok(runtime),
+            Err(first_error) => {
+                let fallback = bundled.filter(|path| *path != selected && vad_runtime_complete(path));
+                match fallback {
+                    Some(path) => Self::load_from_directory(&path, model_path, min_speech_duration)
+                        .map_err(|fallback_error| format!("VAD runtime failed in both cache and bundle: {first_error}; {fallback_error}")),
+                    None => Err(first_error),
+                }
+            }
+        }
+    }
+
+    fn load_from_directory(
         root: &Path,
         model_path: &Path,
         min_speech_duration: f32,
@@ -243,6 +269,7 @@ impl VadRuntime {
                 return Err("Sherpa VAD model initialization returned null".to_string());
             }
             Ok(Self {
+                runtime_root: root.to_path_buf(),
                 _onnx: onnx,
                 _providers: providers,
                 _sherpa: sherpa,
@@ -258,6 +285,10 @@ impl VadRuntime {
                 detector_flush,
             })
         }
+    }
+
+    pub(crate) fn runtime_root(&self) -> &Path {
+        &self.runtime_root
     }
 
     pub(crate) fn reset(&self) {
@@ -307,6 +338,39 @@ impl VadRuntime {
         }
         ranges
     }
+}
+
+// Preserve the already installed runtime when it is complete. A new profile
+// may not have enrolled a voiceprint or downloaded the speaker runtime yet;
+// in that case use the CPU runtime shipped with this application. A partial
+// cache must never be mixed with files from a different directory.
+fn vad_runtime_complete(root: &Path) -> bool {
+    VAD_RUNTIME_FILES.iter().all(|name| root.join(name).is_file())
+}
+
+fn select_vad_runtime_root(cached: &Path, bundled: Option<&Path>) -> PathBuf {
+    if vad_runtime_complete(cached) {
+        return cached.to_path_buf();
+    }
+    if let Some(root) = bundled.filter(|root| vad_runtime_complete(root)) {
+        return root.to_path_buf();
+    }
+    cached.to_path_buf()
+}
+
+fn bundled_vad_runtime_root() -> Option<PathBuf> {
+    #[cfg(debug_assertions)]
+    {
+        let development = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/vad-runtime");
+        if development.is_dir() {
+            return Some(development);
+        }
+    }
+    let executable = std::env::current_exe().ok()?;
+    let root = executable.parent()?;
+    [root.join("resources/vad-runtime"), root.join("vad-runtime")]
+        .into_iter()
+        .find(|candidate| candidate.is_dir())
 }
 
 pub(crate) fn ensure_vad_model() -> Result<PathBuf, String> {
@@ -378,4 +442,44 @@ fn sha256_file(path: &Path) -> Result<String, String> {
         hasher.update(&buffer[..count]);
     }
     Ok(format!("{:X}", hasher.finalize()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_selection_preserves_complete_cache_and_never_mixes_partial_files() {
+        let base = std::env::temp_dir().join(format!("listener-vad-test-{}", uuid::Uuid::new_v4()));
+        let cache = base.join("cache");
+        let bundled = base.join("bundled");
+        fs::create_dir_all(&cache).unwrap();
+        fs::create_dir_all(&bundled).unwrap();
+        for name in VAD_RUNTIME_FILES { fs::write(bundled.join(name), b"fixture").unwrap(); }
+        fs::write(cache.join(VAD_RUNTIME_FILES[0]), b"fixture").unwrap();
+        assert_eq!(select_vad_runtime_root(&cache, Some(&bundled)), bundled);
+        for name in VAD_RUNTIME_FILES { fs::write(cache.join(name), b"fixture").unwrap(); }
+        assert_eq!(select_vad_runtime_root(&cache, Some(&bundled)), cache);
+        fs::remove_file(cache.join(VAD_RUNTIME_FILES[1])).unwrap();
+        fs::remove_file(bundled.join(VAD_RUNTIME_FILES[2])).unwrap();
+        assert_eq!(select_vad_runtime_root(&cache, Some(&bundled)), cache);
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn fresh_profile_loads_packaged_cpu_runtime_and_detects_silence() {
+        let cache = std::env::temp_dir().join(format!("listener-vad-empty-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&cache).unwrap();
+        let model = ensure_vad_model().unwrap();
+        let vad = VadRuntime::load(&cache, &model, VAD_MIN_SPEECH_SECONDS).unwrap();
+        assert_eq!(vad.runtime_root(), bundled_vad_runtime_root().unwrap());
+        for _ in 0..32 { vad.accept(&[0.0; VAD_WINDOW_SAMPLES]); }
+        assert!(!vad.detected());
+        drop(vad);
+        for name in VAD_RUNTIME_FILES { fs::write(cache.join(name), b"invalid DLL").unwrap(); }
+        let fallback = VadRuntime::load(&cache, &model, VAD_MIN_SPEECH_SECONDS).unwrap();
+        assert_eq!(fallback.runtime_root(), bundled_vad_runtime_root().unwrap());
+        drop(fallback);
+        fs::remove_dir_all(cache).unwrap();
+    }
 }

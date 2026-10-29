@@ -236,7 +236,7 @@ mod local_speech_vad {
             "[asr] local VAD worker ready model={} sha256={} runtime_root={} pending_onset={}",
             model_path.display(),
             VAD_MODEL_SHA256,
-            runtime_root.display(),
+            runtime.runtime_root().display(),
             pending_runtime.is_some()
         );
 

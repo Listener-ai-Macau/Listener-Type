@@ -116,6 +116,7 @@
       "resources/models/wesep-bsrnn-voicefilter-3s-int8.LICENSE.txt",
       "resources/models/silero_vad.onnx",
       "resources/models/silero_vad.onnx.LICENSE.txt",
+      "resources/vad-runtime/**/*",
       "resources/models/ps4-ecapa-fp32.onnx",
       "resources/models/ps4-bsrnn-fp32.onnx",
       "resources/models/ps4-mel-257x80.f32",
