@@ -9,7 +9,7 @@ result={'scope':__doc__,'passed':False,'cases':[]}
 def settled(page):
  page.wait_for_function("""()=>{let e=document.querySelector('main > .ol-thinscroll');return e&&getComputedStyle(e).opacity==='1'&&!e.style.animation.includes('fadeout')&&!e.getAnimations().some(a=>a.playState==='running');}""")
 with sync_playwright() as pw:
- browser=pw.chromium.launch(headless=True,channel='msedge')
+ browser=pw.chromium.launch(headless=True,channel='msedge',args=['--disable-gpu'])
  try:
   for locale in ['en','zh-CN','zh-TW','ja','ko']:
    context=browser.new_context(viewport={'width':1280,'height':1000})
@@ -36,14 +36,15 @@ with sync_playwright() as pw:
    expect(nav.locator('button')).to_have_count(3);expect(nav.locator('.ol-nav-btn-active')).to_have_count(1)
    page.locator('main > .ol-thinscroll > div').first.get_by_role('button').click()
    expect(page.locator('main > .ol-thinscroll h1')).not_to_have_text(guide_title);settled(page)
-   nav.locator('button').last.click();expect(page.locator('[data-tool]')).to_have_count(4);settled(page)
+   nav.locator('button').last.click();expect(page.locator('[data-tool]')).to_have_count(5);settled(page)
+   assert set(page.locator('[data-tool]').evaluate_all("items=>items.map(e=>e.dataset.tool)"))=={'style','vocab','translation','selectionAsk','audio-file'}
    expect(page.locator('details')).not_to_have_attribute('open','')
    page.locator('summary').click();expect(page.locator('details')).to_have_attribute('open','')
-   expect(page.locator('details button')).to_have_count(6)
+   expect(page.locator('details button')).to_have_count(5)
    page.set_viewport_size({'width':820,'height':720});settled(page)
    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
    if locale=='zh-CN':page.screenshot(path=str(a.report.with_suffix('.png')))
-   result['cases'].append({'locale':locale,'skipGuidePersistsAcrossReload':True,'dailyOverviewServicesAndDeviceStatusRetained':True,'recoverGuideWithOverviewStillActive':True,'sixExistingUtilityEntriesRetained':True,'narrowWidth':820})
+   result['cases'].append({'locale':locale,'skipGuidePersistsAcrossReload':True,'dailyOverviewServicesAndDeviceStatusRetained':True,'recoverGuideWithOverviewStillActive':True,'fivePrimaryAndFiveUtilityEntriesRetained':True,'narrowWidth':820})
    context.close()
   # Failed persistence hides only the current session and says so explicitly.
   context=browser.new_context();page=context.new_page()

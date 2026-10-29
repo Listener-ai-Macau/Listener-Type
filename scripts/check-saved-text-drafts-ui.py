@@ -4,7 +4,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright,expect
 p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--report',required=True,type=Path);p.add_argument('--edit-copy',action='store_true');p.add_argument('--naming',action='store_true');a=p.parse_args();checks=[]
 with sync_playwright() as pw:
- b=pw.chromium.launch(headless=True,channel='msedge')
+ b=pw.chromium.launch(headless=True,channel='msedge',args=['--disable-gpu'])
  try:
   # Deliberately differ from the app's selected English language.
   page=b.new_page(viewport={'width':1280,'height':1000},locale='zh-CN');page.set_default_timeout(6000);page.set_default_navigation_timeout(30000)
