@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T17:23:23.072153+08:00",
+  "updated_at": "2026-10-29T17:29:40.526435+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -10094,7 +10094,7 @@
       "commit": "f7aa6930d4c919a453a7f2c45fffa25efff1cbc8",
       "commit_subject": "Keep numbered list markers outside the light translation model",
       "subject": "Preserve numbered list markers instead of translating them as separate sentences",
-      "state": "actual_light_model_customer_counterexample_corrected_native_delivery_pending",
+      "state": "235_exact_native_light_model_customer_numbered_list_verified_installed",
       "humanAccepted": false,
       "protects": [
         "Line-leading numbered markers with following space stay outside the light model and are restored verbatim; decimal numbers and ordinary sentences remain unchanged.",
@@ -10107,14 +10107,31 @@
       ],
       "machine_evidence": [
         "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/translation234-list-final-actual-contrast.json",
-        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/outputs/Listener-FIRST_USE233-presale-20261029/session-recount.md"
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/outputs/Listener-FIRST_USE233-presale-20261029/session-recount.md",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\translation234-list-final-actual-contrast.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\email233-polite-actual.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\customer232-presale-feedback-handling.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\customer232-aftersale-feedback-handling.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\suggestions235-actual-replay.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\polite235-ui.json",
+        "E:/ListenerAnalysisState/listener-repair-handoff/work/customer-onboarding-20261020/isolated-native235-snapshot-20261029-172817/list-and-suggestions235-native.json",
+        "E:/ListenerAnalysisState/listener-repair-handoff/work/customer-onboarding-20261020/isolated-native235-snapshot-20261029-172817/setup-result.json",
+        "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native235-snapshot-20261029-172846\\recording-recovery235-native.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build235\\type-artifact-verification.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build235\\type235-installed.json"
       ],
       "machine_accepted_scope": [
         "Real CPU model, exact customer synthetic source, decimal and negation controls; matching native build pending."
       ],
       "pending_human_scope": [
         "No universal semantic correctness, live speech or physical qualification."
-      ]
+      ],
+      "delivery": {
+        "build": 235,
+        "source": "91e40c1561ce6c02425a986ae1c032af4476433e",
+        "installed": true,
+        "publicPrepared": true
+      }
     },
     {
       "id": "wording_suggestions_use_explicit_structured_contract",
@@ -10172,7 +10189,7 @@
       ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-29T17:23:23.072153+08:00",
+  "feature_routes_updated_at": "2026-10-29T17:29:40.526435+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -11548,7 +11565,7 @@
     },
     {
       "id": "offline-text-translation",
-      "accepted_scope": "Existing213 ordinary native scope remains. Optional818ed43 CPU candidate has19 worker inputs,13 affected native controls and React quality/cancellation/save checks; new matching MSI/whole-app native use/independent feedback pending. Ordinary214 private native default-light preparation/translation/edit/save/reread/return and owned Cancel/Close source-retention proof added; original evidence and remaining physical/global/other-model limits retained. 8de658fd source checkpoint adds recognized time/year checks to the actual light CPU route; matching native host/package and natural feedback pending. All old semantic and original22 limits remain. Exact220 ordinary MSI private UI verifies full original/edit/translation/cache/v1 save and reread, with the known time-range/after2PM source translated using the existing light CPU assets and saved/reopened exactly. Source CPU checks cover9 complete inputs plus14 retained cases;51 source tests and scoped Rust host/process controls retain their explicit source receipts. Bounded clock parsing and fact guards do not certify all translation semantics or new physical/global/cross-PC behavior. 233 accepts explicit source -> preferred target terms locally; exact marker preservation is checked, but surrounding model meaning still needs review.",
+      "accepted_scope": "Existing213 ordinary native scope remains. Optional818ed43 CPU candidate has19 worker inputs,13 affected native controls and React quality/cancellation/save checks; new matching MSI/whole-app native use/independent feedback pending. Ordinary214 private native default-light preparation/translation/edit/save/reread/return and owned Cancel/Close source-retention proof added; original evidence and remaining physical/global/other-model limits retained. 8de658fd source checkpoint adds recognized time/year checks to the actual light CPU route; matching native host/package and natural feedback pending. All old semantic and original22 limits remain. Exact220 ordinary MSI private UI verifies full original/edit/translation/cache/v1 save and reread, with the known time-range/after2PM source translated using the existing light CPU assets and saved/reopened exactly. Source CPU checks cover9 complete inputs plus14 retained cases;51 source tests and scoped Rust host/process controls retain their explicit source receipts. Bounded clock parsing and fact guards do not certify all translation semantics or new physical/global/cross-PC behavior. 233 accepts explicit source -> preferred target terms locally; exact marker preservation is checked, but surrounding model meaning still needs review. 234 retains numbered line markers outside the light model, preventing their separate translation on the observed customer example.",
       "baseline_state": "214_installed_exact_light_workflow_passed_public_prepared",
       "guard_entries": [
         "offline_translation_optional_verified_worker_no_cloud_fallback",
@@ -11603,7 +11620,9 @@
           "src/lib/protectedTranslation.test.ts",
           "scripts/check-protected-translation-ui.py",
           "src/components/FloatingShell.tsx",
-          "scripts/check-guide-scroll-ui.py"
+          "scripts/check-guide-scroll-ui.py",
+          "src-tauri/src/polish.rs",
+          "src-tauri/src/llm_gemini.rs"
         ]
       }
     },
