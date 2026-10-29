@@ -1,16 +1,16 @@
 {
   "schema": "listener.paired-release.v1",
-  "updatedAt": "2026-10-29T08:47:56.041532+08:00",
+  "updatedAt": "2026-10-29T11:02:04.750872+08:00",
   "version": "1.0.6-rc1",
   "prerelease": true,
   "type": {
-    "build": 224,
-    "source": "6ac9cb46eb53b0590fa7b7c53f5a45ea6c24c111",
-    "sourceTag": "build-source/type224-20261029",
+    "build": 225,
+    "source": "c1ea4de9ecc54f635c8fb0e7f0d4ce0f75a36c50",
+    "sourceTag": "build-source/type225-20261029",
     "file": "ListenerType_1.0.6-rc1_x64_en-US.msi",
-    "sha256": "afa2ddfc3fd92ac7eb386efa47fa6ba1b28a349ada5d404d7e3d593f69619bcc",
-    "sizeBytes": 299868160,
-    "exeSha256": "7d2a308e73a425f719da445ad34df766b28ac491cd0fecf998fdfdaea10a6a45",
+    "sha256": "f1919e3f58d29735ca2fb5650ce835e12d0862004275e396cc5d8871b3ecd590",
+    "sizeBytes": 299872256,
+    "exeSha256": "0da4a855be3da7344ce3567f6d8338f5801d27978c2a851e37c60d4259859f75",
     "url": "https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi"
   },
   "firmware": {
@@ -610,7 +610,13 @@
     "audioRetentionRespected224": true,
     "trueCancelAndNewOwnerProtected224": true,
     "nativeDraftTranslationLightContinuation224": true,
-    "noNewLiveHardwareGlobalCrossPCQualification224": true
+    "noNewLiveHardwareGlobalCrossPCQualification224": true,
+    "startupScopeProductionQueueChecks225": true,
+    "nativeSyntheticFailureRecovery225": true,
+    "nativeExplicitSubmitUi225": true,
+    "nativeDraftContinuationV1Retention225": true,
+    "intermittentGattWriteRootFixed": false,
+    "noNewLiveHardwareGlobalCrossPCQualification225": true
   },
   "remainingLimits": [
     "Strong-interference isolation remains incomplete.",
@@ -628,6 +634,6 @@
     "regressionIndex": "Listener-Type/scripts/regression-guard-commits.json",
     "releaseTagPointsToExactBuiltSource": true,
     "historyTagsPreserved": true,
-    "previousPairedRelease": "history/v1.0.6-rc1-before-build224-20261029"
+    "previousPairedRelease": "history/v1.0.6-rc1-before-build225-20261029"
   }
 }
