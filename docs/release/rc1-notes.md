@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build238 / Firmware38
+# Listener v1.0.6-rc1 · Type build239 / Firmware38
 
 | Download | File |
 | --- | --- |
@@ -7,7 +7,7 @@
 
 ## In this app update
 
-Local translation checks common explicit negative-number forms and a specific case where an unspecified Chinese 元 amount becomes an ungrounded dollar amount. If verification fails, the app keeps the original and asks you to review or choose another method; it does not guess the intended currency. Some valid expressions can be rejected.
+When a user-selected term marker is corrupted in a local Chinese translation, the app retries once locally with a different marker. If it still cannot preserve the selected terms, it keeps the original and reports the problem. The retry can be cancelled and does not use a cloud service. Select terms explicitly and review the full translation.
 
 ## Before using
 
@@ -17,11 +17,11 @@ These bounded checks do not guarantee currency-to-amount association, mixed-curr
 
 ## File identity
 
-- Type source: `bb621b2f1e0010e4e9bd95ce8222bd82f756cedf` · `build-source/type238-20261029`
-- MSI: 299905024 bytes · SHA256 `9c2edb78edb4ecf66db26999c98b5adce09f436a7fbd81736a55d85ee9de3b67`
+- Type source: `5146da8ceae8683dc7d11d8c585d5d583bfefcb8` · `build-source/type239-20261029`
+- MSI: 299913216 bytes · SHA256 `3e527a4424a971b53ed034fd6f312e0ac0472df993f2e3cb589dac756b2eb825`
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`
 - ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`
 
 ## 中文说明
 
-本机翻译检查更多明确负数写法，以及原文未指定美元时“元”被译成美元的已复现情况。无法核对时保留原文并提示，不猜测原文币种；部分正确表达也可能被拦下。
+中文本机翻译中，用户指定术语的保护标记损坏时，软件会换标记在本机重试一次；仍无法保留时保留原文并提示。重试可取消，不使用云端。术语需自行指定，整句仍需核对。
