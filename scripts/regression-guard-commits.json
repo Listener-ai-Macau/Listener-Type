@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T17:50:13.709283+08:00",
+  "updated_at": "2026-10-29T18:12:38.033463+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -10227,6 +10227,32 @@
         "installed": true,
         "publicPrepared": true
       }
+    },
+    {
+      "id": "local_translation_written_negative_numeral_guard",
+      "repo": "type",
+      "commit": "255ad9e099af3f1471470a9ff4edec94b5716aa1",
+      "commit_subject": "Check written negative numbers in local translation",
+      "subject": "Reject loss of negative magnitude written with Chinese or English sign words",
+      "state": "actual_light_cpu_contrast_native_delivery_pending",
+      "humanAccepted": false,
+      "protects": [
+        "Recognize explicit written negative markers and common below-zero forms while retaining dates, IDs, currency punctuation and actual valid below-zero controls."
+      ],
+      "guards": [
+        "python scripts/test_translation_signed_number_fidelity.py",
+        "python scripts/test_translation_time_fidelity.py"
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/translation237-negative-actual-comparison.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/translation237-negative-first-attempt.json"
+      ],
+      "machine_accepted_scope": [
+        "Actual CPU light model: observed negative-100 error rejected and 35 other sampled cases retained; sentence-level semantic accuracy and all below-zero expressions are not guaranteed."
+      ],
+      "pending_human_scope": [
+        "Matching native package and broader semantic, hardware and cross-PC behavior remain unverified."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-29T17:50:13.709283+08:00",
@@ -11619,7 +11645,8 @@
         "long_audio_resume_and_explicit_translation_terms",
         "offline_translation_explicit_preferred_terms",
         "light_translation_numbered_items_not_independent_sentences",
-        "local_translation_explicit_negative_number_guard"
+        "local_translation_explicit_negative_number_guard",
+        "local_translation_written_negative_numeral_guard"
       ],
       "paths": {
         "type": [
