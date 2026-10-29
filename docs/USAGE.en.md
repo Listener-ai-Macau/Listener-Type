@@ -20,7 +20,7 @@ You can view, edit and import/export built-in style packs locally. **That does n
 2. On **Windows Foundry Local Whisper**, keep the default **Whisper Small (whisper-small)**. Base and Tiny are smaller alternatives with a possible accuracy tradeoff.
 3. Check the displayed model size and runtime status. Size comes from the current catalog; “unknown” means it has not been obtained, not a zero-byte download. Total disk use also includes the runtime and extracted files.
 4. Click **Prepare and use local recognition** and wait for download, loading and activation. Cancel or failure preserves the old provider. **Download / load only** does not activate it. Check the loaded-model and active status before recording.
-5. Select **Computer microphone** in Recording settings and keep default **Raw** in Styles. Focus a writable field, press Right Ctrl, speak, and press again to stop and review.
+5. Select **Computer microphone** in Recording settings and keep default **Raw** in Styles. If you want a computer shortcut, assign one in **Settings → Shortcuts** first. Focus a writable field and use that configured recording shortcut to start and stop, then review the text.
 
 This path does not provide automatic polishing or instant use before downloading. Use the size currently shown to decide whether to proceed; unknown download and running-memory sizes are not fixed promises.
 
@@ -30,7 +30,7 @@ This path does not provide automatic polishing or instant use before downloading
 2. Install and open Listener Type. Allow microphone access. Windows installation uses WebView2; prepare its runtime first on an offline computer.
 3. In Settings → Recording, choose Computer microphone. To use a keyboard, charge it over USB-C, click the knob to power on, and start pairing in Settings → Device. Select `listener` in Windows Bluetooth, return to Type and check the connection. Choose Listener BLE as the recording source.
 4. Configure a recognition provider's credentials and model, or prepare the Windows local recognition runtime and model. Try Raw in a plain text editor before adding other services.
-5. Focus the destination field. Press Right Ctrl or click the keyboard knob, speak, and press again to stop. Review the final text. If the application blocks insertion, follow the paste prompt or copy from History.
+5. Focus the destination field. Use your configured recording shortcut or click the keyboard knob to start and stop. Review the final text. If the application blocks insertion, follow the paste prompt or copy from History.
 
 Press Esc while recording to cancel the session. The recording capsule displays a preview; its text does not establish that insertion has succeeded. Streaming insertion is enabled in preferences by default, but actual incremental insertion depends on the platform, provider and mode. The standard installer does not register a system input method.
 
@@ -67,14 +67,14 @@ Use the provider's own account page for actual usage and remaining credit. Hardw
 
 For example, an illustrative draft, “hey Maya can we move Thursday's review to Friday at 10:30 I can send the link by 6 pm Thursday,” could keep its chat tone in Light or use a more restrained request in Formal. In both, Maya, the proposed change, the times and **can send** must remain intact. A proposal must not become a confirmed meeting, and “can send” must not become a promise. These are examples of what to compare, not guaranteed model outputs.
 
-From **Overview → Try typed text**, try a saved style with your own non-sensitive draft and compare the result before using it for dictation. This uses the selected saved prompt without activating it. **Copy result** puts the returned text on the clipboard only when you request it; wait for **Copied**, then paste. Processing alone does not save a History entry or write the clipboard. The saved example is an illustration, separate from your result.
+From **Overview → Open text workspace**, try a saved style with your own non-sensitive draft and compare the result before using it for dictation. This uses the selected saved prompt without activating it. **Copy result** puts the returned text on the clipboard only when you request it; wait for **Copied**, then paste. Processing alone does not save a History entry or write the clipboard. The saved example is an illustration, separate from your result.
 
 | Task | Controls |
 | --- | --- |
 | Preserve wording | Start with Raw. Review the final transcript. |
 | Polish a message | Select Light, Structured or Formal in Styles after configuring a text service. |
 | Customize a style | Clone and edit a style pack; import or export its ZIP. |
-| Translate | Select a target on the Translation page. Tap Shift during recording to mark that session for translation. |
+| Translate | Select a target on the Translation page. If you want a translation shortcut, assign one in Settings → Shortcuts and use it during recording. |
 | Correct terminology | Add terms, notes or presets in Vocabulary. Literal replacement rules help with repeated errors. |
 | Recover a result | View, copy, delete or clear History. Retention defaults to seven days and is adjustable. |
 

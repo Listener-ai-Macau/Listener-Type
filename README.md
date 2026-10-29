@@ -57,10 +57,10 @@ Type build225 retires abandoned automatic-recording takeover requests when recog
 </picture>
 
 1. Place the cursor in the destination field.
-2. Press Right Ctrl, speak, then press it again to stop.
+2. Use your configured recording shortcut or the Listener knob, speak, then use the same control to stop.
 3. Review the inserted text; follow the paste prompt if insertion is blocked.
 
-This illustrates the workflow; it is not a live recording. Raw keeps the original by default. Choose a style or translation when needed.
+Computer shortcuts start unassigned. Set only the ones you want in **Settings → Shortcuts**; updates keep existing saved bindings. This illustrates the workflow; it is not a live recording. Raw keeps the original by default. Choose a style or translation when needed.
 
 ## Make your first dictation
 
@@ -75,7 +75,7 @@ Windows is the primary installation and full keyboard-audio path. macOS / Linux 
 
 ### Free app, separate service costs
 
-**Local text translation:** Tools → Translation, or Try typed text → choose an output language. On 64-bit Windows, Chinese ↔ English translation runs on your computer without a text-provider API key or per-translation API fee. Choose the original language and explicitly download its components once (about 113 MB for the first Chinese→English setup, including the runtime). Components stay outside the MSI; later translations use CPU and an on-demand worker. Review the result before using it. Other offline languages are not qualified yet; existing cloud translation remains an explicit option with provider charges. Voice recognition is a separate step and keeps its existing setup and fees.
+**Local text translation:** Tools → Translation, or Overview → Open text workspace → choose Translate text and an output language. On 64-bit Windows, Chinese ↔ English translation runs on your computer without a text-provider API key or per-translation API fee. Choose the original language and explicitly download its components once (about 113 MB for the first Chinese→English setup, including the runtime). Components stay outside the MSI; later translations use CPU and an on-demand worker. Review the result before using it. Other offline languages are not qualified yet; existing cloud translation remains an explicit option with provider charges. Voice recognition is a separate step and keeps its existing setup and fees.
 
 The app is free; cloud costs are set by each provider. Without an API key, prepare a Windows local model and start with Raw.
 
@@ -97,9 +97,9 @@ The app is free; cloud costs are set by each provider. Without an API key, prepa
 | Keep the original wording | Raw dictation, recording-capsule preview, cursor insertion and clipboard fallback |
 | Tidy a message or email | Light / Formal; optional Everyday list for several action points |
 | Prepare instructions for an AI coding tool | Structured; styles support editing and ZIP import/export |
-| Write in another language | Select a target, then tap Shift during recording |
+| Write in another language | Select a target and use your configured translation shortcut during recording |
 | Help with names and terminology | Local vocabulary, presets and literal correction rules |
-| Ask about a passage | Select text, open QA with Ctrl+Shift+;, then use the recording key to ask |
+| Ask about a passage | Set a question shortcut in Settings → Shortcuts, select text, then use that shortcut to open QA and ask |
 | Recover previous text | History, copy, delete and retention controls |
 
 Streaming insertion is enabled in preferences by default; actual incremental insertion depends on the platform, mode and provider. Text in the recording capsule is a preview, not confirmation that it has been inserted into the target field.
@@ -108,13 +108,13 @@ Streaming insertion is enabled in preferences by default; actual incremental ins
 
 **Raw is the default.** Styles and translation require configuration. For example, Light may turn “um, remind me about tomorrow's three o'clock meeting” into “Remind me about tomorrow's 3 pm meeting.” This illustrates a style, not a guaranteed output.
 
-Want to compare styles before speaking? Use **Overview → Try typed text** with your own draft, then **Copy result**. [Choosing Light or Formal](docs/USAGE.en.md#choose-light-or-formal-for-the-message-you-have) explains what changes to expect; [estimating service costs](docs/USAGE.en.md#estimate-your-own-service-costs) separates audio recognition from text processing and shows where to check actual usage.
+Want to compare styles before speaking? Use **Overview → Open text workspace** with your own draft, then **Copy result**. [Choosing Light or Formal](docs/USAGE.en.md#choose-light-or-formal-for-the-message-you-have) explains what changes to expect; [estimating service costs](docs/USAGE.en.md#estimate-your-own-service-costs) separates audio recognition from text processing and shows where to check actual usage.
 
 ## One knob. Four keys. Six status lights.
 
 **US$49 buys the hardware:** its own microphone, Bluetooth audio to Type, a recording/volume knob, four customizable keys and six status lights. The microphone and controls can sit beside your working hand. Each board keeps its own settings.
 
-The free app uses your computer microphone and Right Ctrl. With Listener selected, audio comes from the device microphone instead. Both routes use the recognition service or local model configured on the computer; the hardware price does not include cloud usage. Windows Type is required for the full device-audio path. Review results in noise or overlapping speech.
+The free app can use your computer microphone; configure a recording shortcut only if you want one. With Listener selected, audio comes from the device microphone instead. Both routes use the recognition service or local model configured on the computer; the hardware price does not include cloud usage. Windows Type is required for the full device-audio path. Review results in noise or overlapping speech.
 
 
 **The optional keyboard is in its presale phase; a purchase link has not been announced. You can use the app on its own now.**
