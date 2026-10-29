@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T12:58:05.446843+08:00",
+  "updated_at": "2026-10-29T13:45:00.030367+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9667,7 +9667,7 @@
       "commit": "7d4740c2b47751405e753a2af96c53e0ec621f22",
       "commit_subject": "Show actual text request wait and keep source confirmation beside language choice",
       "subject": "Show real elapsed wait for explicit text submissions and place Chinese confirmation next to its source selector",
-      "state": "source_checkpoint_affected_React_and_frontend_build_verified_not_packaged",
+      "state": "226_installed_public_exact_pair_and_complete_AI_customer_text_use_verified",
       "humanAccepted": false,
       "protects": [
         "Pending seconds measure the current explicit submission with a monotonic clock; no fake progress, estimated completion, new request or service-stage claim.",
@@ -9684,16 +9684,24 @@
         "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/workspace-pending225-affected-ui-after2.json",
         "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/workspace-pending225-readiness-ui.json",
         "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/workspace-pending225-frontend-build.log",
-        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/customer225-local-translation-attribution.json"
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/customer225-local-translation-attribution.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\outputs\\Listener-build226-delivery.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\customer226-presale-feedback-handling.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\customer226-aftersale-feedback-handling.json"
       ],
       "machine_accepted_scope": [
         "Headless actual React with controlled IPC:10 viewport/zoom/scroll measurements, local/cloud explicit pending/completion and late closed-workspace reply, immutable edited save/retrieval, source confirmation and readiness privacy boundary.",
         "Five locale strings typechecked and frontend bundled; no actual cloud, new capture, clipboard, hardware or native delivery in this source checkpoint."
       ],
       "pending_human_scope": [
-        "Source checkpoint not installed/published; retain public/daily225. No independent customer has used this change.",
-        "Original radio/GATT cause, brownout, remaining real OS target and second-computer/long-term scopes remain open."
-      ]
+        "Original live/physical/global/other-PC/long-term boundaries retained. Both226 AI text roles completed and handled; not real-order or all-hardware acceptance."
+      ],
+      "delivery": {
+        "build": 226,
+        "source": "918c06bf6e63ab548ecec652da915a95cdc0448b",
+        "installed": true,
+        "published": true
+      }
     },
     {
       "id": "saved_text_recovery_locations_match_visible_history_and_saved_names",
@@ -9701,7 +9709,7 @@
       "commit": "438f8ee7b19e190784b3c9a52b3d25d02560311c",
       "commit_subject": "Keep saved text names and recovery locations consistent across the writing workflow",
       "subject": "Keep saved-result terminology and recovery paths aligned with the actual History library without changing saved data",
-      "state": "ordinary226_native_text_workflow_verified_installed_customer_pending",
+      "state": "226_installed_public_exact_pair_and_complete_AI_customer_text_use_verified",
       "humanAccepted": false,
       "protects": [
         "Saved-result acknowledgements and full-library recovery point to History → Saved drafts in all five locales. Empty recording History explicitly points to the separate saved-text library.",
@@ -9726,24 +9734,61 @@
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\release-closeout226-first-use-ui-after3.json",
         "E:\\ListenerAnalysisState\\listener-repair-handoff\\work\\customer-onboarding-20261020\\isolated-native226-snapshot-20261029-125504\\recording-recovery226-native.json",
         "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build226\\type-artifact-verification.json",
-        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build226\\type226-installed.json"
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-04\\listener-repair-handoff\\outputs\\release-rc1-20261029-build226\\type226-installed.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\outputs\\Listener-build226-delivery.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\customer226-presale-feedback-handling.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\customer226-aftersale-feedback-handling.json"
       ],
       "machine_accepted_scope": [
         "Actual headless React save/name/edit-copy/history/copy/delete/failure workflow, five-locale first-use hide/reload/recover, pending local/cloud time and late closed-workspace reply, narrow/wide/zoom controls. GPU disabled; no actual service/microphone/Owner clipboard/physical acceptance.",
         "First-use fixture expected obsolete4 primary/6 utility cards, while unchanged225/current Tools has5/5. Both failures preserved and test corrected; not a product regression or new feature."
       ],
       "pending_human_scope": [
-        "Matching226 MSI ordinary native workflow and usable batch delivery/customer feedback remain pending. Original physical/global/other-computer and historic fault limits remain separately recorded."
+        "Original live/physical/global/other-PC/long-term boundaries retained. Both226 AI text roles completed and handled; not real-order or all-hardware acceptance."
       ],
       "delivery": {
         "build": 226,
         "source": "918c06bf6e63ab548ecec652da915a95cdc0448b",
         "installed": true,
-        "publicPrepared": true
+        "published": true
       }
+    },
+    {
+      "id": "formal_factory_role_and_local_model_choice_help",
+      "repo": "type",
+      "commit": "1cc262d2e90a443a235f07ebda37dc6800b0efec",
+      "commit_subject": "Let factory Formal rephrase without adding facts and explain local model choices",
+      "subject": "Remove factory Formal no-rewrite conflict while preserving customized prompts and show local model tradeoffs before selection/download",
+      "state": "source_native_and_actual_React_verified_matching227_delivery_pending",
+      "humanAccepted": false,
+      "protects": [
+        "Only the exact previous factory Formal template is upgraded at shared runtime composition; custom prompts and persisted bytes are retained; non-Formal defaults unchanged.",
+        "Current factory Formal permits professional rewording and paragraphs without fact expansion; effective runtime preview and provider paths use the same composition.",
+        "Current and previous factory prompt matching/hotword assembly preserve facts, custom rules, working-language and output rules; old exact factory fingerprint is d15a2008588da0a442acd7fe1374f30eff79b583abb3160283441be4355c36fd.",
+        "Light/enhanced choice help is reachable before switching/downloading, documents existing CPU, size and RAM tradeoffs without promising accuracy; enhanced selected hint remains visible. Model selection never downloads/translates."
+      ],
+      "guards": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --lib --locked formal_factory_ -- --test-threads=1",
+        "python scripts/check-local-translation-ui.py --url <controlled-ui> --report <result>",
+        "node --experimental-strip-types src/lib/bufferedSourceFacts.test.ts",
+        "npm run build"
+      ],
+      "machine_evidence": [
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\outputs\\Listener-formal227-source.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\native227-formal-affected-summary.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\local-model-help227-ui-after.json",
+        "C:\\Users\\Billy\\Documents\\Codex\\2026-10-27\\listener-delivery-20261027\\work\\formal227-role-contrast.json"
+      ],
+      "machine_accepted_scope": [
+        "Two explicit existing226 production text-service contrasts using one generic role line; real original customer example restructured and passes unchanged source-fact boundary. The other response retains facts but existing clock negation scope conservatively rejects its em-dash form; guard was not loosened. No universal model-quality claim.",
+        "Current native compatibility/composition/common-rule cases compiled and pass; existing fact guards pass; actual React17 route/cache/model/readiness/save/recovery checks pass with GPU disabled. First ambiguous nested-summary fixture failure retained and selector scoped, not product fix."
+      ],
+      "pending_human_scope": [
+        "Matching227 ordinary MSI and coherent delivery plus neutral full customer use are pending. No live/physical/global/second-PC/long-term acceptance inferred."
+      ]
     }
   ],
-  "feature_routes_updated_at": "2026-10-29T12:58:05.446843+08:00",
+  "feature_routes_updated_at": "2026-10-29T13:45:00.030367+08:00",
   "feature_routes": [
     {
       "id": "wake-latency",
@@ -10941,7 +10986,7 @@
     },
     {
       "id": "text-workspace-clarity",
-      "accepted_scope": "Text workspace visual hierarchy and content-first saved-draft discovery only; speech/BLE/firmware unchanged. Type142 binds processing notice/eligibility to selected style/revision/retry; exact private MSI verifies actual policy/labels and separate actual-React fixtures cover delays, not a real unauthorized cloud request or visible-duration measurement. Exact ordinary215 private native submit/Close hit testing at both content scroll ends, real light translation and Cancel, keyless cloud-switch fee/confirmation visibility and exact edited-save/library-return proof added; no original22/global/physical/cross-PC closure. Fresh result Copy/Save/Continue/cloud actions are mouse-hit-testable after output without manual scrolling in desktop/narrow/zoomed views; native source/cache/v1 save checks match the exact candidate. No interactive global/hardware/cross-PC acceptance change. Full219 result lifecycle direct mouse checks cover named/saved-expanded states, library return, content top/bottom and private narrow viewport; original/source/cache/v1 saves and optional-shortcut guidance retained. Not a new speech/hardware/global/cross-PC qualification. Type222 current-input buffered rewrite fact matching and fixed audio result action/retention areas passed controlled source/failure/cache/save workflows and exact ordinary MSI native UI/storage. The native probe used the real public-sample speech service and an explicitly controlled loopback compatible text service; it does not qualify all language/model meaning, live speech, hardware, global or cross-PC behavior. Original scopes and separate translation/generation contracts remain. Type223 extends bounded current-input fact matching to English/Chinese-target buffered cloud translation, contextual clocks and negated corrections, legitimate translated counts and recognized duration units. Controlled source and exact MSI loopback protocol/native v1 save/manual/reread/recovery proof retain their explicit scope; not all semantics, languages or live/physical/OS qualification. Type226 makes elapsed wait visible without fake service stages or extra requests, keeps explicit source confirmation with its language selector, and aligns saved text names/recovery with the History library. Matching ordinary MSI loopback pending/explicit submit/v1 save/history recovery proof is separate from current unchanged225 audio source and original field/physical limits.",
+      "accepted_scope": "Text workspace visual hierarchy and content-first saved-draft discovery only; speech/BLE/firmware unchanged. Type142 binds processing notice/eligibility to selected style/revision/retry; exact private MSI verifies actual policy/labels and separate actual-React fixtures cover delays, not a real unauthorized cloud request or visible-duration measurement. Exact ordinary215 private native submit/Close hit testing at both content scroll ends, real light translation and Cancel, keyless cloud-switch fee/confirmation visibility and exact edited-save/library-return proof added; no original22/global/physical/cross-PC closure. Fresh result Copy/Save/Continue/cloud actions are mouse-hit-testable after output without manual scrolling in desktop/narrow/zoomed views; native source/cache/v1 save checks match the exact candidate. No interactive global/hardware/cross-PC acceptance change. Full219 result lifecycle direct mouse checks cover named/saved-expanded states, library return, content top/bottom and private narrow viewport; original/source/cache/v1 saves and optional-shortcut guidance retained. Not a new speech/hardware/global/cross-PC qualification. Type222 current-input buffered rewrite fact matching and fixed audio result action/retention areas passed controlled source/failure/cache/save workflows and exact ordinary MSI native UI/storage. The native probe used the real public-sample speech service and an explicitly controlled loopback compatible text service; it does not qualify all language/model meaning, live speech, hardware, global or cross-PC behavior. Original scopes and separate translation/generation contracts remain. Type223 extends bounded current-input fact matching to English/Chinese-target buffered cloud translation, contextual clocks and negated corrections, legitimate translated counts and recognized duration units. Controlled source and exact MSI loopback protocol/native v1 save/manual/reread/recovery proof retain their explicit scope; not all semantics, languages or live/physical/OS qualification. Type226 makes elapsed wait visible without fake service stages or extra requests, keeps explicit source confirmation with its language selector, and aligns saved text names/recovery with the History library. Matching ordinary MSI loopback pending/explicit submit/v1 save/history recovery proof is separate from current unchanged225 audio source and original field/physical limits. Factory Formal role compatibility and explicit model-choice help have scoped current source/native/React evidence; matching227 delivery/customer evidence remains separate. This does not establish universal generated quality, speech, physical or other-PC qualification.",
       "baseline_state": "affected_ui_exact_native_installed_verified_not_customer_or_physical_qualified",
       "guard_entries": [
         "ui135_text_workspace_focus_and_content_first_saved_drafts",
@@ -10953,7 +10998,8 @@
         "buffered_current_input_facts_and_audio_result_action_reachability",
         "buffered_cloud_translation_recognized_facts_and_unchanged_notice",
         "workspace_pending_elapsed_and_adjacent_source_confirmation",
-        "saved_text_recovery_locations_match_visible_history_and_saved_names"
+        "saved_text_recovery_locations_match_visible_history_and_saved_names",
+        "formal_factory_role_and_local_model_choice_help"
       ],
       "paths": {
         "type": [
@@ -10988,7 +11034,10 @@
           "src/i18n/sourceFacts.ts",
           "src/i18n/firstUse.ts",
           "src/i18n/textDraft.ts",
-          "src/i18n/offlineHelp.ts"
+          "src/i18n/offlineHelp.ts",
+          "src-tauri/src/types.rs",
+          "src-tauri/src/polish.rs",
+          "src/i18n/localTranslation.ts"
         ]
       }
     },
