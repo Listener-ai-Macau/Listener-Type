@@ -19,8 +19,10 @@ import time
 import urllib.error
 import urllib.request
 
-_RESERVE = 2 * 1024**3
-_ADMISSION = 4386193408
+# Avoid a fixed multi-gigabyte admission gate: model mappings and available
+# memory vary across machines. Stop the owned worker if the system actually
+# reaches a critically low reserve; never switch to a cloud service.
+_RESERVE = 512 * 1024**2
 _CONTEXT = 8192
 _OUTPUT = 4096
 
@@ -85,8 +87,6 @@ def _translate_enhanced(request):
     runtime, model = Path(request['runtime']), Path(request['model'])
     if not (runtime / 'llama-server.exe').is_file() or not model.is_file() or (runtime / 'ggml-vulkan.dll').exists():
         raise ValueError('local_translation_not_ready')
-    if _available_memory() < _ADMISSION:
-        raise ValueError('local_translation_memory_low')
     with socket.socket() as reservation:
         reservation.bind(('127.0.0.1', 0))
         port = reservation.getsockname()[1]

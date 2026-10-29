@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { createStylePackFromTemplate, listStylePacks } from '../lib/ipc';
 import { everydayListStyle, isEverydayListStyle } from '../lib/everydayListStyle';
 import { conciseDraftStyle, isConciseDraftStyle } from '../lib/conciseDraftStyle';
-import { emailDraftStyle, isEmailDraftStyle, isMessageBodyDraftStyle, isMessageDraftStyle, messageDraftStyle } from '../lib/messageDraftStyle';
+import { emailDraftStyle, isCurrentEmailDraftStyle, isMessageBodyDraftStyle, isMessageDraftStyle, messageDraftStyle } from '../lib/messageDraftStyle';
 import type { StylePack } from '../lib/types';
 import { Btn } from '../pages/_atoms';
 import { StyleTextTrial } from './StyleTextTrial';
@@ -53,7 +53,7 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTran
   const savedEverydayList = packs.find(isEverydayListStyle);
   const savedConcise = packs.find(isConciseDraftStyle);
   const savedMessageDraft = packs.find(isMessageBodyDraftStyle);
-  const savedEmailDraft = packs.find(isEmailDraftStyle);
+  const savedEmailDraft = packs.find(isCurrentEmailDraftStyle);
   const prepareConcise = async (): Promise<StylePack> => {
     if (savedConcise) return savedConcise;
     if (addingRef.current) throw new Error('style_trial_prepare_shorter_failed');
@@ -138,7 +138,7 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTran
       hint: t('messageDraft.hint'), pending: adding !== null,
       error: addFailed === 'draft' ? t('messageDraft.failed') : '', onChoose: () => void chooseMessageDraft(),
     } : undefined}
-    emailDraftingChoice={!translationTarget && selected && !isEmailDraftStyle(selected) ? {
+    emailDraftingChoice={!translationTarget && selected && !isCurrentEmailDraftStyle(selected) ? {
       label: t(savedEmailDraft ? 'messageDraft.emailChoose' : 'messageDraft.emailAdd'),
       hint: t('messageDraft.emailHint'), pending: adding !== null,
       error: addFailed === 'email' ? t('messageDraft.emailFailed') : '', onChoose: () => void chooseEmailDraft(),

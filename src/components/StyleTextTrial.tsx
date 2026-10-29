@@ -17,7 +17,7 @@ import { canSuggestChineseSource, localTargetCode, localTranslationErrorKey, loc
 import type { TranslationEngine, LocalTranslationReadiness, LocalTranslationQuality } from '../lib/localTranslation';
 import { SavedTextDraftsDialog } from './SavedTextDraftsDialog';
 import { BufferedSourceFactError, preserveBufferedSourceFacts, preserveTranslatedSourceFacts } from '../lib/bufferedSourceFacts';
-import { isMessageDraftStyle } from '../lib/messageDraftStyle';
+import { isEmailDraftStyle, isMessageDraftStyle, removeUnrequestedEmailSignaturePlaceholder } from '../lib/messageDraftStyle';
 
 function withDraftOriginName(origin: string, suffix: string): string {
   const room = Math.max(0, 80 - Array.from(suffix).length - 3);
@@ -259,7 +259,10 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         // This response belongs to this exact current input. Validate before
         // caching/display/save, never by rewriting later manual edits or by
         // secretly sending an earlier workflow original back to a service.
-        const baseValue = offline ? { ...returned, packId: target.id, packName: target.name } : returned;
+        const routedValue = offline ? { ...returned, packId: target.id, packName: target.name } : returned;
+        const baseValue = !translationTarget && isEmailDraftStyle(target) && returned.usedTextService
+          ? { ...routedValue, outputText: removeUnrequestedEmailSignaturePlaceholder(draft, routedValue.outputText) }
+          : routedValue;
         const review = !matching && returned.usedTextService
           ? translationTarget && localTargetCode(translationTarget) ? preserveTranslatedSourceFacts
             : !translationTarget && target.baseMode !== 'raw' && !isMessageDraftStyle(target) ? preserveBufferedSourceFacts : null

@@ -22,17 +22,31 @@ export function isMessageBodyDraftStyle(pack: StylePack): boolean {
 }
 
 /** A separate explicit choice; existing body-only drafts remain unchanged. */
-export const EMAIL_DRAFT_PROMPT = MESSAGE_DRAFT_PROMPT.replace(
+export const LEGACY_EMAIL_DRAFT_PROMPT = MESSAGE_DRAFT_PROMPT.replace(
   'Return only the usable message body. No writing advice, instruction list, explanation, preface or code fence.',
   'Return one concise email subject followed by the usable message body. Label the subject in the output language and place it on its own line, then a blank line and the body. The subject must reflect only the supplied facts. No writing advice, instruction list, explanation, preface or code fence.'
 );
+export const EMAIL_DRAFT_PROMPT = LEGACY_EMAIL_DRAFT_PROMPT.replace(
+  'For an existing message, make only changes needed for the requested writing task.',
+  'Do not imply a meeting, conversation, previous reply, work or time spent by the recipient unless the brief states it. Politeness must not introduce an unverified event or action. Do not add a signature, a name placeholder or bracketed sign-off unless the brief requests it. For an existing message, make only changes needed for the requested writing task.'
+);
 export function isEmailDraftStyle(pack: StylePack): boolean {
+  return pack.kind === 'imported' && pack.baseMode === 'formal' && [EMAIL_DRAFT_PROMPT, LEGACY_EMAIL_DRAFT_PROMPT].includes(pack.prompt);
+}
+export function isCurrentEmailDraftStyle(pack: StylePack): boolean {
   return pack.kind === 'imported' && pack.baseMode === 'formal' && pack.prompt === EMAIL_DRAFT_PROMPT;
 }
 export function emailDraftStyle(t: TFunction): StylePack {
   return { id: '', name: t('messageDraft.emailName'), description: t('messageDraft.emailDescription'),
     version: '1.0.0', kind: 'imported', baseMode: 'formal', prompt: EMAIL_DRAFT_PROMPT,
     examples: [], tags: [], enabled: true, active: false };
+}
+
+/** Remove an unsolicited, empty sender-name placeholder only at the end of a
+ * generated email. Explicit signature requests and all later edits are kept. */
+export function removeUnrequestedEmailSignaturePlaceholder(source: string, output: string): string {
+  if (/\b(?:signature|sign(?:ed|ing)?|sign[- ]?off|sender.?s? name|your name|my name)\b|署名|签名|簽名|签字|簽字|落款|名字|姓名/u.test(source.toLowerCase())) return output;
+  return output.replace(/\r?\n[ \t]*\[(?:your name|your signature|sender(?:'s)? name|您的姓名|你的姓名|发件人姓名|寄件人姓名)\][ \t]*(?:\r?\n)?[ \t]*$/iu, '');
 }
 
 export function messageDraftStyle(t: TFunction): StylePack {

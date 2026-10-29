@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import { EMAIL_DRAFT_PROMPT, LEGACY_EMAIL_DRAFT_PROMPT, MESSAGE_DRAFT_PROMPT, isCurrentEmailDraftStyle, isEmailDraftStyle, isMessageDraftStyle, removeUnrequestedEmailSignaturePlaceholder as clean } from './messageDraftStyle.ts';
+import type { StylePack } from './types.ts';
+
+const pack = (prompt: string): StylePack => ({ id:'test', name:'test', description:'', version:'1', kind:'imported', baseMode:'formal', prompt, examples:[], tags:[], enabled:true, active:false });
+assert.ok(isEmailDraftStyle(pack(LEGACY_EMAIL_DRAFT_PROMPT)), 'the existing saved email style remains recognized');
+assert.ok(isMessageDraftStyle(pack(LEGACY_EMAIL_DRAFT_PROMPT)), 'old drafts remain instruction drafting, not rewrite');
+assert.ok(!isCurrentEmailDraftStyle(pack(LEGACY_EMAIL_DRAFT_PROMPT)), 'do not silently reuse the old prompt as the updated one');
+assert.ok(isCurrentEmailDraftStyle(pack(EMAIL_DRAFT_PROMPT)));
+assert.ok(isMessageDraftStyle(pack(MESSAGE_DRAFT_PROMPT)), 'the existing body-only style is unchanged');
+assert.match(EMAIL_DRAFT_PROMPT, /Do not imply a meeting, conversation, previous reply, work or time spent by the recipient unless the brief states it/);
+assert.match(EMAIL_DRAFT_PROMPT, /one concise email subject/);
+assert.ok(!isEmailDraftStyle(pack(EMAIL_DRAFT_PROMPT+' user modification')), 'custom edits are never mistaken for factory prompt');
+assert.equal(clean('请写邮件给 Maya。', 'Subject: Update\n\nThank you,\n[Your Name]'), 'Subject: Update\n\nThank you,');
+assert.equal(clean('Please add my name and signature.', 'Thanks,\n[Your Name]'), 'Thanks,\n[Your Name]');
+assert.equal(clean('请留签名。', '谢谢，\n[您的姓名]'), '谢谢，\n[您的姓名]');
+assert.equal(clean('Please include [Your Name].', 'Thanks,\n[Your Name]'), 'Thanks,\n[Your Name]');
+assert.equal(clean('请写邮件。', 'Use [Your Name] to fill the form.\nThanks.'), 'Use [Your Name] to fill the form.\nThanks.');
+assert.equal(clean('请写邮件。', 'Thanks,\n[Maya]'), 'Thanks,\n[Maya]');
+console.log('PASS email draft version recognition, preservation of old and custom styles, and explicit unverified-interaction constraint');

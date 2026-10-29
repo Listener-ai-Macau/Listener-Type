@@ -60,7 +60,7 @@ with sync_playwright() as pw:
   expect(help.locator('summary')).to_have_text('Choosing light or enhanced')
   help.locator('summary').click()
   expect(help).to_contain_text('about 1.2 GB')
-  expect(help).to_contain_text('about 4.4 GB')
+  expect(help).to_contain_text('If the computer runs low on memory')
   expect(help).to_contain_text('Both can misread or omit names, addresses and specialist terms')
   expect(help).to_contain_text('Selection does not download or translate')
   expect(page.locator('.ol-style-trial-input')).to_have_value('保留这份输入')
@@ -230,6 +230,12 @@ with sync_playwright() as pw:
    expect(page.locator('.ol-style-trial-result-editor')).to_have_count(0)
    expect(engine).to_have_value('local');assert calls('try_translation_text')==[]
   checks.append('Time/year fidelity rejection retains the exact source, accepts no partial result and never silently uploads or selects cloud; the existing explicit method selector remains available')
+  page.evaluate("window.__offlineFail='local_translation_memory_low'");run.click()
+  expect(page.locator('dialog[open] [role=alert]')).to_contain_text('not enough available memory')
+  expect(page.locator('.ol-style-trial-input')).to_have_value('另一份原文，不要丢失。')
+  expect(page.locator('.ol-style-trial-result-editor')).to_have_count(0)
+  expect(engine).to_have_value('local');assert calls('try_translation_text')==[]
+  checks.append('Actual memory-low outcome retains the exact source without partial output or cloud fallback')
   page.get_by_role('combobox',name='Translate output to',exact=True).select_option('日本語')
   expect(run).to_be_disabled();expect(setup).to_contain_text('Chinese ↔ English')
   expect(engine).to_have_value('local');assert calls('try_translation_text')==[]
@@ -264,7 +270,7 @@ with sync_playwright() as pw:
   options=page.locator('[data-text-options-panel]');options.locator(':scope > summary').click()
   quality=page.get_by_role('combobox',name='Local model',exact=True);count=len(calls('prepare_local_translation'));translated=len(calls('try_local_translation_text'))
   quality.select_option('enhanced');expect(run).to_be_disabled();expect(page.locator('.ol-style-trial-result-editor')).to_have_count(0)
-  expect(page.locator('[data-local-translation-setup]')).to_contain_text('available RAM')
+  expect(page.locator('[data-local-translation-setup]')).to_contain_text('runs low on memory')
   assert len(calls('prepare_local_translation'))==count and len(calls('try_local_translation_text'))==translated
   quality.select_option('standard');expect(run).to_be_enabled();expect(page.locator('.ol-style-trial-result-editor')).to_have_value('Do not send the email; save the draft only.')
   quality.select_option('enhanced');page.get_by_role('button',name=re.compile('Download offline components')).click()
