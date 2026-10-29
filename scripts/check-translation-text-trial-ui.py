@@ -57,7 +57,7 @@ with sync_playwright() as pw:
   checks.append('401 is visible and keeps the source; no fake successful raw translation')
   close_trial();page.evaluate('window.__authFailure=false');open_trial()
   original='Original source — 条件😀\nKeep the condition.';reviewed='Reviewed source — 条件😀\nKeep the condition.'
-  page.locator('.ol-style-trial-input').fill(original);page.get_by_role('button',name='Try this text',exact=True).click()
+  page.locator('.ol-style-trial-input').fill(original);page.get_by_role('button',name=re.compile(r'^(?:Try this text|Process text|Generate draft|Preparing…)$'),exact=True).click()
   page.get_by_label('Result text',exact=True).fill(reviewed)
   before=page.evaluate('window.__translationCalls.length');page.get_by_role('button',name='Translate this result…',exact=True).click()
   expect(page.locator('.ol-style-trial-input')).to_have_value(reviewed)
@@ -77,7 +77,7 @@ with sync_playwright() as pw:
   expect(previous.locator('pre').first).to_have_text(edited);expect(previous.locator('details')).to_have_attribute('open','');expect(previous.locator('pre').nth(1)).to_be_visible();expect(previous.locator('pre').nth(1)).to_have_text(reviewed)
   expect(page.locator('[data-translation-refine-hint]')).to_contain_text('does not compare it with the original')
   assert not any(x['cmd'].startswith('try_') or x['cmd']=='save_text_draft' for x in page.evaluate('window.__translationCalls')[before:])
-  page.get_by_role('button',name='Try this text',exact=True).click();expect(page.get_by_label('Result text',exact=True)).to_have_value(edited)
+  page.get_by_role('button',name=re.compile(r'^(?:Try this text|Process text|Generate draft|Preparing…)$'),exact=True).click();expect(page.get_by_label('Result text',exact=True)).to_have_value(edited)
   page.get_by_role('button',name='Save draft',exact=True).click();expect(page.get_by_role('button',name='Saved draft',exact=True)).to_be_disabled()
   saved=[x['args'] for x in page.evaluate('window.__translationCalls') if x['cmd']=='save_text_draft'];assert saved[-1]['original']==edited and saved[-1]['text']==edited
   checks.append('translation-to-refinement is explicit, rejects over-limit handoff without truncation, retains the correct previous source/output and saves only the separately submitted current input/result')

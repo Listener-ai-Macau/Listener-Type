@@ -64,7 +64,7 @@ with sync_playwright() as pw:
   expect(help).not_to_have_attribute('open','')
   expect(trial.get_by_text('Make shorter uses your text service.',exact=False)).not_to_be_visible()
   text='Reviewed text — 条件😀\nKeep Thursday at three.'
-  trial.get_by_label('Your text',exact=True).fill(text);trial.get_by_role('button',name='Try this text',exact=True).click()
+  trial.get_by_label('Your text',exact=True).fill(text);trial.get_by_role('button',name=re.compile(r'^(?:Try this text|Process text|Generate draft|Preparing…)$'),exact=True).click()
   expect(trial.get_by_label('Result text',exact=True)).to_have_value(text)
   boxes=trial.evaluate("e=>Object.fromEntries(['.ol-style-trial-input','.ol-style-trial-result-editor'].map(s=>[s,Math.round(e.querySelector(s).getBoundingClientRect().height)]))")
   assert abs(boxes['.ol-style-trial-input']-boxes['.ol-style-trial-result-editor'])<=2,boxes

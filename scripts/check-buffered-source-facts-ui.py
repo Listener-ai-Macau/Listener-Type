@@ -28,7 +28,7 @@ window.__factFixture=(cmd,args,mock)=>{window.__factCalls.push({cmd,args});
   page.get_by_role('button',name='Open text workspace',exact=True).click();d=page.locator('dialog.ol-style-trial[open]')
   d.get_by_label('Your text',exact=True).fill(source)
   d.locator('select:has(option[value="builtin.formal"])').select_option('builtin.formal')
-  d.get_by_role('button',name='Try this text',exact=True).click()
+  d.get_by_role('button',name=re.compile(r'^(?:Try this text|Process text|Generate draft|Preparing…)$'),exact=True).click()
   editor=d.get_by_label('Result text',exact=True);expect(editor).not_to_have_value('')
   actual=editor.input_value();r['actual']=actual
   r['noInventedDaypart']='下午' not in actual
@@ -54,7 +54,7 @@ window.__factFixture=(cmd,args,mock)=>{window.__factCalls.push({cmd,args});
    r['checks'].append('No hidden source retranslation, paid validation/retry, microphone or target insertion request is started')
    changed=source.replace('三点','四点').replace('50美元','60美元')
    d.get_by_label('Your text',exact=True).fill(changed)
-   d.get_by_role('button',name='Try this text',exact=True).click()
+   d.get_by_role('button',name=re.compile(r'^(?:Try this text|Process text|Generate draft|Preparing…)$'),exact=True).click()
    expect(d.get_by_role('alert')).to_contain_text('could not be matched safely')
    expect(d.get_by_label('Your text',exact=True)).to_have_value(changed)
    expect(d.get_by_label('Result text',exact=True)).to_have_count(0)

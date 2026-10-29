@@ -64,7 +64,7 @@ with sync_playwright() as pw:
             original = 'Keep Thursday at three, unless the room is unavailable. 条件😀'
             reviewed = 'My reviewed wording — Thursday at three; room condition unchanged. 条件😀'
             workspace.get_by_label('Your text', exact=True).fill(original)
-            workspace.get_by_role('button', name='Try this text', exact=True).click()
+            workspace.get_by_role('button', name=re.compile(r'^(?:Try this text|Process text|Generate draft|Preparing…)$'), exact=True).click()
             page.wait_for_function('!!window.__finishReturnTrial')
             if not pending:
                 page.evaluate('window.__finishReturnTrial()')

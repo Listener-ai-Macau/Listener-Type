@@ -59,7 +59,7 @@ window.__factFixture=(cmd,args,mock)=>{window.__factCalls.push({cmd,args});
   d.get_by_role('combobox',name='What would you like to do?',exact=True).select_option('text')
   d.get_by_label('Your text',exact=True).fill('我的消息保持原样。')
   d.locator('select:has(option[value="builtin.light"])').select_option('builtin.light')
-  d.get_by_role('button',name='Try this text',exact=True).click()
+  d.get_by_role('button',name=re.compile(r'^(?:Try this text|Process text|Generate draft|Preparing…)$'),exact=True).click()
   expect(d.get_by_label('Result text',exact=True)).to_have_value('我的消息保持原样。')
   expect(d).not_to_contain_text('{{seconds}}')
   expect(d.locator('p[role="note"]').filter(has_text=re.compile('^The text service returned',re.I))).to_contain_text('1.2')

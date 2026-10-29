@@ -1,6 +1,7 @@
 .ol-style-trial {
   width: min(980px, calc(100vw / var(--ol-font-scale, 1) - 48px));
   margin: 32px auto;
+  height: calc(100vh / var(--ol-font-scale, 1) - 64px);
   max-height: calc(100vh / var(--ol-font-scale, 1) - 64px);
   box-sizing: border-box;
   padding: 24px;
@@ -31,6 +32,7 @@
 }
 .ol-style-trial-header > button { flex-shrink: 0; }
 .ol-style-trial-scroll {
+  flex: 1;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;

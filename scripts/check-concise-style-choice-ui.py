@@ -62,7 +62,7 @@ with sync_playwright() as pw:
         trial.get_by_label('Your text', exact=True).fill(source)
         expect(short).to_be_in_viewport()
         expect(short).to_be_enabled()
-        trial.get_by_role('button', name='Try this text', exact=True).click()
+        trial.get_by_role('button', name=re.compile(r'^(?:Try this text|Process text|Generate draft|Preparing…)$'), exact=True).click()
         editor = trial.get_by_label('Result text', exact=True)
         expect(editor).to_have_value(source)
         editor.fill(source + ' Keep my edit.')
@@ -99,7 +99,7 @@ with sync_playwright() as pw:
         assert len(calls('try_style_pack_text')) == 2 and len(calls('create_style_pack_from_template')) == 1
         checks.append('Exact completed shorter result and its local edits reused with zero further request; original edited result, comparisons and explicit Save survive')
         page.evaluate('window.__failService=true')
-        trial.get_by_role('button', name='Try this text', exact=True).click()
+        trial.get_by_role('button', name=re.compile(r'^(?:Try this text|Process text|Generate draft|Preparing…)$'), exact=True).click()
         expect(trial.get_by_role('alert')).to_contain_text('controlled request failure')
         expect(editor).to_have_value(output + ' Edited final.')
         expect(trial.locator('[data-style-trial-restored]')).to_have_count(0)
@@ -128,7 +128,7 @@ with sync_playwright() as pw:
 
         trial = fresh()
         trial.get_by_label('Your text', exact=True).fill(source)
-        trial.get_by_role('button', name='Try this text', exact=True).click()
+        trial.get_by_role('button', name=re.compile(r'^(?:Try this text|Process text|Generate draft|Preparing…)$'), exact=True).click()
         page.evaluate('window.__failAdd=true')
         trial.get_by_role('button', name='Make shorter', exact=True).click()
         expect(trial.get_by_role('alert')).to_contain_text('Your draft is kept')
@@ -165,7 +165,7 @@ with sync_playwright() as pw:
         trial = open_trial()
         trial.get_by_label('Your text', exact=True).fill(source)
         expect(trial.get_by_role('button', name='Make shorter', exact=True)).to_be_disabled()
-        expect(trial.get_by_role('button', name='Try this text', exact=True)).to_be_enabled()
+        expect(trial.get_by_role('button', name=re.compile(r'^(?:Try this text|Process text|Generate draft|Preparing…)$'), exact=True)).to_be_enabled()
         assert len(calls('create_style_pack_from_template')) == 0 and len(calls('try_style_pack_text')) == 0
         checks.append('No text service: purpose action remains unavailable while Original text stays usable, with no hidden setup or request')
         a.report.parent.mkdir(parents=True, exist_ok=True)

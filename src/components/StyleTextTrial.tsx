@@ -667,11 +667,13 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
           {refinementReturn && <Btn variant="ghost" disabled={pending || copying || delivering || draftSaving || styleChangePending || translationPreparing}
             onClick={returnToRefinement}>{t('textWorkspace.returnToRefinement')}</Btn>}
           <Btn variant="blue" disabled={pending || copying || delivering || draftSaving || styleChangePending || !canProcess || !draft.trim()} onClick={() => void runTrial()}>
-            {t(pending ? 'style.trial.running' : translationTarget ? 'offlineTranslation.run' : 'style.trial.run')}
+            {t(pending ? 'style.trial.running' : styleChangePending || (!offline && !currentReadiness)
+              ? 'textWorkspace.preparing' : translationTarget ? 'offlineTranslation.run'
+              : isMessageDraftStyle(pack) ? 'textWorkspace.submitDraft' : 'textWorkspace.submitText')}
           </Btn>
           {prepareShorter && <Btn variant="ghost" disabled={pending || copying || delivering || draftSaving || styleChangePending || !canProcess || !readiness?.textServiceConfigured || !draft.trim()}
             onClick={() => void runTrial(prepareShorter)}>{t(shortening ? 'conciseDraft.running' : 'conciseDraft.run')}</Btn>}
-          {!offline && readiness?.available && <Btn variant="ghost" disabled={draftSaving} onClick={() => setProvidersOpen(true)}>{t('style.trial.providers')}</Btn>}
+          {!offline && readiness?.available !== false && <Btn variant="ghost" disabled={draftSaving} onClick={() => setProvidersOpen(true)}>{t('style.trial.providers')}</Btn>}
           {readiness?.available === false && <a href="https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1" target="_blank" rel="noreferrer noopener" style={{ color: 'var(--ol-blue)', fontSize: 13 }}>{t('style.trial.download')}</a>}
         </div>
         {pending && <p role="status" className="ol-style-trial-hint" data-style-trial-pending>

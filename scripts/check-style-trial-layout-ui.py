@@ -1,5 +1,5 @@
 """Measure the actual customer-observed trial control movement in an owned headless UI."""
-import argparse, json, re
+import argparse, json, re, subprocess, uuid
 from datetime import datetime
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
@@ -9,8 +9,15 @@ p.add_argument('--url',required=True)
 p.add_argument('--report',required=True,type=Path)
 p.add_argument('--width',type=int,default=1280)
 p.add_argument('--height',type=int,default=900)
+p.add_argument('--before-ref',help='Read a frozen component through Vite; never check out or reset the product tree.')
+p.add_argument('--measure-only',action='store_true')
 a=p.parse_args()
-report={'at':datetime.now().astimezone().isoformat(),'scope':'Controlled private frontend, delayed readiness and normal style selection, no cloud, native app, clipboard or hardware.'}
+frozen = None
+if a.before_ref:
+    root=Path(__file__).resolve().parent.parent
+    frozen=root/'src/components'/('.style-submit-baseline-'+uuid.uuid4().hex+'.tsx')
+    frozen.write_bytes(subprocess.check_output(['git','show',a.before_ref+':src/components/StyleTextTrial.tsx'],cwd=root))
+report={'at':datetime.now().astimezone().isoformat(),'beforeRef':a.before_ref,'scope':'Controlled private frontend, delayed readiness and normal style selection, no cloud, native app, clipboard or hardware.'}
 with sync_playwright() as pw:
     browser=pw.chromium.launch(headless=True,channel='msedge')
     try:
@@ -21,10 +28,15 @@ with sync_playwright() as pw:
             assert s.count(old)==1
             route.fulfill(response=r,body=s.replace(old,'if (!isTauri) {\n    return window.__layoutFixture(cmd,args,mock);\n  }',1))
         page.route(re.compile(r'/src/lib/ipc\.ts(?:\?.*)?$'),fixture)
+        if frozen:
+            def old_component(route):
+                response=route.fetch(url=a.url+'/src/components/'+frozen.name)
+                route.fulfill(response=response)
+            page.route(re.compile(r'/src/components/StyleTextTrial\.tsx(?:\?.*)?$'),old_component)
         page.goto(a.url,wait_until='networkidle')
-        page.get_by_role('button',name='Try typed text',exact=True).click()
+        page.get_by_role('button',name='Open text workspace',exact=True).click()
         dialog=page.get_by_role('dialog')
-        run=dialog.get_by_role('button',name='Try this text',exact=True)
+        run=dialog.get_by_role('button',name=re.compile(r'^(?:Try this text|Process text|Generate draft|Preparing…)$'),exact=True)
         entry=dialog.get_by_label('Your text',exact=True)
         expect(dialog.get_by_role('status')).to_contain_text('Checking trial availability')
         entry.fill('Keep the original meaning.')
@@ -51,12 +63,16 @@ with sync_playwright() as pw:
         report['lightReadinessButtonMovementPx']=samples['lightReady']['run']['y']-samples['lightChecking']['run']['y']
         report['styleButtonMovementPx']=samples['lightReady']['run']['y']-samples['rawReady']['run']['y']
         report['maximumControlMovementPx']=max(abs(samples[name][key][axis]-samples['rawChecking'][key][axis]) for name in samples for key in ('input','run') for axis in ('x','y'))
+        report['maximumSubmitMovementPx']=max(abs(s['run'][axis]-samples['rawChecking']['run'][axis]) for s in samples.values() for axis in ('x','y'))
         report['draftPreserved']=all(s['draft']=='Keep the original meaning.' for s in samples.values())
         report['dialogWithinViewport']=all(s['dialog']['x']>=0 and s['dialog']['y']>=0 and s['dialog']['x']+s['dialog']['width']<=a.width+1 and s['dialog']['y']+s['dialog']['height']<=a.height+1 for s in samples.values())
         page.screenshot(path=str(a.report.with_suffix('.png')))
         report['measured']=True
-    finally:browser.close()
+    finally:
+        browser.close()
+        if frozen:frozen.unlink(missing_ok=True)
 a.report.write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 print(json.dumps(report,ensure_ascii=False))
 
-assert report['maximumControlMovementPx']<1 and report['draftPreserved'] and report['dialogWithinViewport'], 'Trial controls moved or overlay exceeded viewport'
+if not a.measure_only:
+    assert report['maximumSubmitMovementPx']<1 and report['draftPreserved'] and report['dialogWithinViewport'], 'Submit moved or overlay exceeded viewport'

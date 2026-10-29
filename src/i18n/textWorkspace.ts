@@ -1,4 +1,5 @@
 const en = {
+  submitText: 'Process text', submitDraft: 'Generate draft', preparing: 'Preparing…',
   translateResult: 'Translate this result…', refineResult: 'Refine this translation…',
   retranslateOriginal: 'Switch to my cloud service…',
   retranslationReferenceHint: 'Your current translation and edits are kept for comparison. Review the original input, cloud service and charges, then click Translate to submit.',
@@ -36,6 +37,7 @@ const en = {
 export const textWorkspaceTranslations = {
   en,
   'zh-CN': {
+    submitText: '处理文字', submitDraft: '生成正文', preparing: '正在准备…',
     translateResult: '接着翻译这份结果…', refineResult: '接着润色这份译文…',
     retranslateOriginal: '切换到云端翻译…',
     retranslationReferenceHint: '当前译稿及修改会留作对照。核对待提交的原文、云端服务和费用后，再点击翻译提交。',
@@ -66,6 +68,7 @@ export const textWorkspaceTranslations = {
     draftsIntro: '成稿保存在本机，与录音分别存放。', draftsDetails: '成稿保存说明',
   },
   'zh-TW': {
+    submitText: '處理文字', submitDraft: '產生正文', preparing: '正在準備…',
     translateResult: '接著翻譯這份結果…', refineResult: '接著潤飾這份譯文…',
     retranslateOriginal: '切換至雲端翻譯…',
     retranslationReferenceHint: '目前譯稿及修改會保留供對照。核對待提交的原文、雲端服務和費用後，再點擊翻譯提交。',
@@ -96,6 +99,7 @@ export const textWorkspaceTranslations = {
     draftsIntro: '成稿儲存在本機，與錄音分開存放。', draftsDetails: '成稿儲存說明',
   },
   ja: {
+    submitText: 'テキストを処理', submitDraft: '本文を作成', preparing: '準備中…',
     translateResult: 'この結果を翻訳…', refineResult: 'この訳文を推敲…',
     retranslateOriginal: 'クラウド翻訳に切り替える…',
     retranslationReferenceHint: '現在の訳文と編集内容は比較用に残ります。原文、クラウドサービスと料金を確認し、「翻訳」を押して送信してください。',
@@ -126,6 +130,7 @@ export const textWorkspaceTranslations = {
     draftsIntro: 'このPCに保存した文章です。録音とは別に保管されます。', draftsDetails: '下書きの保存について',
   },
   ko: {
+    submitText: '텍스트 처리', submitDraft: '본문 생성', preparing: '준비 중…',
     translateResult: '이 결과 번역…', refineResult: '이 번역 다듬기…',
     retranslateOriginal: '클라우드 번역으로 전환…',
     retranslationReferenceHint: '현재 번역과 수정 내용을 비교용으로 남깁니다. 제출할 원문, 클라우드 서비스와 요금을 확인한 후 번역을 눌러 제출하세요.',

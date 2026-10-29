@@ -50,7 +50,7 @@ window.__resultFixture=(cmd,args,mock)=>{window.__calls.push({cmd,args});
     else:
      dialog.get_by_role('combobox',name='Translate output to',exact=True).select_option('简体中文')
      dialog.get_by_role('combobox',name='Original language',exact=True).select_option('en')
-    dialog.get_by_role('button',name='Try this text' if mode=='raw' else 'Translate',exact=True).click()
+    dialog.get_by_role('button',name=re.compile(r'^(?:Try this text|Process text|Generate draft|Preparing…)$') if mode=='raw' else 'Translate',exact=True).click()
     expect(dialog.get_by_label('Result text',exact=True)).to_have_value(original if mode=='raw' else local)
     names=['Copy result','Save draft','Translate this result…' if mode=='raw' else 'Refine this translation…']
     if mode=='local':names.append('Switch to my cloud service…')
@@ -60,7 +60,7 @@ window.__resultFixture=(cmd,args,mock)=>{window.__calls.push({cmd,args});
      geometry={name:dialog.get_by_role('button',name=name,exact=True).evaluate(hit) for name in labels}
      report['currentStages'].append({'stage':stage,'actions':geometry})
      assert all(g['fullyVisible'] and g['ownHit'] for g in geometry.values()), (stage,geometry)
-     for control in ['Close','Try this text' if mode=='raw' else 'Translate']:
+     for control in ['Close',re.compile(r'^(?:Try this text|Process text)$') if mode=='raw' else 'Translate']:
       g=dialog.get_by_role('button',name=control,exact=True).evaluate(hit)
       assert g['fullyVisible'] and g['ownHit'], (stage,control,g)
      return geometry
@@ -70,7 +70,7 @@ window.__resultFixture=(cmd,args,mock)=>{window.__calls.push({cmd,args});
      button=dialog.get_by_role('button',name=name,exact=True)
      page.wait_for_function("([label])=>{const b=[...document.querySelectorAll('dialog[open] button')].find(e=>e.innerText.trim()===label);if(!b)return false;const g=("+hit+")(b);return g.fullyVisible&&g.ownHit}",arg=[name])
     geometry=check_actions('fresh_result',names)
-    for name in ['Close','Try this text' if mode=='raw' else 'Translate']:
+    for name in ['Close',re.compile(r'^(?:Try this text|Process text)$') if mode=='raw' else 'Translate']:
      assert dialog.get_by_role('button',name=name,exact=True).evaluate("e=>{const r=e.getBoundingClientRect(),h=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return !!h&&e.contains(h)}")
     if (width,scale)==(1240,1.1):page.screenshot(path=str(a.report.with_name(a.report.stem+'-'+mode+'.png')))
     name_input=dialog.get_by_label('Draft name',exact=True)

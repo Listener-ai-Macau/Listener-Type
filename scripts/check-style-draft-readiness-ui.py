@@ -37,7 +37,7 @@ window.__draftFixture=(cmd,args,mock)=>{
         page.get_by_role('button', name='Try typed text', exact=True).click()
         dialog = page.get_by_role('dialog')
         entry = dialog.get_by_label('Your text', exact=True)
-        run = dialog.get_by_role('button', name='Try this text', exact=True)
+        run = dialog.get_by_role('button', name=re.compile(r'^(?:Try this text|Process text|Generate draft|Preparing…)$'), exact=True)
         expect(dialog.get_by_role('status')).to_contain_text('Checking trial availability')
         expect(run).to_be_disabled()
         rect = entry.bounding_box()

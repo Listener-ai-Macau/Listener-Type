@@ -44,9 +44,9 @@ window.__fixture=(cmd,args,mock)=>{
   if(cmd!=='get_style_text_trial_readiness') return mock();
   const dialog=document.querySelector('dialog.ol-style-trial');
   if(dialog)window.__transitions.push({requested:args.stylePackId,
-    selected:dialog.querySelector('select')?.value,
+    selected:dialog.querySelector('select:has(option[value="builtin.light"])')?.value,
     notice:dialog.querySelector('[data-style-trial-service-notice]')?.textContent,
-    submitEnabled:![...dialog.querySelectorAll('button')].find(b=>b.textContent==='Try this text')?.disabled});
+    submitEnabled:![...dialog.querySelectorAll('button')].find(b=>/^(?:Try this text|Process text|Generate draft|Preparing…)$/.test(b.textContent))?.disabled});
   if(!window.__delay)return {available:true,requiresTextService:false,textServiceConfigured:false};
   return new Promise((resolve,reject)=>window.__pending.push({id:args.stylePackId,resolve,reject}));
 };
@@ -66,10 +66,10 @@ window.__fixture=(cmd,args,mock)=>{
                 route.fulfill(response=r)
             page.route(re.compile(r'/src/components/StyleTextTrial\.tsx(?:\?.*)?$'), original)
         page.goto(a.url, wait_until='networkidle')
-        page.get_by_role('button', name='Try typed text', exact=True).click()
+        page.get_by_role('button', name='Open text workspace', exact=True).click()
         dialog = page.locator('dialog.ol-style-trial')
         draft = dialog.get_by_label('Your text', exact=True)
-        run = dialog.get_by_role('button', name='Try this text', exact=True)
+        run = dialog.get_by_role('button', name=re.compile(r'^(?:Try this text|Process text|Generate draft|Preparing…)$'), exact=True)
         draft.fill('A local draft must not imply that a different style is local.')
         expect(run).to_be_enabled()
         raw_notice = dialog.locator('[data-style-trial-service-notice]').inner_text()
