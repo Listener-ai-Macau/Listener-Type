@@ -128,6 +128,7 @@ def translate(request):
         prefix, body = split_numbered_list_prefix(value)
         translated, _ = preserve_explicit_years(body, paragraph(body), source)
         translated, _ = preserve_explicit_times(body, translated, source)
+        require_signed_numbers(body, translated)
         output.append(prefix + body[:len(body) - len(body.lstrip())] + translated + body[len(body.rstrip()):])
     return ''.join(output)
 
@@ -145,7 +146,8 @@ if __name__ == '__main__':
         known = str(error)
         if known not in {'local_translation_invalid_text', 'local_translation_unsupported_pair',
                          'local_translation_output_limit', 'local_translation_empty_output',
-                         'local_translation_date_fidelity', 'local_translation_time_fidelity'}:
+                         'local_translation_date_fidelity', 'local_translation_time_fidelity',
+                         'local_translation_signed_number_fidelity'}:
             known = 'local_translation_runtime_failed'
         sys.stdout.buffer.write(json.dumps({'error': known}).encode('utf8'))
         sys.stdout.buffer.flush()

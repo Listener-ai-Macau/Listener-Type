@@ -115,7 +115,7 @@ pub(super) fn run(runtime: &Path, script: &str, request: serde_json::Value, time
     if let Some(error) = result["error"].as_str() {
         return Err(match error {
             "local_translation_memory_low" | "local_translation_context_limit" | "local_translation_output_limit"
-            | "local_translation_date_fidelity" | "local_translation_time_fidelity" | "local_translation_structure_fidelity" | "local_translation_not_ready"
+            | "local_translation_date_fidelity" | "local_translation_time_fidelity" | "local_translation_structure_fidelity" | "local_translation_signed_number_fidelity" | "local_translation_not_ready"
             | "local_translation_invalid_text" | "local_translation_unsupported_pair" | "local_translation_timeout"
             | "local_translation_empty_output" => error,
             _ => "local_translation_runtime_failed",

@@ -176,6 +176,7 @@ def _translate_enhanced(request):
                 if message.get('reasoning_content') or not (message.get('content') or '').strip():
                     raise ValueError('local_translation_empty_output')
                 translated, changes = preserve_layout_and_years(value, message['content'], source)
+                require_signed_numbers(value, translated)
                 restored += len(changes)
                 cache[value] = translated
             outputs.extend([cache[value]] * count)
