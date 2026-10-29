@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T11:42:36.790835+08:00",
+  "updated_at": "2026-10-29T12:42:22.033893+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -9694,6 +9694,40 @@
         "Source checkpoint not installed/published; retain public/daily225. No independent customer has used this change.",
         "Original radio/GATT cause, brownout, remaining real OS target and second-computer/long-term scopes remain open."
       ]
+    },
+    {
+      "id": "saved_text_recovery_locations_match_visible_history_and_saved_names",
+      "repo": "type",
+      "commit": "438f8ee7b19e190784b3c9a52b3d25d02560311c",
+      "commit_subject": "Keep saved text names and recovery locations consistent across the writing workflow",
+      "subject": "Keep saved-result terminology and recovery paths aligned with the actual History library without changing saved data",
+      "state": "source_affected_frontend_and_saved_result_workflows_passed_matching_package_pending",
+      "humanAccepted": false,
+      "protects": [
+        "Saved-result acknowledgements and full-library recovery point to History → Saved drafts in all five locales. Empty recording History explicitly points to the separate saved-text library.",
+        "Chinese saved-result terminology and offline help use the visible saved-draft labels and actual actions, preserving distinctions from unsaved input/layout drafts.",
+        "No schema, record identity, original/body, audio, credential or device mutation. Existing immutable save, naming, uncertain-reply retry, edit-copy and delete ownership stay intact.",
+        "Existing pending elapsed/source-confirmation checkpoint is combined into the same usable writing batch; no separate package per copy change."
+      ],
+      "guards": [
+        "python scripts/check-saved-text-drafts-ui.py --url <controlled-ui> --report <result> --edit-copy --naming",
+        "python scripts/check-first-use-overview-ui.py --url <controlled-ui> --report <result>",
+        "python scripts/check-workspace-action-visibility-ui.py --url <controlled-ui> --report <result>",
+        "npm run build"
+      ],
+      "machine_evidence": [
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/release-closeout226-saved-text-ui.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/release-closeout226-workspace-ui.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/release-closeout226-first-use-ui-after3.json",
+        "C:/Users/Billy/Documents/Codex/2026-10-27/listener-delivery-20261027/work/release-closeout226-frontend-build.log"
+      ],
+      "machine_accepted_scope": [
+        "Actual headless React save/name/edit-copy/history/copy/delete/failure workflow, five-locale first-use hide/reload/recover, pending local/cloud time and late closed-workspace reply, narrow/wide/zoom controls. GPU disabled; no actual service/microphone/Owner clipboard/physical acceptance.",
+        "First-use fixture expected obsolete4 primary/6 utility cards, while unchanged225/current Tools has5/5. Both failures preserved and test corrected; not a product regression or new feature."
+      ],
+      "pending_human_scope": [
+        "Matching226 MSI ordinary native workflow and usable batch delivery/customer feedback remain pending. Original physical/global/other-computer and historic fault limits remain separately recorded."
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-29T11:02:04.750872+08:00",
@@ -10905,7 +10939,8 @@
         "workspace_result_toolbar_survives_name_save_return_and_resize",
         "buffered_current_input_facts_and_audio_result_action_reachability",
         "buffered_cloud_translation_recognized_facts_and_unchanged_notice",
-        "workspace_pending_elapsed_and_adjacent_source_confirmation"
+        "workspace_pending_elapsed_and_adjacent_source_confirmation",
+        "saved_text_recovery_locations_match_visible_history_and_saved_names"
       ],
       "paths": {
         "type": [
