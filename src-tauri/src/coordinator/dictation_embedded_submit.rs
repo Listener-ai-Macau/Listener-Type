@@ -207,6 +207,21 @@ enum EmbeddedBleNotificationAction {
     ContinueAfterCompletedSession,
 }
 
+// A continuous listener resets its actor after a completed segment. If its
+// transport later exits, that empty actor is not an incomplete recording.
+fn background_capture_ended_after_session_reset(
+    streaming: &EmbeddedStreamingDictation,
+    emit_idle_capture_errors: bool,
+    capture_cancel_requested: bool,
+) -> bool {
+    !emit_idle_capture_errors
+        && !capture_cancel_requested
+        && !streaming.terminal_received
+        && streaming.session.is_none()
+        && streaming.embedded_session_id.is_none()
+        && streaming.collector.inner().stats().session_id.is_none()
+}
+
 /// The production actor's notification boundary.  Keeping the handler return
 /// processing here is important: tests must exercise the same completion,
 /// submission-result, error, reset, and loop-exit decisions as the live actor.
@@ -736,6 +751,15 @@ async fn submit_embedded_audio_ble_stream_impl(
         && streaming.embedded_session_id.is_none()
     {
         return Err("嵌入式 BLE 后台监听已取消，尚未开始录音会话".to_string());
+    }
+    if capture_result.is_ok()
+        && background_capture_ended_after_session_reset(
+            &streaming,
+            emit_idle_capture_errors,
+            capture_cancel_requested,
+        )
+    {
+        return Err("嵌入式 BLE 后台监听通道已结束，等待重新建立".to_string());
     }
     if let Err(err) = capture_result {
         if !streaming.terminal_received {

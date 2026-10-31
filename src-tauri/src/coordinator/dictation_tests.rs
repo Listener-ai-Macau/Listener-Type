@@ -14154,6 +14154,28 @@ fn embedded_streaming_background_listener_keeps_pipeline_error_policy_after_rese
     assert!(!EmbeddedStreamingDictation::default().keep_listening_after_pipeline_errors);
 }
 
+#[test]
+fn closed_background_transport_after_session_reset_is_not_an_unfinished_recording() {
+    let mut streaming = EmbeddedStreamingDictation::background_listener();
+    streaming.terminal_received = true;
+    streaming.embedded_session_id = Some(42);
+    streaming.reset_for_next_session();
+    assert!(super::background_capture_ended_after_session_reset(&streaming, false, false));
+    assert!(!super::background_capture_ended_after_session_reset(&streaming, true, false),
+        "one-shot captures must still require their recording result");
+    assert!(!super::background_capture_ended_after_session_reset(&streaming, false, true),
+        "explicit listener cancellation keeps its existing handling");
+    streaming.embedded_session_id = Some(43);
+    assert!(!super::background_capture_ended_after_session_reset(&streaming, false, false),
+        "an unfinished live segment must not be treated as an idle listener");
+    let previous = crate::embedded_ble::classify_ble_failure("嵌入式音频流式会话尚未收到结束包");
+    let corrected = crate::embedded_ble::classify_ble_failure("嵌入式 BLE 后台监听通道已结束，等待重新建立");
+    assert_eq!(previous.kind, corrected.kind);
+    assert_eq!(previous.automatic_recovery, corrected.automatic_recovery);
+    assert_eq!(previous.retryable, corrected.retryable,
+        "correcting the message must not change pairing or recovery policy");
+}
+
 #[tokio::test]
 async fn background_terminal_cancel_resets_without_fake_incomplete_submission() {
     let coordinator = Coordinator::new();
