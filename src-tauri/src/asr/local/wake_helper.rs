@@ -259,6 +259,13 @@ mod imp {
             use sha2::{Digest, Sha256};
             let started = std::time::Instant::now();
             let mut slot = self.keyword_comparison_slot(timeout)?;
+            // Never cold-start the helper on the live capture critical path.
+            if slot.as_mut().is_some_and(|process| !process.is_running()) {
+                *slot = None;
+            }
+            if slot.is_none() {
+                return Err(super::WAKE_HELPER_NOT_READY_ERROR_CODE.to_string());
+            }
             let wav = TempWavFile::create_without_context_padding(pcm)
                 .map_err(|err| format!("prepare keyword comparison WAV: {err:#}"))?;
             let request_id = Uuid::new_v4().to_string();
@@ -537,7 +544,16 @@ mod imp {
 
     pub fn compare_keyword(pcm: &[u8], phrase: &str, claimed_end_seconds: f32,
         timeout: Duration) -> Result<Option<crate::wake_phrase::AcousticKeywordConflict>, String> {
-        client().compare_keyword(pcm, phrase, claimed_end_seconds, timeout)
+        let result = client().compare_keyword(pcm, phrase, claimed_end_seconds, timeout);
+        if let Err(error) = &result {
+            let missing = error == super::WAKE_HELPER_NOT_READY_ERROR_CODE
+                || client().process.try_lock().is_some_and(|slot| slot.is_none());
+            if missing { schedule_recovery(); }
+            if error == super::WAKE_HELPER_NOT_READY_ERROR_CODE {
+                return Err(super::WAKE_HELPER_BUSY_ERROR_CODE.to_string());
+            }
+        }
+        result
     }
 
     fn emit_response(response: &HelperResponse) -> Result<(), String> {
@@ -930,6 +946,17 @@ mod imp {
             ).expect_err("the next live candidate must not wait for model startup");
             assert_eq!(error, super::super::WAKE_HELPER_NOT_READY_ERROR_CODE);
             assert!(started.elapsed() < Duration::from_secs(1));
+        }
+
+        #[test]
+        fn live_keyword_comparison_does_not_cold_start_helper() {
+            let client = WakeHelperClient::default();
+            let started = std::time::Instant::now();
+            let error = client.compare_keyword(&[0, 0], "开始录音", 0.1, Duration::from_secs(4))
+                .expect_err("live keyword comparison must not cold-start the helper");
+            assert_eq!(error, super::super::WAKE_HELPER_NOT_READY_ERROR_CODE);
+            assert!(started.elapsed() < Duration::from_secs(1));
+            assert!(client.process.lock().is_none());
         }
 
         #[test]
