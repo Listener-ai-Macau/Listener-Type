@@ -452,6 +452,7 @@ struct Inner {
     /// press-release-press 三连过快。
     last_hotkey_dispatch_at: Mutex<Option<std::time::Instant>>,
     shortcut_recording_active: AtomicBool,
+    manual_finish_claimed: Mutex<Option<SessionId>>,
     /// 自定义组合键监听器（global-hotkey crate）。当 `prefs.hotkey.trigger == Custom` 时
     /// 代替 modifier-only 的 hotkey monitor。`None` 表示不使用自定义组合键或还没成功安装。
     combo_hotkey: Mutex<Option<ComboHotkeyMonitor>>,
@@ -1181,6 +1182,7 @@ impl Coordinator {
                     hotkey_trigger_held: AtomicBool::new(false),
                     last_hotkey_dispatch_at: Mutex::new(None),
                     shortcut_recording_active: AtomicBool::new(false),
+                    manual_finish_claimed: Mutex::new(None),
                     combo_hotkey: Mutex::new(None),
                     translation_hotkey: Mutex::new(None),
                     switch_style_hotkey: Mutex::new(None),
@@ -1276,6 +1278,7 @@ impl Coordinator {
                 hotkey_trigger_held: AtomicBool::new(false),
                 last_hotkey_dispatch_at: Mutex::new(None),
                 shortcut_recording_active: AtomicBool::new(false),
+                manual_finish_claimed: Mutex::new(None),
                 combo_hotkey: Mutex::new(None),
                 translation_hotkey: Mutex::new(None),
                 switch_style_hotkey: Mutex::new(None),
@@ -1980,7 +1983,7 @@ impl Coordinator {
             return;
         }
         let (tx, rx) = mpsc::channel::<HotkeyEvent>();
-        match HotkeyMonitor::start(binding, tx) {
+        match HotkeyMonitor::start(binding, tx, finish_recording_target(&self.inner)) {
             Ok(monitor) => {
                 let adapter = monitor.kind();
                 *self.inner.hotkey.lock() = Some(monitor);
@@ -2130,22 +2133,8 @@ impl Coordinator {
     }
 
     pub async fn stop_dictation(&self) -> Result<(), String> {
-        if request_embedded_ble_recording_stop_from_host(
-            &self.inner,
-            "capsule_confirm_stop_processing_start",
-        )
-        .await?
-        {
-            if listening_session_has_no_current_asr(&self.inner) {
-                end_session(&self.inner).await?;
-            }
-            return Ok(());
-        }
-        if self.inner.state.lock().phase == SessionPhase::Starting {
-            request_stop_during_starting(&self.inner, "manual stop");
-            return Ok(());
-        }
-        end_session(&self.inner).await
+        let session_id = self.inner.state.lock().session_id;
+        dictation::finish_recording_for_session(&self.inner, session_id).await
     }
 
     pub async fn submit_embedded_audio_notifications(
@@ -2782,6 +2771,28 @@ include!("coordinator/hotkey_device_runtime.rs");
 
 include!("coordinator/embedded_ble_runtime.rs");
 
+// Read only nonblocking snapshots in the Windows keyboard hook. A stale event
+// carries its original session ID and is rejected again by the stop path.
+fn finish_recording_target(inner: &Arc<Inner>) -> Arc<dyn Fn() -> Option<Uuid> + Send + Sync> {
+    let weak = Arc::downgrade(inner);
+    Arc::new(move || {
+        let inner = weak.upgrade()?;
+        if inner.shortcut_recording_active.load(Ordering::SeqCst)
+            || !inner.prefs.try_enter_finishes_recording() { return None; }
+        let state = inner.state.try_lock()?;
+        if !matches!(state.phase, SessionPhase::Starting | SessionPhase::Listening)
+            || state.cancelled || state.pending_stop
+            || state.voice_action != crate::voice_command::VoiceAction::Dictation { return None; }
+        let latest = inner.capsule_latest_payload.try_lock()?;
+        let payload = latest.as_ref()?;
+        if payload.state != CapsuleState::Recording
+            || payload.session_id.as_deref() != Some(state.session_id.to_string().as_str()) {
+            return None;
+        }
+        Some(state.session_id)
+    })
+}
+
 fn hotkey_bridge_loop(inner: Arc<Inner>, rx: mpsc::Receiver<HotkeyEvent>) {
     while let Ok(evt) = rx.recv() {
         if inner.shortcut_recording_active.load(Ordering::SeqCst) {
@@ -2815,6 +2826,13 @@ fn hotkey_bridge_loop(inner: Arc<Inner>, rx: mpsc::Receiver<HotkeyEvent>) {
                     log::info!("[coord] global hotkey cancel received phase={phase:?}");
                     cancel_session(&inner_cloned);
                 }
+            }
+            HotkeyEvent::FinishRecording(session_id) => {
+                async_runtime::spawn(async move {
+                    if let Err(error) = dictation::finish_recording_for_session(&inner_cloned, session_id).await {
+                        log::warn!("[coord] Enter finish failed: {error}");
+                    }
+                });
             }
             HotkeyEvent::TranslationModifierPressed => {
                 let translation_hotkey = inner_cloned.prefs.get().translation_hotkey;

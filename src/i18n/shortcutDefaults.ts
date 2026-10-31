@@ -1,4 +1,6 @@
 const en = {
+  enterFinish: 'Enter finishes recording',
+  enterFinishDesc: 'During recording, Enter acts as ✓ and is not sent to the current app. Enter cannot confirm input-method candidates while recording.',
   unassigned: 'Not set',
   description: 'Computer shortcuts start unassigned. Record only the shortcuts you want; saved personal bindings are kept when updating.',
   clear: 'Clear shortcut',
@@ -13,6 +15,8 @@ const en = {
 };
 type Copy = typeof en;
 const zhCN: Copy = {
+  enterFinish: 'Enter 提前结束录音',
+  enterFinishDesc: '录音时 Enter 相当于点击 ✓，不会发送到当前应用。录音时不能用 Enter 确认输入法选字。',
   unassigned: '未设置',
   description: '电脑快捷键首次默认不绑定。需要哪项，再自行录入；更新会保留你已保存的个人绑定。',
   clear: '清除绑定',
@@ -26,6 +30,8 @@ const zhCN: Copy = {
   historyUnassigned: '尚未设置录音快捷键。可在概览点击「开始听写」，需要时再到「设置 → 快捷键」绑定。',
 };
 const zhTW: Copy = {
+  enterFinish: 'Enter 提前結束錄音',
+  enterFinishDesc: '錄音時 Enter 相當於點擊 ✓，不會傳送至目前應用程式。錄音時不能用 Enter 確認輸入法選字。',
   unassigned: '未設定',
   description: '電腦快捷鍵首次預設不綁定。需要哪項，再自行錄入；更新會保留你已儲存的個人綁定。',
   clear: '清除綁定',
@@ -39,6 +45,8 @@ const zhTW: Copy = {
   historyUnassigned: '尚未設定錄音快捷鍵。可在概覽點擊「開始聽寫」，需要時再到「設定 → 快捷鍵」綁定。',
 };
 const ja: Copy = {
+  enterFinish: 'Enter で録音を終了',
+  enterFinishDesc: '録音中の Enter は ✓ と同じ動作で、現在のアプリには送信されません。録音中は Enter で入力変換を確定できません。',
   unassigned: '未設定',
   description: 'パソコンのショートカットは最初は未設定です。必要なものだけ登録してください。更新時は保存済みの設定を保持します。',
   clear: '割り当てを解除',
@@ -52,6 +60,8 @@ const ja: Copy = {
   historyUnassigned: '録音ショートカットは未設定です。概要の録音ボタンを使うか、必要に応じて「設定 → ショートカット」で登録してください。',
 };
 const ko: Copy = {
+  enterFinish: 'Enter로 녹음 종료',
+  enterFinishDesc: '녹음 중 Enter는 ✓와 같이 동작하며 현재 앱에 전달되지 않습니다. 녹음 중에는 Enter로 입력기 후보를 확정할 수 없습니다.',
   unassigned: '미설정',
   description: '컴퓨터 단축키는 처음에는 지정되지 않습니다. 필요한 항목만 직접 등록하세요. 업데이트할 때 저장한 개인 설정은 유지됩니다.',
   clear: '단축키 해제',

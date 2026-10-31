@@ -208,6 +208,7 @@ let mockSettings: UserPreferences = {
   customStylePrompts: { raw: '', light: '', structured: '', formal: '' },
   launchAtLogin: false,
   showCapsule: true,
+  enterFinishesRecording: false,
   muteDuringRecording: false,
   microphoneDeviceName: '',
   dictationInputSource: 'embeddedBle',

@@ -1243,6 +1243,8 @@ pub struct UserPreferences {
     pub custom_style_prompts: CustomStylePrompts,
     pub launch_at_login: bool,
     pub show_capsule: bool,
+    /// Optional Windows Enter key to confirm an active dictation.
+    pub enter_finishes_recording: bool,
     /// 录音期间临时静音系统输出，停止/取消/出错后恢复原静音状态。
     #[serde(default)]
     pub mute_during_recording: bool,
@@ -1583,6 +1585,7 @@ struct UserPreferencesWire {
     custom_style_prompts: CustomStylePrompts,
     launch_at_login: bool,
     show_capsule: bool,
+    enter_finishes_recording: bool,
     #[serde(default)]
     mute_during_recording: bool,
     #[serde(default)]
@@ -1730,6 +1733,7 @@ impl Default for UserPreferencesWire {
             custom_style_prompts: prefs.custom_style_prompts,
             launch_at_login: prefs.launch_at_login,
             show_capsule: prefs.show_capsule,
+            enter_finishes_recording: prefs.enter_finishes_recording,
             mute_during_recording: prefs.mute_during_recording,
             microphone_device_name: prefs.microphone_device_name,
             dictation_input_source: prefs.dictation_input_source,
@@ -1928,6 +1932,7 @@ impl<'de> Deserialize<'de> for UserPreferences {
             custom_style_prompts: wire.custom_style_prompts,
             launch_at_login: wire.launch_at_login,
             show_capsule: wire.show_capsule,
+            enter_finishes_recording: wire.enter_finishes_recording,
             mute_during_recording: wire.mute_during_recording,
             microphone_device_name: wire.microphone_device_name,
             dictation_input_source,
@@ -2385,6 +2390,7 @@ impl Default for UserPreferences {
             custom_style_prompts: CustomStylePrompts::default(),
             launch_at_login: false,
             show_capsule: true,
+            enter_finishes_recording: false,
             mute_during_recording: false,
             microphone_device_name: String::new(),
             dictation_input_source: DictationInputSource::EmbeddedBle,

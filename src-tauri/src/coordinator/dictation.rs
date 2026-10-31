@@ -2798,6 +2798,70 @@ fn embedded_pcm_rms_and_peak(pcm: &[u8]) -> (f64, u16) {
     }
 }
 
+/// Same operation as the capsule checkmark, tied to the session that owned
+/// the physical key press so a delayed event cannot stop a newer recording.
+pub(super) async fn finish_recording_for_session(inner: &Arc<Inner>, session_id: SessionId) -> Result<(), String> {
+    {
+        let state = inner.state.lock();
+        if state.session_id != session_id || state.cancelled
+            || !matches!(state.phase, SessionPhase::Starting | SessionPhase::Listening) {
+            return Ok(());
+        }
+        if !claim_manual_finish(inner, session_id) { return Ok(()); }
+    }
+    let result = finish_recording_for_session_claimed(inner, session_id).await;
+    if result.is_err() {
+        let mut claimed = inner.manual_finish_claimed.lock();
+        if *claimed == Some(session_id) { *claimed = None; }
+    }
+    result
+}
+
+fn claim_manual_finish(inner: &Arc<Inner>, session_id: SessionId) -> bool {
+    let mut claimed = inner.manual_finish_claimed.lock();
+    if *claimed == Some(session_id) { return false; }
+    *claimed = Some(session_id);
+    true
+}
+
+async fn finish_recording_for_session_claimed(inner: &Arc<Inner>, session_id: SessionId) -> Result<(), String> {
+    if request_embedded_ble_recording_stop_from_host_for_session(
+        inner, session_id, "capsule_confirm_stop_processing_start",
+    ).await? {
+        if listening_session_has_no_current_asr(inner) {
+            end_session_for_owner(inner, session_id).await?;
+        }
+        return Ok(());
+    }
+    // Another source may already own this device stop. Wait for its tail;
+    // never turn its duplicate into an early local finalization.
+    if inner.recording_lifecycle.lock().stop_committed_for(session_id) {
+        let mut claimed = inner.manual_finish_claimed.lock();
+        if *claimed == Some(session_id) { *claimed = None; }
+        return Ok(());
+    }
+    let starting = {
+        let mut state = inner.state.lock();
+        if state.session_id != session_id || state.cancelled { return Ok(()); }
+        if state.phase == SessionPhase::Starting {
+            Some(request_stop_during_starting_state(&mut state))
+        } else { None }
+    };
+    if let Some(newly_queued) = starting {
+        if newly_queued { stop_recorder_if_pending_start_stop(inner); }
+        return Ok(());
+    }
+    end_session_for_owner(inner, session_id).await
+}
+
+async fn end_session_for_owner(inner: &Arc<Inner>, session_id: SessionId) -> Result<(), String> {
+    let transition = {
+        let mut state = inner.state.lock();
+        apply_dictation_event(&mut state, DictationEvent::Stop { session_id, user_initiated: true })
+    };
+    finish_end_session_after_stop_transition(inner, transition).await
+}
+
 pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
     end_session_with_stop_origin(inner, true).await
 }
