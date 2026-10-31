@@ -269,7 +269,7 @@ pub fn send_recording_control_abort_wake_capture(
         // independently checks the request and the matching audio segment.
         if let Some(cancelled) = register_wake_abort_retry() {
             std::thread::spawn(move || {
-                retry_owned_wake_abort(active, request_id, timeout, 12, Duration::from_secs(3), cancelled);
+                retry_owned_wake_abort(active, owner, timeout, 12, Duration::from_secs(3), cancelled);
             });
         }
     }
@@ -296,6 +296,16 @@ fn register_wake_abort_retry() -> Option<Arc<AtomicBool>> {
     Some(cancelled)
 }
 
+// Called under the owner lock, before publishing the next owner. A retry
+// already admitted to the real control queue carries this same token.
+fn cancel_wake_abort_retries_for_new_owner() {
+    if let Ok(mut retries) = wake_abort_retries().lock() {
+        for token in retries.tokens.drain(..).filter_map(|token| token.upgrade()) {
+            token.store(true, Ordering::Release);
+        }
+    }
+}
+
 pub fn suspend_wake_abort_retries_for_ota(suspended: bool) {
     if let Ok(mut retries) = wake_abort_retries().lock() {
         retries.suspended = suspended;
@@ -309,12 +319,13 @@ pub fn suspend_wake_abort_retries_for_ota(suspended: bool) {
 
 fn retry_owned_wake_abort(
     original: ActiveAudioControlSender,
-    request_id: u32,
+    owner: AcceptedWakeCaptureOwner,
     timeout: Duration,
     attempts: usize,
     interval: Duration,
     cancelled: Arc<AtomicBool>,
 ) {
+    let request_id = owner.request_id;
     let command = format!("VREC:ABORT:{request_id:08X}\n");
     for attempt in 1..=attempts {
         std::thread::sleep(interval);
@@ -322,10 +333,7 @@ fn retry_owned_wake_abort(
         // device now. Do not carry the old cleanup across that boundary.
         let same_capture = active_audio_control_sender()
             .is_some_and(|active| active.capture_id == original.capture_id);
-        let superseded = accepted_wake_capture_owner_slot()
-            .lock()
-            .map(|slot| slot.as_ref().is_some_and(|owner| owner.request_id != request_id))
-            .unwrap_or(true);
+        let superseded = ACCEPTED_WAKE_OWNER_GENERATION.load(Ordering::Acquire) != owner.generation;
         if !same_capture || superseded || cancelled.load(Ordering::Acquire) {
             log::info!("[embedded-ble] wake abort retry retired request_id={request_id} capture_id={}", original.capture_id);
             return;

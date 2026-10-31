@@ -2851,6 +2851,7 @@ fn pending_active_audio_control_hang_finishes_without_blocking_capture_poll() {
         }),
         fallback: Some(GattWriteOption::WriteWithoutResponse),
         deadline_at: Instant::now() + Duration::from_secs(2),
+        dispatch_at: Instant::now(),
         primary_error: None,
     };
 
@@ -2861,7 +2862,15 @@ fn pending_active_audio_control_hang_finishes_without_blocking_capture_poll() {
     pending.deadline_at = Instant::now() - Duration::from_millis(1);
     let polled_at = Instant::now();
     let result = pending.poll(None).expect("expired hang must finish in one poll");
-    assert!(result.unwrap_err().contains("timed out"));
+    let error = result.unwrap_err();
+    assert!(error.contains("timed out") && error.contains("async_status=Started")
+        && error.contains("queue_ms=") && error.contains("dispatch_ms="));
+    if let Some(AudioControlAsyncOperation::Test { status, .. }) = pending.operation.as_mut() {
+        *status = AsyncStatus::Completed;
+    }
+    let completed_late = pending.poll(None).unwrap().unwrap_err();
+    assert!(completed_late.contains("async_status=Completed"),
+        "the failure metadata must distinguish late completed writes from still-pending writes");
     assert!(polled_at.elapsed() < Duration::from_millis(50));
     pending.finish(Err("timed out".to_string()));
     assert!(result_rx.recv_timeout(Duration::from_millis(50)).unwrap().is_err());
@@ -2924,6 +2933,7 @@ fn pending_active_audio_control_observes_caller_cancel_and_closes_operation() {
         }),
         fallback: Some(GattWriteOption::WriteWithoutResponse),
         deadline_at: Instant::now() + Duration::from_secs(2),
+        dispatch_at: Instant::now(),
         primary_error: None,
     };
 
@@ -3023,8 +3033,10 @@ fn owned_wake_abort_retries_the_original_request_on_the_same_capture() {
     let (tx, rx) = mpsc::channel();
     let registration = install_test_audio_control(815, tx);
     let original = active_audio_control_sender().unwrap();
+    remember_accepted_wake_capture_owner(0x1234, 815);
+    let owner = take_accepted_wake_capture_owner(0x1234).unwrap();
     let retry = std::thread::spawn(move || {
-        retry_owned_wake_abort(original, 0x1234, Duration::from_secs(1), 3, Duration::from_millis(1), Arc::new(AtomicBool::new(false)));
+        retry_owned_wake_abort(original, owner, Duration::from_secs(1), 3, Duration::from_millis(1), Arc::new(AtomicBool::new(false)));
     });
     let first = rx.recv_timeout(Duration::from_secs(1)).unwrap();
     assert_eq!(first.bytes, b"VREC:ABORT:00001234\n");
@@ -3064,17 +3076,63 @@ fn owned_wake_abort_retry_stops_for_new_capture_or_new_request() {
     let (old_tx, old_rx) = mpsc::channel();
     let old_registration = install_test_audio_control(816, old_tx);
     let original = active_audio_control_sender().unwrap();
+    remember_accepted_wake_capture_owner(0x1234, 816);
+    let owner = take_accepted_wake_capture_owner(0x1234).unwrap();
     remember_accepted_wake_capture_owner(0x5678, 816);
-    retry_owned_wake_abort(original.clone(), 0x1234, Duration::from_millis(20), 1, Duration::ZERO, Arc::new(AtomicBool::new(false)));
+    retry_owned_wake_abort(original.clone(), owner, Duration::from_millis(20), 1, Duration::ZERO, Arc::new(AtomicBool::new(false)));
     assert!(old_rx.try_recv().is_err(), "a newer request must keep its own session");
-    *accepted_wake_capture_owner_slot().lock().unwrap() = None;
+    assert!(take_accepted_wake_capture_owner(0x5678).is_some());
+    retry_owned_wake_abort(original.clone(), owner, Duration::from_millis(20), 1, Duration::ZERO, Arc::new(AtomicBool::new(false)));
+    assert!(old_rx.try_recv().is_err(), "completed newer owner must still fence old retries");
     let (new_tx, new_rx) = mpsc::channel();
     let new_registration = install_test_audio_control(817, new_tx);
-    retry_owned_wake_abort(original, 0x1234, Duration::from_millis(20), 1, Duration::ZERO, Arc::new(AtomicBool::new(false)));
+    retry_owned_wake_abort(original, owner, Duration::from_millis(20), 1, Duration::ZERO, Arc::new(AtomicBool::new(false)));
     assert!(old_rx.try_recv().is_err());
     assert!(new_rx.try_recv().is_err(), "old cleanup must not cross capture generations");
     drop(old_registration);
     drop(new_registration);
+}
+
+#[test]
+fn new_wake_owner_revokes_queued_old_abort_retry_even_after_new_owner_finishes() {
+    let _guard = active_audio_control_test_lock().lock().unwrap();
+    suspend_wake_abort_retries_for_ota(false);
+    *accepted_wake_capture_owner_slot().lock().unwrap() = None;
+    let (tx, rx) = mpsc::channel();
+    let registration = install_test_audio_control(819, tx.clone());
+    remember_accepted_wake_capture_owner(0x1111, 819);
+    let old_owner = take_accepted_wake_capture_owner(0x1111).unwrap();
+    let token = register_wake_abort_retry().unwrap();
+    let (reply_tx, reply_rx) = mpsc::channel();
+    tx.send(AudioControlRequest {
+        bytes: b"VREC:ABORT:00001111\n".to_vec(), label: "old retry".into(),
+        timeout: Duration::from_secs(1), queued_at: Instant::now(),
+        cancelled: token.clone(), result_tx: reply_tx,
+    }).unwrap();
+    remember_accepted_wake_capture_owner(0x2222, 819);
+    assert!(take_accepted_wake_capture_owner(0x2222).is_some());
+    assert!(token.load(Ordering::Acquire));
+    assert!(next_live_audio_control_request(&rx).is_none());
+    assert!(reply_rx.recv_timeout(Duration::from_millis(50)).unwrap().is_err());
+    assert_ne!(old_owner.generation, ACCEPTED_WAKE_OWNER_GENERATION.load(Ordering::Acquire));
+    drop(registration);
+}
+
+#[test]
+fn newer_wake_generation_fences_reused_request_id() {
+    let _guard = active_audio_control_test_lock().lock().unwrap();
+    *accepted_wake_capture_owner_slot().lock().unwrap() = None;
+    let (tx, rx) = mpsc::channel();
+    let registration = install_test_audio_control(820, tx);
+    let sender = active_audio_control_sender().unwrap();
+    remember_accepted_wake_capture_owner(0x3333, 820);
+    let old = take_accepted_wake_capture_owner(0x3333).unwrap();
+    remember_accepted_wake_capture_owner(0x3333, 820);
+    let new = take_accepted_wake_capture_owner(0x3333).unwrap();
+    assert_ne!(old.generation, new.generation);
+    retry_owned_wake_abort(sender, old, Duration::from_millis(20), 1, Duration::ZERO, Arc::new(AtomicBool::new(false)));
+    assert!(rx.try_recv().is_err(), "an identical request id cannot revive an older generation");
+    drop(registration);
 }
 
 #[test]

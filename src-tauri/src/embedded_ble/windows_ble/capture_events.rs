@@ -567,6 +567,7 @@ struct PendingAudioControlWrite {
     operation: Option<AudioControlAsyncOperation>,
     fallback: Option<GattWriteOption>,
     deadline_at: Instant,
+    dispatch_at: Instant,
     primary_error: Option<String>,
 }
 
@@ -584,6 +585,7 @@ impl PendingAudioControlWrite {
             Err(err) => return Err((request, err)),
         };
         let deadline_at = request.queued_at + request.timeout;
+        let dispatch_at = Instant::now();
         let (operation, fallback, primary_error) = match start_audio_control_async_operation(
             control,
             &request.bytes,
@@ -623,6 +625,7 @@ impl PendingAudioControlWrite {
             operation: Some(operation),
             fallback,
             deadline_at,
+            dispatch_at,
             primary_error,
         })
     }
@@ -713,11 +716,22 @@ impl PendingAudioControlWrite {
                 "active Listener BLE audio control request cancelled: {}",
                 request.label
             )),
-            AudioControlWritePollDecision::TimedOut => Err(format!(
-                "BLE {} write timed out after {} ms",
-                request.label,
-                request.timeout.as_millis()
-            )),
+            AudioControlWritePollDecision::TimedOut => {
+                let status_name = match status {
+                    windows::Foundation::AsyncStatus::Started => "Started",
+                    windows::Foundation::AsyncStatus::Completed => "Completed",
+                    windows::Foundation::AsyncStatus::Canceled => "Canceled",
+                    windows::Foundation::AsyncStatus::Error => "Error",
+                    _ => "Unknown",
+                };
+                Err(format!(
+                    "BLE {} write timed out after {} ms (queue_ms={} dispatch_ms={} async_status={status_name})",
+                    request.label,
+                    request.timeout.as_millis(),
+                    self.dispatch_at.saturating_duration_since(request.queued_at).as_millis(),
+                    self.dispatch_at.elapsed().as_millis(),
+                ))
+            },
         };
         match outcome {
             Ok(()) => Some(Ok(())),

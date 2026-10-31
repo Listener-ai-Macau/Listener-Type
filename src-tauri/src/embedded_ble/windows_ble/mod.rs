@@ -26,7 +26,7 @@ use std::fmt;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::{mpsc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
@@ -516,7 +516,10 @@ pub(super) async fn wait_for_listener_ota_control_ready(timeout: Duration) -> Re
 struct AcceptedWakeCaptureOwner {
     request_id: u32,
     capture_id: u64,
+    generation: u64,
 }
+
+static ACCEPTED_WAKE_OWNER_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone)]
 struct RuntimeBluetoothTargetAddress {
@@ -607,9 +610,15 @@ fn accepted_wake_capture_owner_slot() -> &'static Mutex<Option<AcceptedWakeCaptu
 
 fn remember_accepted_wake_capture_owner(request_id: u32, capture_id: u64) {
     if let Ok(mut slot) = accepted_wake_capture_owner_slot().lock() {
+        // Revoke older queued/in-flight retries before admitting the new owner.
+        // The generation also fences an old failure that registers its retry
+        // after this cancellation pass has completed.
+        cancel_wake_abort_retries_for_new_owner();
+        let generation = ACCEPTED_WAKE_OWNER_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
         *slot = Some(AcceptedWakeCaptureOwner {
             request_id,
             capture_id,
+            generation,
         });
     }
 }
