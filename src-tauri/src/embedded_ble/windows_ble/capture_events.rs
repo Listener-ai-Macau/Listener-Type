@@ -26,11 +26,9 @@ struct BleIngressDiagnosticSink {
 
 impl BleIngressDiagnosticSink {
     fn for_capture(capture_id: u64) -> Option<Self> {
-        let directory = std::env::var(BLE_INGRESS_DIAGNOSTIC_DIR_ENV)
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)?;
+        let directory = crate::sensitive_diagnostics::directory(
+            std::env::var(BLE_INGRESS_DIAGNOSTIC_DIR_ENV).ok(),
+        )?;
         if let Err(err) = fs::create_dir_all(&directory) {
             log::warn!(
                 "[embedded-ble] ingress diagnostic directory unavailable capture_id={capture_id}: {err}"

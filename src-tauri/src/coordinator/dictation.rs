@@ -2510,9 +2510,10 @@ fn archive_embedded_audio_if_enabled(
 
 fn record_embedded_audio_for_debug_enabled(inner: &Arc<Inner>) -> bool {
     inner.prefs.get().record_audio_for_debug
-        || std::env::var("LISTENER_TYPE_RECORD_EMBEDDED_AUDIO_FOR_DEBUG")
+        || (crate::sensitive_diagnostics::development_enabled()
+            && std::env::var("LISTENER_TYPE_RECORD_EMBEDDED_AUDIO_FOR_DEBUG")
             .map(|value| value == "1")
-            .unwrap_or(false)
+            .unwrap_or(false))
 }
 
 fn embedded_pcm_peak_level(pcm: &[u8]) -> f32 {

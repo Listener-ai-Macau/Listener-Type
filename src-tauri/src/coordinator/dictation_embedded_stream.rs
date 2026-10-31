@@ -1617,6 +1617,8 @@ impl EmbeddedStreamingDictation {
                 && verification.as_ref().is_ok_and(|result| result.enrolled_owner_matched());
             let retained_verification_source =
                 verification_input.observe_direct_result(&verification, &candidate);
+            #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+            let mut early_terminal_extraction_started = false;
             let mut phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
             let mut local_confirmation_ms = 0u64;
             #[cfg(target_os = "windows")]
@@ -1817,6 +1819,22 @@ impl EmbeddedStreamingDictation {
                                         },
                                     ) {
                                         candidate.local_owner_masked_phrase_evidence = true;
+                                        // The same owner-compatible evidence would start
+                                        // extraction after the terminal ASR ladder below.
+                                        // Start that independent work now so it can overlap
+                                        // the remaining checks; its result is still gated by
+                                        // the original phrase and owner verification.
+                                        let extraction_was_pending = candidate.target_wake_extraction_task.is_some();
+                                        maybe_start_terminal_owner_compatible_wake_extraction(
+                                            &mut candidate,
+                                            &phrase,
+                                            embedded_session_id,
+                                            &verification,
+                                            false,
+                                            false,
+                                        );
+                                        early_terminal_extraction_started |= !extraction_was_pending
+                                            && candidate.target_wake_extraction_task.is_some();
                                         log::info!(
                                             "[wake-phrase] masked owner phrase evidence retained for extraction embedded_session_id={} distance={} transcript_chars={} owner_score={:.6}",
                                             embedded_session_id,
@@ -2209,8 +2227,8 @@ impl EmbeddedStreamingDictation {
                     interference_owner_rise,
                     wake_match.is_some(),
                 );
-                let lazy_terminal_extraction_started =
-                    !extraction_was_prefetched && candidate.target_wake_extraction_task.is_some();
+                let lazy_terminal_extraction_started = early_terminal_extraction_started
+                    || (!extraction_was_prefetched && candidate.target_wake_extraction_task.is_some());
                 if let Some(evidence) = terminal_target_wake_evidence(
                     &mut candidate,
                     inner,

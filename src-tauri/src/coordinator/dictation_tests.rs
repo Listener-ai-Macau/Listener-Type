@@ -14576,6 +14576,52 @@ fn recorded_wake_parallel_inference_latency_probe() {
         "source_session_id":fixture["source_session_id"],"snapshot_pcm_ms":fixture["snapshot_pcm_ms"],"trials":trials})).unwrap()).unwrap();
 }
 
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+#[test]
+#[ignore = "explicit local wake WAV and enrolled model; CPU only, no device, editor or cloud"]
+fn recorded_terminal_extraction_overlap_latency_probe() {
+    use std::time::{Duration, Instant};
+    let path = std::env::var_os("LISTENER_TERMINAL_OVERLAP_WAV")
+        .expect("explicit local wake WAV");
+    let phrase = std::env::var("LISTENER_TERMINAL_OVERLAP_PHRASE")
+        .expect("explicit wake phrase");
+    let wav = std::fs::read(path).expect("read local wake WAV");
+    let pcm = crate::embedded_audio::read_wav_pcm16le(&wav).expect("decode local wake WAV");
+    let boosted = crate::wake_phrase::gain_normalized_pcm16(&pcm);
+    let embedding = crate::speaker_verification::target_speaker_embedding_for_phrase(&phrase)
+        .expect("load enrolled profile")
+        .expect("enrolled target-speaker embedding");
+    crate::asr::local::wake_helper::preload().expect("preload wake helper");
+    crate::asr::target_speaker_extraction::warm_up().expect("preload CPU separation");
+
+    for trial in 0..3 {
+        let start = Instant::now();
+        let serial_phrase = crate::asr::local::wake_helper::confirm(
+            &boosted, &phrase, Duration::from_secs(10),
+        ).expect("serial local confirmation");
+        let serial_extraction = crate::asr::target_speaker_extraction::extract_enrolled_owner_wake_candidate(
+            &pcm, embedding.clone(),
+        ).expect("serial owner separation");
+        let serial_ms = start.elapsed().as_millis();
+
+        let start = Instant::now();
+        let (parallel_phrase, parallel_extraction) = std::thread::scope(|scope| {
+            let wake = scope.spawn(|| crate::asr::local::wake_helper::confirm(
+                &boosted, &phrase, Duration::from_secs(10),
+            ));
+            let separate = scope.spawn(|| crate::asr::target_speaker_extraction::extract_enrolled_owner_wake_candidate(
+                &pcm, embedding.clone(),
+            ));
+            (wake.join().unwrap().unwrap(), separate.join().unwrap().unwrap())
+        });
+        let parallel_ms = start.elapsed().as_millis();
+        assert_eq!(serial_phrase.matched, parallel_phrase.matched);
+        assert_eq!(serial_phrase.phrase_relation, parallel_phrase.phrase_relation);
+        assert_eq!(serial_extraction.pcm.len(), parallel_extraction.pcm.len());
+        println!("terminal_overlap trial={trial} serial_ms={serial_ms} parallel_ms={parallel_ms}");
+    }
+}
+
 #[test]
 fn owner_snapshot_must_cover_the_same_wake_or_repeated_confirmation_audio() {
     use crate::observability::CandidateRange;
@@ -21713,6 +21759,7 @@ fn recorded_recall_intent_saved_inputs() {
     ).unwrap()).unwrap();
     let phrase = protocol["phrase"].as_str().unwrap();
     let coordinator = Coordinator::new();
+    crate::asr::local::wake_helper::preload().expect("prepare helper before recorded replay");
     let mut rows = Vec::new();
     let mut failed = Vec::new();
     for row in protocol["cases"].as_array().unwrap() {

@@ -284,7 +284,7 @@ fn reconcile_final_transcript_with_preview_hotwords(
         if let Some((start, end)) = replacement {
             corrected.replace_range(start..end, phrase);
             log::info!(
-                "[coord] restored preview-confirmed ASR hotword in final transcript: {phrase}"
+                "[coord] restored preview-confirmed ASR hotword in final transcript"
             );
         }
     }

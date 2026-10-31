@@ -1,4 +1,5 @@
 const WAKE_HELPER_BUSY_ERROR_CODE: &str = "local_wake_helper_busy";
+const WAKE_HELPER_NOT_READY_ERROR_CODE: &str = "local_wake_helper_not_ready";
 
 pub fn is_busy_error(error: &str) -> bool {
     error.contains(WAKE_HELPER_BUSY_ERROR_CODE)
@@ -10,6 +11,7 @@ mod imp {
     use std::os::windows::process::CommandExt;
     use std::process::{Child, ChildStdin, Command, Stdio};
     use std::sync::mpsc::{self, Receiver};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::OnceLock;
     use std::time::{Duration, Instant};
 
@@ -114,8 +116,9 @@ mod imp {
             // selected executable is allowed only for the ignored, offline
             // captured-PCM diagnostic, whose test harness has a different
             // current_exe and cannot serve the helper protocol itself.
-            let diagnostic_mode = std::env::var_os("LISTENER_WAKE_DIAGNOSTIC_DIR")
-                .is_some_and(|value| !value.to_string_lossy().trim().is_empty());
+            let diagnostic_mode = crate::sensitive_diagnostics::directory(
+                std::env::var("LISTENER_WAKE_DIAGNOSTIC_DIR").ok(),
+            ).is_some();
             let executable = if diagnostic_mode {
                 std::env::var_os("LISTENER_WAKE_HELPER_EXE")
                     .map(std::path::PathBuf::from)
@@ -183,11 +186,9 @@ mod imp {
                     let _ = process.child.kill();
                     Err(error.unwrap_or_else(|| "local wake helper model unavailable".to_string()))
                 }
-                response => {
+                _response => {
                     let _ = process.child.kill();
-                    Err(format!(
-                        "local wake helper returned unexpected startup response: {response:?}"
-                    ))
+                    Err("local wake helper returned unexpected startup response".to_string())
                 }
             }
         }
@@ -297,6 +298,16 @@ mod imp {
             phrase: &str,
             timeout: Duration,
         ) -> Result<WakeHelperResult, String> {
+            self.confirm_with_start_policy(pcm, phrase, timeout, true)
+        }
+
+        fn confirm_with_start_policy(
+            &self,
+            pcm: &[u8],
+            phrase: &str,
+            timeout: Duration,
+            allow_cold_start: bool,
+        ) -> Result<WakeHelperResult, String> {
             if pcm.is_empty() {
                 return Err("local wake helper received empty PCM".to_string());
             }
@@ -307,6 +318,14 @@ mod imp {
                 .process
                 .try_lock()
                 .ok_or_else(|| super::WAKE_HELPER_BUSY_ERROR_CODE.to_string())?;
+            if !allow_cold_start {
+                if process_slot.as_mut().is_some_and(|process| !process.is_running()) {
+                    *process_slot = None;
+                }
+                if process_slot.is_none() {
+                    return Err(super::WAKE_HELPER_NOT_READY_ERROR_CODE.to_string());
+                }
+            }
             let wav = TempWavFile::create_without_context_padding(pcm)
                 .map_err(|err| format!("prepare local wake helper WAV: {err:#}"))?;
             let request_id = Uuid::new_v4().to_string();
@@ -359,11 +378,9 @@ mod imp {
                         })
                     }
                 }
-                response => {
+                _response => {
                     *process_slot = None;
-                    Err(format!(
-                        "local wake helper returned mismatched response: {response:?}"
-                    ))
+                    Err("local wake helper returned mismatched response".to_string())
                 }
             }
         }
@@ -422,11 +439,9 @@ mod imp {
                         Ok(ShadowTranscriptResult { text, inference_ms })
                     }
                 }
-                response => {
+                _response => {
                     *process_slot = None;
-                    Err(format!(
-                        "local shadow ASR returned mismatched response: {response:?}"
-                    ))
+                    Err("local shadow ASR returned mismatched response".to_string())
                 }
             }
         }
@@ -452,6 +467,53 @@ mod imp {
     fn client() -> &'static WakeHelperClient {
         static CLIENT: OnceLock<WakeHelperClient> = OnceLock::new();
         CLIENT.get_or_init(WakeHelperClient::default)
+    }
+
+    fn schedule_recovery() {
+        static RECOVERY_RUNNING: AtomicBool = AtomicBool::new(false);
+        if RECOVERY_RUNNING.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_err() {
+            return;
+        }
+        let spawned = std::thread::Builder::new()
+            .name("listener-wake-helper-recovery".into())
+            .spawn(|| {
+                struct RecoveryGuard;
+                impl Drop for RecoveryGuard {
+                    fn drop(&mut self) { RECOVERY_RUNNING.store(false, Ordering::Release); }
+                }
+                let _guard = RecoveryGuard;
+                match client().preload() {
+                    Ok(()) => log::info!("[wake-phrase] local helper recovered in background"),
+                    Err(error) => log::warn!("[wake-phrase] background helper recovery failed: {error}"),
+                }
+            });
+        if let Err(error) = spawned {
+            RECOVERY_RUNNING.store(false, Ordering::Release);
+            log::warn!("[wake-phrase] background helper recovery could not start: {error}");
+        }
+    }
+
+    /// Live/terminal audio must not cold-start a helper while holding the IPC
+    /// lane: a slow restart would make an already-ended candidate block later
+    /// speech for the entire model warmup. Explicit offline diagnostics retain
+    /// the synchronous `confirm` entry point.
+    pub fn confirm_if_ready(
+        pcm: &[u8],
+        phrase: &str,
+        timeout: Duration,
+    ) -> Result<WakeHelperResult, String> {
+        let result = client().confirm_with_start_policy(pcm, phrase, timeout, false);
+        if let Err(error) = &result {
+            let missing = error == super::WAKE_HELPER_NOT_READY_ERROR_CODE
+                || client().process.try_lock().is_some_and(|slot| slot.is_none());
+            if missing {
+                schedule_recovery();
+            }
+            if error == super::WAKE_HELPER_NOT_READY_ERROR_CODE {
+                return Err(super::WAKE_HELPER_BUSY_ERROR_CODE.to_string());
+            }
+        }
+        result
     }
 
     pub fn preload() -> Result<(), String> {
@@ -721,12 +783,9 @@ mod imp {
                     );
                     match transcript {
                         Ok(evidence) => {
-                            let transcript_text = std::env::var(
-                                "LISTENER_WAKE_DIAGNOSTIC_DIR",
-                            )
-                            .ok()
-                            .filter(|directory| !directory.trim().is_empty())
-                            .map(|_| evidence.text);
+                            let transcript_text = crate::sensitive_diagnostics::directory(
+                                std::env::var("LISTENER_WAKE_DIAGNOSTIC_DIR").ok(),
+                            ).map(|_| evidence.text);
                             HelperResponse::Result {
                                 request_id,
                                 matched: phrase_relation_matches(evidence.phrase_relation),
@@ -828,6 +887,49 @@ mod imp {
                 .confirm(&[0, 0], "开始录音", Duration::from_millis(1))
                 .expect_err("a second confirmation must not queue");
             assert!(super::super::is_busy_error(&error));
+        }
+
+        #[test]
+        fn live_confirmation_does_not_cold_start_a_missing_helper() {
+            let client = WakeHelperClient::default();
+            let started = std::time::Instant::now();
+            let error = client
+                .confirm_with_start_policy(&[0, 0], "开始录音", Duration::from_millis(1), false)
+                .expect_err("a live candidate must not start the model itself");
+            assert_eq!(error, super::super::WAKE_HELPER_NOT_READY_ERROR_CODE);
+            assert!(started.elapsed() < Duration::from_secs(1));
+            assert!(client.process.lock().is_none());
+        }
+
+        #[test]
+        fn timed_out_helper_does_not_cold_start_on_the_next_live_candidate() {
+            use std::os::windows::process::CommandExt;
+            use std::process::{Command, Stdio};
+            let mut child = Command::new("powershell.exe")
+                .args(["-NoProfile", "-Command", "Start-Sleep -Seconds 30"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .creation_flags(super::CREATE_NO_WINDOW)
+                .spawn()
+                .expect("start controlled unresponsive helper");
+            let stdin = child.stdin.take().expect("helper stdin");
+            let (_response_sender, responses) = std::sync::mpsc::channel();
+            let client = WakeHelperClient::default();
+            *client.process.lock() = Some(super::HelperProcess { child, stdin, responses });
+
+            let error = client.confirm_with_start_policy(
+                &[0, 0], "开始录音", Duration::from_millis(30), false,
+            ).expect_err("the controlled helper does not answer");
+            assert!(error.contains("timed out"));
+            assert!(client.process.lock().is_none());
+
+            let started = std::time::Instant::now();
+            let error = client.confirm_with_start_policy(
+                &[0, 0], "开始录音", Duration::from_secs(4), false,
+            ).expect_err("the next live candidate must not wait for model startup");
+            assert_eq!(error, super::super::WAKE_HELPER_NOT_READY_ERROR_CODE);
+            assert!(started.elapsed() < Duration::from_secs(1));
         }
 
         #[test]
@@ -1614,7 +1716,7 @@ mod imp {
 #[cfg(target_os = "windows")]
 #[allow(unused_imports)]
 pub use imp::{
-    compare_keyword, confirm, preload, run_helper, transcribe_if_ready, ShadowTranscriptResult, WakeHelperResult,
+    compare_keyword, confirm, confirm_if_ready, preload, run_helper, transcribe_if_ready, ShadowTranscriptResult, WakeHelperResult,
 };
 
 #[cfg(not(target_os = "windows"))]

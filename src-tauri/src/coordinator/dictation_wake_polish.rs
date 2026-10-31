@@ -1825,9 +1825,7 @@ fn next_wake_diagnostic_capture_count(current: usize) -> Option<usize> {
 }
 
 fn explicit_wake_diagnostic_directory(value: Option<String>) -> Option<std::path::PathBuf> {
-    value
-        .filter(|directory| !directory.trim().is_empty())
-        .map(std::path::PathBuf::from)
+    crate::sensitive_diagnostics::directory(value)
 }
 
 fn pcm16_wav_bytes(pcm: &[u8]) -> Vec<u8> {
@@ -3844,7 +3842,7 @@ fn run_local_wake_confirmation_once(
         });
     let mut live_starving: Option<LiveStage2StarvingGuard> = None;
     let result = loop {
-        match crate::asr::local::wake_helper::confirm(&boosted, phrase, Duration::from_secs(4)) {
+        match crate::asr::local::wake_helper::confirm_if_ready(&boosted, phrase, Duration::from_secs(4)) {
             Err(err)
                 if crate::asr::local::wake_helper::is_busy_error(&err)
                     && Instant::now() < busy_deadline =>
@@ -3872,7 +3870,7 @@ fn run_local_wake_confirmation_once(
     .map_err(|err| format!("local wake confirmation failed: {err}"))?;
     drop(live_starving);
     log::info!(
-        "[wake-phrase] stage2 helper result embedded_session_id={} attempt={} branch={} phase={} request_id={} matched={} phrase_relation={:?} transcript_chars={} phonetic_prefix_units={} phonetic_suffix_units={} phonetic_best_distance={} phonetic_best_window_start={} inference_ms={} transcript={:?}",
+        "[wake-phrase] stage2 helper result embedded_session_id={} attempt={} branch={} phase={} request_id={} matched={} phrase_relation={:?} transcript_chars={} phonetic_prefix_units={} phonetic_suffix_units={} phonetic_best_distance={} phonetic_best_window_start={} inference_ms={}",
         context.embedded_session_id,
         context
             .attempt
@@ -3889,7 +3887,6 @@ fn run_local_wake_confirmation_once(
         result.phonetic_best_distance,
         result.phonetic_best_window_start,
         result.inference_ms,
-        &result.transcript_text,
     );
     #[cfg(test)]
     if explicit_wake_diagnostic_directory(std::env::var(WAKE_DIAGNOSTIC_DIR_ENV).ok()).is_some() {

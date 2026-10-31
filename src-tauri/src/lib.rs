@@ -55,6 +55,7 @@ mod wake_voice_commands;
 mod wake_admission_diagnostics;
 mod recorder;
 mod selection;
+mod sensitive_diagnostics;
 mod shortcut_binding;
 mod shortcut_dispatch;
 #[cfg(target_os = "windows")]

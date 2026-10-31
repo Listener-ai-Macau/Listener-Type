@@ -182,7 +182,10 @@ fn classify_provider_error(code: u32, body: &str) -> VolcengineASRError {
     {
         return VolcengineASRError::QuotaExceeded(code);
     }
-    VolcengineASRError::ConnectionFailed(format!("ASR error {code}: {body}"))
+    // Provider error bodies may echo speech or credentials. Keep the code for
+    // support and classification without propagating the untrusted body into
+    // product errors or persistent logs.
+    VolcengineASRError::ConnectionFailed(format!("ASR error {code}"))
 }
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -10952,7 +10955,7 @@ impl VolcengineStreamingASR {
     fn handle_frame(&self, data: &[u8]) -> bool {
         if self.managed_cloud && !self.managed_account_is_current() { self.cancel();return false; }
         let Some(parsed) = frame::parse(data) else {
-            log::error!("[asr] 帧解析失败 raw={}", hex_prefix(data, 32));
+            log::error!("[asr] 帧解析失败 bytes={}", data.len());
             return true;
         };
 
@@ -10962,9 +10965,8 @@ impl VolcengineStreamingASR {
             let body = String::from_utf8_lossy(&parsed.payload).to_string();
             let code = parsed.error_code.unwrap_or(0);
             log::error!(
-                "[asr] error frame code={} body={}",
-                code,
-                body.chars().take(200).collect::<String>()
+                "[asr] error frame code={}",
+                code
             );
             // 断流类错误帧（45000081 等）顺带探测网络分层，定位数据。
             let error = classify_provider_error(code, &body);
@@ -10991,10 +10993,6 @@ impl VolcengineStreamingASR {
             st.bytes_sent_since_response = 0;
             st.post_response_gap_logged = false;
         }
-
-        let payload_for_log = std::str::from_utf8(&parsed.payload)
-            .ok()
-            .map(|payload| payload.chars().take(400).collect::<String>());
 
         let json: Value = match serde_json::from_slice(&parsed.payload) {
             Ok(v) => v,
@@ -12115,22 +12113,6 @@ impl VolcengineStreamingASR {
                 self.session_options.endpoint.label()
             );
         }
-        if let Some(payload) = payload_for_log {
-            let text_is_empty = candidate.text.trim().is_empty();
-            if text_is_empty && !has_final {
-                log::debug!(
-                    "[asr] {} server JSON(empty): {}",
-                    self.session_options.endpoint.label(),
-                    payload
-                );
-            } else {
-                log::debug!(
-                    "[asr] {} server JSON: {}",
-                    self.session_options.endpoint.label(),
-                    payload
-                );
-            }
-        }
         if !has_final {
             let should_ignore = {
                 let state = self.state.lock();
@@ -12138,8 +12120,8 @@ impl VolcengineStreamingASR {
             };
             if should_ignore {
                 log::debug!(
-                    "[asr] ignored unstable initial partial: {}",
-                    candidate.text.chars().take(20).collect::<String>()
+                    "[asr] ignored unstable initial partial chars={}",
+                    candidate.text.chars().count()
                 );
                 return true;
             }
@@ -26131,6 +26113,8 @@ mod tests {
         let transport = classify_provider_error(45_000_001, "temporary server error");
         assert!(matches!(transport, VolcengineASRError::ConnectionFailed(_)));
         assert!(transport.permits_full_audio_replay());
+        assert!(transport.to_string().contains("45000001"));
+        assert!(!transport.to_string().contains("temporary server error"));
     }
 
     #[test]

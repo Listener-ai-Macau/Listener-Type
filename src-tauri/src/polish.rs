@@ -237,7 +237,7 @@ pub enum LLMError {
     Network(String),
     #[error("timeout")]
     Timeout,
-    #[error("invalid response: status {status}, body: {body}")]
+    #[error("invalid response: status {status}")]
     InvalidResponse { status: u16, body: String },
     #[error("parse error: {0}")]
     ParseError(String),
@@ -701,7 +701,7 @@ impl OpenAICompatibleLLMProvider {
 
         let preview_end = BODY_PREVIEW_LIMIT.min(body_text.len());
         let preview = safe_str_slice(&body_text, preview_end);
-        log::info!("[llm] HTTP {} body={}", status.as_u16(), preview);
+        log::info!("[llm] HTTP {}", status.as_u16());
 
         if !status.is_success() {
             return Err(LLMError::InvalidResponse {
@@ -768,7 +768,7 @@ impl OpenAICompatibleLLMProvider {
                 .map_err(|e| LLMError::Network(e.to_string()))?;
             let preview_end = BODY_PREVIEW_LIMIT.min(body_text.len());
             let preview = safe_str_slice(&body_text, preview_end);
-            log::error!("[llm] HTTP {} body={}", status.as_u16(), preview);
+            log::error!("[llm] HTTP {}", status.as_u16());
             return Err(LLMError::InvalidResponse {
                 status: status.as_u16(),
                 body: preview.to_string(),
@@ -815,8 +815,8 @@ impl OpenAICompatibleLLMProvider {
                         Ok(v) => v,
                         Err(e) => {
                             log::warn!(
-                                "[llm] SSE parse skip: {e}; payload preview: {}",
-                                safe_str_slice(payload, 80)
+                                "[llm] SSE parse skip: {e}; payload_bytes={}",
+                                payload.len()
                             );
                             continue;
                         }
@@ -902,7 +902,7 @@ impl OpenAICompatibleLLMProvider {
                 .map_err(|e| LLMError::Network(e.to_string()))?;
             let preview_end = BODY_PREVIEW_LIMIT.min(body_text.len());
             let preview = safe_str_slice(&body_text, preview_end);
-            log::error!("[llm] streaming HTTP {} body={}", status.as_u16(), preview);
+            log::error!("[llm] streaming HTTP {}", status.as_u16());
             return Err(LLMError::InvalidResponse {
                 status: status.as_u16(),
                 body: preview.to_string(),
@@ -975,8 +975,8 @@ impl OpenAICompatibleLLMProvider {
                         Ok(v) => v,
                         Err(e) => {
                             log::warn!(
-                                "[llm] polish SSE parse skip: {e}; payload preview: {}",
-                                safe_str_slice(payload, 80)
+                                "[llm] polish SSE parse skip: {e}; payload_bytes={}",
+                                payload.len()
                             );
                             continue;
                         }
@@ -1303,7 +1303,7 @@ impl CodexOAuthLLMProvider {
                 .map_err(|e| LLMError::Network(e.to_string()))?;
             let preview_end = BODY_PREVIEW_LIMIT.min(body_text.len());
             let preview = safe_str_slice(&body_text, preview_end);
-            log::error!("[llm] codex HTTP {} body={}", status.as_u16(), preview);
+            log::error!("[llm] codex HTTP {}", status.as_u16());
             return Err(LLMError::InvalidResponse {
                 status: status.as_u16(),
                 body: preview.to_string(),
@@ -1648,8 +1648,8 @@ fn handle_codex_sse_event<F>(
             Ok(v) => v,
             Err(e) => {
                 log::warn!(
-                    "[llm] codex SSE parse skip: {e}; payload preview: {}",
-                    safe_str_slice(payload, 80)
+                    "[llm] codex SSE parse skip: {e}; payload_bytes={}",
+                    payload.len()
                 );
                 continue;
             }
@@ -2412,6 +2412,17 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Mutex as StdMutex;
     use std::thread;
+
+    #[test]
+    fn provider_error_display_does_not_expose_response_text() {
+        let error = LLMError::InvalidResponse {
+            status: 401,
+            body: "private provider response".into(),
+        };
+        assert!(error.to_string().contains("401"));
+        assert!(!error.to_string().contains("private provider response"));
+        assert!(matches!(error, LLMError::InvalidResponse { status: 401, .. }));
+    }
 
     #[test]
     fn polite_suggestions_use_a_json_contract_not_the_dictation_envelope() {

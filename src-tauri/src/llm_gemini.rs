@@ -246,7 +246,7 @@ impl GeminiProvider {
 
         let preview_end = BODY_PREVIEW_LIMIT.min(body_text.len());
         let preview = safe_str_slice(&body_text, preview_end);
-        log::info!("[llm] HTTP {} body={}", status.as_u16(), preview);
+        log::info!("[llm] HTTP {}", status.as_u16());
 
         if !status.is_success() {
             return Err(LLMError::InvalidResponse {
@@ -297,7 +297,7 @@ impl GeminiProvider {
                 .map_err(|e| LLMError::Network(e.to_string()))?;
             let preview_end = BODY_PREVIEW_LIMIT.min(body_text.len());
             let preview = safe_str_slice(&body_text, preview_end);
-            log::error!("[llm] HTTP {} body={}", status.as_u16(), preview);
+            log::error!("[llm] HTTP {}", status.as_u16());
             return Err(LLMError::InvalidResponse {
                 status: status.as_u16(),
                 body: preview.to_string(),
@@ -342,8 +342,8 @@ impl GeminiProvider {
                         Ok(v) => v,
                         Err(e) => {
                             log::warn!(
-                                "[llm] gemini SSE parse skip: {e}; payload preview: {}",
-                                safe_str_slice(payload, 80)
+                                "[llm] gemini SSE parse skip: {e}; payload_bytes={}",
+                                payload.len()
                             );
                             continue;
                         }
