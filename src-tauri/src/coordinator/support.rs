@@ -789,19 +789,12 @@ pub(super) fn emit_capsule_with_session(
     };
 
     if run_window_ops {
-        #[cfg(target_os = "windows")]
-        apply_capsule_window_request(
-            inner,
-            &app,
-            seq,
-            &session_id_for_log,
-            state,
-            elapsed_ms,
-            translation,
-            visible,
-        );
-
-        #[cfg(not(target_os = "windows"))]
+        // Native window positioning can synchronously wait for the owning UI
+        // thread on Windows. The caller may hold the BLE actor lock while that
+        // thread is handling cancel, so never run those window operations on
+        // the background actor thread. Tauri posts this closure when called
+        // off the UI thread; the current-payload check inside it drops stale
+        // requests after session or state changes.
         {
             let inner_for_main = Arc::clone(inner);
             let app_for_main = app.clone();
