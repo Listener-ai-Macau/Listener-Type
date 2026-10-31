@@ -1035,12 +1035,6 @@ impl RecordingLifecycleController {
 
     /// Returns true only for the first active/pending -> Stopping
     /// transition. Repeated stop requests are harmless and return false.
-    /// A duplicate host stop must wait for this owner's device tail.
-    pub(crate) fn stop_committed_for(&self, coordinator_session_id: SessionId) -> bool {
-        self.coordinator_session_id == Some(coordinator_session_id)
-            && matches!(self.state, RecordingLifecycleState::Stopping | RecordingLifecycleState::Closed)
-    }
-
     pub(crate) fn commit_stop(&mut self, coordinator_session_id: SessionId) -> bool {
         self.commit_stop_owned(coordinator_session_id, None)
     }

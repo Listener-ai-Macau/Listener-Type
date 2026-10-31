@@ -25,7 +25,6 @@ pub enum HotkeyEvent {
     Pressed,
     Released,
     Cancelled,
-    FinishRecording(uuid::Uuid),
     /// Shift（或未来配置项指定的修饰键）按下边沿。可在录音过程中任何时刻产生；
     /// 上层据此切换到翻译输出管线。详见 issue #4。
     TranslationModifierPressed,
@@ -43,9 +42,6 @@ mod tests {
 
     fn shared_with_held_latches() -> Shared {
         Shared {
-            finish_target: None,
-            enter_held: AtomicBool::new(false),
-            enter_down: AtomicBool::new(false),
             binding: RwLock::new(HotkeyBinding::default()),
             trigger_held: AtomicBool::new(true),
             qa_trigger: RwLock::new(None),
@@ -119,12 +115,7 @@ pub trait HotkeyAdapter: Send + Sync {
     fn shutdown(&self) {}
 }
 
-type FinishTarget = Arc<dyn Fn() -> Option<uuid::Uuid> + Send + Sync>;
-
 struct Shared {
-    finish_target: Option<FinishTarget>,
-    enter_held: AtomicBool,
-    enter_down: AtomicBool,
     binding: RwLock<HotkeyBinding>,
     /// 触发键当前是否处于"按住"状态。OS 自动重复事件用此去重。
     trigger_held: AtomicBool,
@@ -148,10 +139,9 @@ impl HotkeyMonitor {
     pub fn start(
         binding: HotkeyBinding,
         tx: Sender<HotkeyEvent>,
-        finish_target: FinishTarget,
     ) -> Result<Self, HotkeyInstallError> {
         Ok(Self {
-            adapter: platform::start_adapter(binding, tx, finish_target)?,
+            adapter: platform::start_adapter(binding, tx)?,
         })
     }
 
@@ -227,7 +217,6 @@ fn start_listener_thread<T, F>(
     tx: Sender<HotkeyEvent>,
     thread_name: &str,
     startup_timeout_message: &'static str,
-    finish_target: FinishTarget,
     run_listen_loop: F,
 ) -> Result<ListenerThread<T>, HotkeyInstallError>
 where
@@ -235,9 +224,6 @@ where
     F: FnOnce(Arc<Shared>, Sender<HotkeyEvent>, StartupTx<T>) + Send + 'static,
 {
     let shared = Arc::new(Shared {
-        finish_target: Some(finish_target),
-        enter_held: AtomicBool::new(false),
-        enter_down: AtomicBool::new(false),
         binding: RwLock::new(binding),
         trigger_held: AtomicBool::new(false),
         qa_trigger: RwLock::new(None),
@@ -320,14 +306,12 @@ mod platform {
     pub fn start_adapter(
         binding: HotkeyBinding,
         tx: Sender<HotkeyEvent>,
-        finish_target: super::FinishTarget,
     ) -> Result<Box<dyn HotkeyAdapter>, HotkeyInstallError> {
         let listener = start_listener_thread(
             binding,
             tx,
             "listener-type-hotkey-mac-event-tap",
             "hotkey hook 启动超时",
-            finish_target,
             run_listen_loop,
         )?;
         Ok(Box::new(MacHotkeyAdapter {
@@ -686,9 +670,6 @@ mod platform {
 
         fn shared(trigger: HotkeyTrigger) -> Arc<Shared> {
             Arc::new(Shared {
-                finish_target: None,
-                enter_held: AtomicBool::new(false),
-                enter_down: AtomicBool::new(false),
                 binding: RwLock::new(HotkeyBinding {
                     trigger,
                     mode: crate::types::HotkeyMode::Toggle,
@@ -782,7 +763,7 @@ mod platform {
 
     use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
     use windows::Win32::System::Threading::GetCurrentThreadId;
-    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, GetKeyState};
+    use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState;
     use windows::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
         TranslateMessage, UnhookWindowsHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG,
@@ -804,7 +785,6 @@ mod platform {
     const WM_SYSKEYDOWN: usize = 0x0104;
     const WM_SYSKEYUP: usize = 0x0105;
 
-    const VK_RETURN: u32 = 0x0D;
     const VK_ESCAPE: u32 = 0x1B;
     const VK_SHIFT: u32 = 0x10;
     const VK_LSHIFT: u32 = 0xA0;
@@ -822,14 +802,12 @@ mod platform {
     pub fn start_adapter(
         binding: HotkeyBinding,
         tx: Sender<HotkeyEvent>,
-        finish_target: super::FinishTarget,
     ) -> Result<Box<dyn HotkeyAdapter>, HotkeyInstallError> {
         let listener = start_listener_thread(
             binding,
             tx,
             "listener-type-hotkey-win-ll-hook",
             "Windows hotkey hook 启动超时",
-            finish_target,
             run_listen_loop,
         )?;
         Ok(Box::new(WindowsHotkeyAdapter {
@@ -951,10 +929,6 @@ mod platform {
                 if physical {
                     log_raw_device_key_event(keyboard.vkCode, wparam.0);
                 }
-                // Synthetic Enter from text delivery must never end a session.
-                if !physical && keyboard.vkCode == VK_RETURN {
-                    return CallNextHookEx(None, code, wparam, lparam);
-                }
                 if physical || accept_injected_events() {
                     if dispatch_keyboard_event(ctx, keyboard.vkCode, wparam.0) {
                         return LRESULT(1);
@@ -1050,11 +1024,6 @@ mod platform {
     }
 
     fn dispatch_keyboard_event(ctx: &CallbackContext, vk_code: u32, message: usize) -> bool {
-        if vk_code == VK_RETURN {
-            let modified = [0x10, 0x11, 0x12, 0x5B, 0x5C]
-                .iter().any(|key| unsafe { (GetAsyncKeyState(*key) as u16 & 0x8000) != 0 });
-            return dispatch_enter_event(ctx, message, modified);
-        }
         if vk_code == VK_ESCAPE && (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) {
             send_or_log(&ctx.tx, HotkeyEvent::Cancelled);
             return false;
@@ -1146,31 +1115,6 @@ mod platform {
         true
     }
 
-    // Remember both passed-through and consumed key presses. An autorepeat
-    // that began before recording cannot suddenly turn into a stop command.
-    fn dispatch_enter_event(ctx: &CallbackContext, message: usize, modified: bool) -> bool {
-        match message {
-            WM_KEYUP | WM_SYSKEYUP => {
-                ctx.shared.enter_down.store(false, Ordering::SeqCst);
-                ctx.shared.enter_held.swap(false, Ordering::SeqCst)
-            }
-            WM_KEYDOWN | WM_SYSKEYDOWN => {
-                if ctx.shared.enter_down.swap(true, Ordering::SeqCst) {
-                    return ctx.shared.enter_held.load(Ordering::SeqCst);
-                }
-                if !modified {
-                    if let Some(session) = ctx.shared.finish_target.as_ref().and_then(|target| target()) {
-                        ctx.shared.enter_held.store(true, Ordering::SeqCst);
-                        send_or_log(&ctx.tx, HotkeyEvent::FinishRecording(session));
-                        return true;
-                    }
-                }
-                false
-            }
-            _ => false,
-        }
-    }
-
     fn handle_optional_modifier_trigger(
         ctx: &CallbackContext,
         vk_code: u32,
@@ -1227,9 +1171,6 @@ mod platform {
 
         fn shared(trigger: HotkeyTrigger) -> Arc<Shared> {
             Arc::new(Shared {
-                finish_target: None,
-                enter_held: AtomicBool::new(false),
-                enter_down: AtomicBool::new(false),
                 binding: RwLock::new(HotkeyBinding {
                     trigger,
                     mode: crate::types::HotkeyMode::Toggle,
@@ -1258,41 +1199,6 @@ mod platform {
 
         fn drain(rx: &mpsc::Receiver<HotkeyEvent>) -> Vec<HotkeyEvent> {
             rx.try_iter().collect()
-        }
-
-        #[test]
-        fn enter_finish_only_consumes_one_owned_press_and_its_release() {
-            let id = uuid::Uuid::from_u128(42);
-            let mut target = shared(HotkeyTrigger::Custom);
-            Arc::get_mut(&mut target).unwrap().finish_target = Some(Arc::new(move || Some(id)));
-            let (ctx, rx) = callback_context(target);
-            assert!(dispatch_enter_event(&ctx, WM_KEYDOWN, false));
-            assert!(dispatch_enter_event(&ctx, WM_KEYDOWN, false));
-            assert!(dispatch_enter_event(&ctx, WM_KEYUP, true));
-            assert!(!dispatch_enter_event(&ctx, WM_KEYUP, false));
-            assert_eq!(drain(&rx), vec![HotkeyEvent::FinishRecording(id)]);
-        }
-
-        #[test]
-        fn enter_finish_passes_modified_or_preexisting_press_without_reinterpreting_repeat() {
-            let id = uuid::Uuid::from_u128(43);
-            let active = Arc::new(AtomicBool::new(false));
-            let mut target = shared(HotkeyTrigger::Custom);
-            let active_for_target = active.clone();
-            Arc::get_mut(&mut target).unwrap().finish_target = Some(Arc::new(move ||
-                active_for_target.load(Ordering::SeqCst).then_some(id)));
-            let (ctx, rx) = callback_context(target);
-            assert!(!dispatch_enter_event(&ctx, WM_KEYDOWN, false));
-            active.store(true, Ordering::SeqCst);
-            assert!(!dispatch_enter_event(&ctx, WM_KEYDOWN, false));
-            assert!(!dispatch_enter_event(&ctx, WM_KEYUP, false));
-            assert!(!dispatch_enter_event(&ctx, WM_KEYDOWN, true));
-            assert!(!dispatch_enter_event(&ctx, WM_KEYUP, true));
-            assert!(drain(&rx).is_empty());
-            assert!(dispatch_enter_event(&ctx, WM_KEYDOWN, false));
-            active.store(false, Ordering::SeqCst);
-            assert!(dispatch_enter_event(&ctx, WM_KEYUP, false));
-            assert_eq!(drain(&rx), vec![HotkeyEvent::FinishRecording(id)]);
         }
 
         #[test]
@@ -1467,7 +1373,6 @@ mod platform {
     pub fn start_adapter(
         binding: HotkeyBinding,
         tx: Sender<HotkeyEvent>,
-        finish_target: super::FinishTarget,
     ) -> Result<Box<dyn HotkeyAdapter>, HotkeyInstallError> {
         if super::is_wayland_session() {
             log::info!(
@@ -1482,7 +1387,6 @@ mod platform {
             tx,
             "listener-type-hotkey-rdev",
             "hotkey hook 启动超时",
-            finish_target,
             run_listen_loop,
         )?;
         let _ = listener.startup;
@@ -1704,9 +1608,6 @@ mod platform {
 
         fn shared(trigger: HotkeyTrigger) -> Shared {
             Shared {
-                finish_target: None,
-                enter_held: AtomicBool::new(false),
-                enter_down: AtomicBool::new(false),
                 binding: RwLock::new(HotkeyBinding {
                     trigger,
                     mode: crate::types::HotkeyMode::Toggle,

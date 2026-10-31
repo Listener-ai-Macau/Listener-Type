@@ -27,7 +27,7 @@ fn hotkey_supervisor_loop(inner: Arc<Inner>) {
             mode: prefs.hotkey.mode,
             keys: None,
         };
-        match HotkeyMonitor::start(binding, tx, finish_recording_target(&inner)) {
+        match HotkeyMonitor::start(binding, tx) {
             Ok(monitor) => {
                 let adapter = monitor.kind();
                 *inner.hotkey.lock() = Some(monitor);

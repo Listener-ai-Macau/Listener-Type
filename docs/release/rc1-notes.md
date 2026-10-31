@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build246 / Firmware38
+# Listener v1.0.6-rc1 · Type build243 / Firmware38
 
 | Download | File |
 | --- | --- |
@@ -6,8 +6,6 @@
 | **ESP32-S3 firmware · USB or Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 ## In this app update
-
-On Windows, an optional setting lets an unmodified Enter finish the current recording like the capsule checkmark. It is off by default. While enabled and recording, Enter is not sent to the active app and cannot confirm input-method candidates; modified Enter combinations remain available. Targeted key-edge and session-owner tests were run; a physical-key-to-final-text end-to-end check remains pending.
 
 When a clean raw final differs too much from an earlier pasted prefix to locate a safe tail, Type attempts to replace only the same session’s verified, unchanged editor range with the complete final. If the range cannot be verified, it leaves the existing text untouched and reports that it may be incomplete. This scenario has targeted tests; actual end-to-end reproduction in the original editor is still pending.
 
@@ -23,14 +21,12 @@ Translations can alter meaning or numbers and require review. Enhanced CPU trans
 
 ## File identity
 
-- Type source: `f92a484c1ca6611c4bf5ade313840ea4d4d1ff05` · `build-source/type246-20261031`
-- MSI: 306540544 bytes · SHA256 `f7ac76c6bff65dd5ecef55cc4dbedbcc8d34f16e180c180e3beb927e5c32ac87`
+- Type source: `1a70146c4a8f05dee6d063f2d0347869ff022b2a` · `build-source/type243-20261031`
+- MSI: 306556928 bytes · SHA256 `bf958e6bbf5d9be989b002d60a81a286b076f1f4836652d0720041b7960c9c0a`
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`
 - ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`
 
 ## 中文说明
-
-Windows 新增可选的 Enter 提前结束录音，作用与录音胶囊的勾相同，默认关闭。启用后，录音期间的单独 Enter 不会发送给当前应用，也不能用来确认输入法候选字；组合键不受影响。按键及会话定向测试已运行，实体按键到最终文字的端到端验证尚待完成。
 
 本次更新在提前上屏的文字与最终原文无法安全对齐时，尝试只替换本次录音在同一输入框内已确认且未被修改的范围；不能确认时不强贴，并提示内容可能不完整。此路径已做定向测试，原输入框端到端复现仍待确认。
 

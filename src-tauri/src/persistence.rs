@@ -1439,10 +1439,6 @@ impl PreferencesStore {
         self.state.lock().clone()
     }
 
-    pub(crate) fn try_enter_finishes_recording(&self) -> bool {
-        self.state.try_lock().is_some_and(|prefs| prefs.enter_finishes_recording)
-    }
-
     #[cfg(test)]
     pub fn replace_for_tests(&self, prefs: UserPreferences) {
         *self.state.lock() = prefs;

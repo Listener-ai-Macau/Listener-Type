@@ -11,8 +11,7 @@ import {
 } from '../../lib/ipc';
 import { useHotkeySettings } from '../../state/HotkeySettingsContext';
 import { Card } from '../_atoms';
-import { SettingRow, Toggle } from './shared';
-import { currentPlatform } from '../../lib/hotkey';
+import { SettingRow } from './shared';
 
 const UNBOUND_SHORTCUT = { primary: '', modifiers: [] as string[] };
 
@@ -30,6 +29,7 @@ export function ShortcutsSection() {
 
   const readonlyRows: Array<[string, string]> = [
     [t('settings.shortcuts.cancel'), 'Esc'],
+    [t('settings.shortcuts.confirm'), t('settings.shortcuts.confirmHint')],
   ];
 
   return (
@@ -99,11 +99,6 @@ export function ShortcutsSection() {
           }}
         />
       </SettingRow>
-      {currentPlatform().isWindows && (
-        <SettingRow label={t('shortcutDefaults.enterFinish')} desc={t('shortcutDefaults.enterFinishDesc')}>
-          <Toggle on={prefs.enterFinishesRecording} onToggle={on => void savePrefs(current => ({ ...current, enterFinishesRecording: on }))} />
-        </SettingRow>
-      )}
       {readonlyRows.map(([k, v]) => (
         <SettingRow key={k} label={k}>
           <kbd style={{
