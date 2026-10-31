@@ -1,4 +1,4 @@
-# Listener v1.0.6-rc1 · Type build242 / Firmware38
+# Listener v1.0.6-rc1 · Type build243 / Firmware38
 
 | Download | File |
 | --- | --- |
@@ -6,6 +6,8 @@
 | **ESP32-S3 firmware · USB or Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 ## In this app update
+
+When a clean raw final differs too much from an earlier pasted prefix to locate a safe tail, Type attempts to replace only the same session’s verified, unchanged editor range with the complete final. If the range cannot be verified, it leaves the existing text untouched and reports that it may be incomplete. This scenario has targeted tests; actual end-to-end reproduction in the original editor is still pending.
 
 Type retries the original wake-recording cancellation when the initial Bluetooth control write fails, while protecting later recordings and firmware updates. It also improves recovery of the wake helper, bundles the CPU voice-activity runtime for fresh Windows installations, and reduces sensitive diagnostic logging. Raw recording retention remains off by default.
 
@@ -19,13 +21,15 @@ Translations can alter meaning or numbers and require review. Enhanced CPU trans
 
 ## File identity
 
-- Type source: `ff927ccde203a4a7ae0ab0c9450f1031f48e0bc7` · `build-source/type242-20261031`
-- MSI: 306548736 bytes · SHA256 `0668ba64f33a8cb8f325a364bcc26b696479625ecb81234dd56607a243f91227`
+- Type source: `1a70146c4a8f05dee6d063f2d0347869ff022b2a` · `build-source/type243-20261031`
+- MSI: 306556928 bytes · SHA256 `bf958e6bbf5d9be989b002d60a81a286b076f1f4836652d0720041b7960c9c0a`
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`
 - ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`
 
 ## 中文说明
 
-本次更新在自动唤醒录音的取消指令暂时失败时，对原录音执行有限重试，同时保护后续录音及固件更新。改善唤醒辅助程序恢复，补齐新装机器的 CPU 语音活动检测组件，并减少敏感诊断日志。原始录音默认不保留。
+本次更新在提前上屏的文字与最终原文无法安全对齐时，尝试只替换本次录音在同一输入框内已确认且未被修改的范围；不能确认时不强贴，并提示内容可能不完整。此路径已做定向测试，原输入框端到端复现仍待确认。
+
+同时，在自动唤醒录音的取消指令暂时失败时，对原录音执行有限重试，同时保护后续录音及固件更新。改善唤醒辅助程序恢复，补齐新装机器的 CPU 语音活动检测组件，并减少敏感诊断日志。原始录音默认不保留。
 
 蓝牙持续不可用或连接已更换时，重试不保证成功。实体设备已验证延迟取消，但通过独立蓝牙程序操作；尚未完整复现 Type 自身的真实超时与重试，抓包也未完整跟随。偶发蓝牙超时和唤醒失败的根因仍在排查。
