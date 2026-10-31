@@ -20387,6 +20387,34 @@ fn pause_early_final_remainder_splits_on_stability_key_prefix() {
 }
 
 #[test]
+fn unresolved_early_paste_can_reconcile_only_a_clean_owned_raw_final() {
+    use super::{embedded_audio_partial_preview_stability_key, pause_early_final_remainder,
+        pause_early_revised_terminal_remainder, pause_early_tail_beyond_delivered_anchor,
+        pause_early_aligned_growth_tail, pause_early_mismatch_recovery_tail,
+        should_attempt_owned_final_replacement};
+    let early = "原先识别的短句";
+    let final_text = "完全修正后的开头以及后面完整的长句，必须全部保留。";
+    let key = embedded_audio_partial_preview_stability_key(early);
+    assert!(pause_early_final_remainder(final_text, early, &key).is_none());
+    assert!(pause_early_revised_terminal_remainder(final_text, early, &key).is_none());
+    assert!(pause_early_tail_beyond_delivered_anchor(final_text, &key).is_none());
+    assert!(pause_early_aligned_growth_tail(final_text, &key).is_none());
+    assert!(pause_early_mismatch_recovery_tail(final_text, &key).is_none());
+    assert!(should_attempt_owned_final_replacement(true, true, true, true, false, false, final_text));
+    for (clean, paste, raw, unresolved, covered, streamed, final_body) in [
+        (false, true, true, true, false, false, final_text),
+        (true, false, true, true, false, false, final_text),
+        (true, true, false, true, false, false, final_text),
+        (true, true, true, false, false, false, final_text),
+        (true, true, true, true, true, false, final_text),
+        (true, true, true, true, false, true, final_text),
+        (true, true, true, true, false, false, "   "),
+    ] {
+        assert!(!should_attempt_owned_final_replacement(clean, paste, raw, unresolved, covered, streamed, final_body));
+    }
+}
+
+#[test]
 fn pause_early_boundary_clusters_are_consumed_once_and_keep_new_words() {
     use super::{embedded_audio_partial_preview_stability_key as key,
         pause_early_final_remainder, pause_early_source_key_after_append};

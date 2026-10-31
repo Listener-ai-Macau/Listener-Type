@@ -280,6 +280,19 @@ fn should_restore_clipboard_after_dictation(
     prefs.restore_clipboard_after_paste && !final_retention_applies
 }
 
+fn should_attempt_owned_final_replacement(
+    clean_final: bool,
+    early_paste: bool,
+    raw_mode: bool,
+    unresolved_early_body: bool,
+    already_covered: bool,
+    competing_stream: bool,
+    final_text: &str,
+) -> bool {
+    clean_final && early_paste && raw_mode && unresolved_early_body
+        && !already_covered && !competing_stream && !final_text.trim().is_empty()
+}
+
 fn should_send_post_dictation_key(
     enabled: bool,
     key: PostDictationKey,
@@ -4325,7 +4338,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     } else { None };
     let native_source_covered = matches!(final_source_delivery.as_ref(),
         Some(crate::transcript_boundary::FinalSourceDelivery::Covered));
-    let final_supplement = match final_source_delivery.as_ref() {
+    let source_supplement = match final_source_delivery.as_ref() {
         Some(crate::transcript_boundary::FinalSourceDelivery::SupplementOwnedRange { body }) => Some(body.clone()),
         _ => None,
     };
@@ -4347,6 +4360,25 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         None if pause_early_sticky => (String::new(), true),
         None => (polished.clone(), false),
     }};
+    // If recognition revised the beginning so deeply that no safe tail can
+    // be identified, do not silently leave only the early prefix on screen.
+    // The existing clipboard worker may replace it with the final body only
+    // after proving that this session still owns that exact editor range.
+    let unresolved_owned_replacement = cfg!(target_os = "windows")
+        && source_supplement.is_none()
+        && should_attempt_owned_final_replacement(
+            pause_early_final_clean,
+            pause_early_paste,
+            mode == PolishMode::Raw && !raw_uses_llm && !translation_active,
+            skip_dispatch && pause_early_outcome.as_ref().is_some_and(|(display, remainder, recovery)|
+                !display.is_empty() && remainder.is_none() && recovery.is_none()),
+            native_source_covered,
+            already_streamed || streaming_composition_active(inner, current_session_id)
+                || streaming_composition_contaminated(inner, current_session_id),
+            &polished,
+        );
+    let final_supplement = source_supplement.or_else(||
+        unresolved_owned_replacement.then(|| polished.clone()));
     let terminal_suffix_expected = pause_early_delivered.as_ref()
         .filter(|_| pause_early_terminal_punctuation_only(&insert_text))
         .map(|(display, _)| display.as_str());
@@ -4457,9 +4489,14 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         // or Unicode typing if native ownership/readback is unavailable.
         let expected = &pause_early_delivered.as_ref().expect("supplement has delivered body").0;
         execute_delivery_submission(DeliveryRequest { text: supplement.clone(), ..delivery_request.clone() }, |_| async {
-            let mut submission = inner.inserter.insert_session_paste(supplement, paste_shortcut,
-                crate::insertion::SessionPasteScope { session_id: current_session_id,
-                    previous_body: expected.clone(), replace: true });
+            let scope = crate::insertion::SessionPasteScope { session_id: current_session_id,
+                previous_body: expected.clone(), replace: true };
+            let mut submission = if unresolved_owned_replacement {
+                inner.inserter.insert_session_paste_with_restore(supplement, restore_clipboard, paste_shortcut, scope)
+            } else {
+                inner.inserter.insert_session_paste(supplement, paste_shortcut, scope)
+            };
+            let had_receipt = submission.receipt.is_some();
             let confirmed = if let Some(receipt) = submission.receipt.as_mut() {
                 loop {
                     match receipt.try_take() {
@@ -4472,7 +4509,9 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             } else { false };
             log::info!("[coord] final source supplement session_id={current_session_id} previous_chars={} supplemented_chars={} status={:?} target_confirmed={confirmed}",
                 expected.chars().count(), supplement.chars().count(), submission.status);
-            DeliverySubmission { status: if confirmed { InsertStatus::Inserted } else { InsertStatus::SubmittedUnconfirmed },
+            DeliverySubmission { status: if confirmed { InsertStatus::Inserted }
+                else if unresolved_owned_replacement && !had_receipt { InsertStatus::DeferredNoTarget }
+                else { InsertStatus::SubmittedUnconfirmed },
                 target_confirmed: confirmed, route: DeliveryRoute::Paste,
                 submitted_text: Some(if confirmed { supplement.clone() } else { expected.clone() }) }
         }).await
@@ -4764,7 +4803,8 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         pause_early_sticky,
         &insert_text,
         &session.final_text,
-    ) || (cfg!(target_os = "macos") && pause_early_sticky && delivery_submission.route == DeliveryRoute::Direct);
+    ) || (unresolved_owned_replacement && !supplement_confirmed && pause_early_paste)
+        || (cfg!(target_os = "macos") && pause_early_sticky && delivery_submission.route == DeliveryRoute::Direct);
     let (clipboard_retention_satisfied, clipboard_result) = if retain_plain_dictation {
         retain_final_clipboard_with_foreground_budget(
             inner,
@@ -4919,7 +4959,15 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         && !translation_active)
         .then(|| current_llm_auth_fingerprint().ok()).flatten()
         .filter(|fingerprint| current_llm_auth_is_rejected(*fingerprint));
-    let done_message = if status == InsertStatus::Inserted
+    let done_message = if unresolved_owned_replacement && !supplement_confirmed {
+        Some(if clipboard_retention_satisfied && retain_plain_dictation {
+            "上屏内容可能不完整，完整文字在剪贴板；请核对后替换".to_string()
+        } else if delivery_fact.persistence == DeliveryPersistenceOutcome::Saved {
+            "上屏内容可能不完整，完整文字已保存在历史记录".to_string()
+        } else {
+            "上屏内容可能不完整，历史记录保存也失败，请检查结果".to_string()
+        })
+    } else if status == InsertStatus::Inserted
         && !polish_error.is_some()
         && !tsf_required_insert_failed
         && !wayland_session
