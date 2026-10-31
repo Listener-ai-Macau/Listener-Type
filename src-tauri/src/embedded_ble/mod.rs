@@ -591,6 +591,14 @@ pub fn send_recording_control_abort_wake_capture(
 }
 
 #[cfg(target_os = "windows")]
+pub fn suspend_wake_abort_retries_for_ota(suspended: bool) {
+    windows_ble::suspend_wake_abort_retries_for_ota(suspended)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn suspend_wake_abort_retries_for_ota(_suspended: bool) {}
+
+#[cfg(target_os = "windows")]
 pub fn send_recording_control_enrollment(timeout: Duration) -> Result<(), String> {
     windows_ble::send_recording_control_enrollment(timeout)
 }

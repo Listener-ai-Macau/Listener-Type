@@ -256,12 +256,91 @@ pub fn send_recording_control_abort_wake_capture(
             owner.capture_id, active.capture_id
         ));
     }
-    send_audio_control_via_sender(
-        active,
+    let result = send_audio_control_via_sender(
+        active.clone(),
         command.as_bytes(),
         timeout,
         "accepted wake capture abort",
-    )
+    );
+    if result.is_err() {
+        // A transient GATT stall can outlive both the user's CANCEL and the
+        // first ABORT. Keep the original request and capture lease: a retry
+        // must never open a new device or send an unscoped CANCEL. Firmware
+        // independently checks the request and the matching audio segment.
+        if let Some(cancelled) = register_wake_abort_retry() {
+            std::thread::spawn(move || {
+                retry_owned_wake_abort(active, request_id, timeout, 12, Duration::from_secs(3), cancelled);
+            });
+        }
+    }
+    result
+}
+
+#[derive(Default)]
+struct WakeAbortRetries {
+    suspended: bool,
+    tokens: Vec<std::sync::Weak<AtomicBool>>,
+}
+
+fn wake_abort_retries() -> &'static Mutex<WakeAbortRetries> {
+    static RETRIES: OnceLock<Mutex<WakeAbortRetries>> = OnceLock::new();
+    RETRIES.get_or_init(|| Mutex::new(WakeAbortRetries::default()))
+}
+
+fn register_wake_abort_retry() -> Option<Arc<AtomicBool>> {
+    let mut retries = wake_abort_retries().lock().ok()?;
+    if retries.suspended { return None; }
+    retries.tokens.retain(|token| token.strong_count() > 0);
+    let cancelled = Arc::new(AtomicBool::new(false));
+    retries.tokens.push(Arc::downgrade(&cancelled));
+    Some(cancelled)
+}
+
+pub fn suspend_wake_abort_retries_for_ota(suspended: bool) {
+    if let Ok(mut retries) = wake_abort_retries().lock() {
+        retries.suspended = suspended;
+        if suspended {
+            for token in retries.tokens.drain(..).filter_map(|token| token.upgrade()) {
+                token.store(true, Ordering::Release);
+            }
+        }
+    }
+}
+
+fn retry_owned_wake_abort(
+    original: ActiveAudioControlSender,
+    request_id: u32,
+    timeout: Duration,
+    attempts: usize,
+    interval: Duration,
+    cancelled: Arc<AtomicBool>,
+) {
+    let command = format!("VREC:ABORT:{request_id:08X}\n");
+    for attempt in 1..=attempts {
+        std::thread::sleep(interval);
+        // A closed/replaced capture or a newer wake transaction owns the
+        // device now. Do not carry the old cleanup across that boundary.
+        let same_capture = active_audio_control_sender()
+            .is_some_and(|active| active.capture_id == original.capture_id);
+        let superseded = accepted_wake_capture_owner_slot()
+            .lock()
+            .map(|slot| slot.as_ref().is_some_and(|owner| owner.request_id != request_id))
+            .unwrap_or(true);
+        if !same_capture || superseded || cancelled.load(Ordering::Acquire) {
+            log::info!("[embedded-ble] wake abort retry retired request_id={request_id} capture_id={}", original.capture_id);
+            return;
+        }
+        match send_audio_control_via_sender_with_cancellation(
+            original.clone(), command.as_bytes(), timeout, "accepted wake capture abort retry", Arc::clone(&cancelled),
+        ) {
+            Ok(()) => {
+                log::info!("[embedded-ble] wake abort retry sent request_id={request_id} attempt={attempt}");
+                return;
+            }
+            Err(err) => log::warn!("[embedded-ble] wake abort retry failed request_id={request_id} attempt={attempt}: {err}"),
+        }
+    }
+    log::warn!("[embedded-ble] wake abort retry exhausted request_id={request_id}");
 }
 
 pub fn send_recording_control_enrollment(timeout: Duration) -> Result<(), String> {

@@ -3017,6 +3017,79 @@ fn accepted_wake_abort_is_scoped_to_ensure_capture_generation() {
 }
 
 #[test]
+fn owned_wake_abort_retries_the_original_request_on_the_same_capture() {
+    let _guard = active_audio_control_test_lock().lock().unwrap();
+    *accepted_wake_capture_owner_slot().lock().unwrap() = None;
+    let (tx, rx) = mpsc::channel();
+    let registration = install_test_audio_control(815, tx);
+    let original = active_audio_control_sender().unwrap();
+    let retry = std::thread::spawn(move || {
+        retry_owned_wake_abort(original, 0x1234, Duration::from_secs(1), 3, Duration::from_millis(1), Arc::new(AtomicBool::new(false)));
+    });
+    let first = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_eq!(first.bytes, b"VREC:ABORT:00001234\n");
+    first.result_tx.send(Err("temporary control timeout".into())).unwrap();
+    let second = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_eq!(second.bytes, b"VREC:ABORT:00001234\n");
+    second.result_tx.send(Ok(())).unwrap();
+    retry.join().unwrap();
+    assert!(rx.try_recv().is_err());
+    drop(registration);
+}
+
+#[test]
+fn failed_initial_wake_abort_schedules_owned_retry() {
+    let _guard = active_audio_control_test_lock().lock().unwrap();
+    *accepted_wake_capture_owner_slot().lock().unwrap() = None;
+    let (tx, rx) = mpsc::channel();
+    let registration = install_test_audio_control(818, tx);
+    remember_accepted_wake_capture_owner(0x9876, 818);
+    let first = std::thread::spawn(|| {
+        send_recording_control_abort_wake_capture(0x9876, Duration::from_secs(2))
+    });
+    let initial = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_eq!(initial.bytes, b"VREC:ABORT:00009876\n");
+    initial.result_tx.send(Err("transient control failure".into())).unwrap();
+    assert!(first.join().unwrap().is_err());
+    let retried = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(retried.bytes, b"VREC:ABORT:00009876\n");
+    retried.result_tx.send(Ok(())).unwrap();
+    drop(registration);
+}
+
+#[test]
+fn owned_wake_abort_retry_stops_for_new_capture_or_new_request() {
+    let _guard = active_audio_control_test_lock().lock().unwrap();
+    *accepted_wake_capture_owner_slot().lock().unwrap() = None;
+    let (old_tx, old_rx) = mpsc::channel();
+    let old_registration = install_test_audio_control(816, old_tx);
+    let original = active_audio_control_sender().unwrap();
+    remember_accepted_wake_capture_owner(0x5678, 816);
+    retry_owned_wake_abort(original.clone(), 0x1234, Duration::from_millis(20), 1, Duration::ZERO, Arc::new(AtomicBool::new(false)));
+    assert!(old_rx.try_recv().is_err(), "a newer request must keep its own session");
+    *accepted_wake_capture_owner_slot().lock().unwrap() = None;
+    let (new_tx, new_rx) = mpsc::channel();
+    let new_registration = install_test_audio_control(817, new_tx);
+    retry_owned_wake_abort(original, 0x1234, Duration::from_millis(20), 1, Duration::ZERO, Arc::new(AtomicBool::new(false)));
+    assert!(old_rx.try_recv().is_err());
+    assert!(new_rx.try_recv().is_err(), "old cleanup must not cross capture generations");
+    drop(old_registration);
+    drop(new_registration);
+}
+
+#[test]
+fn wake_abort_retries_are_cancelled_and_blocked_during_ota() {
+    let _guard = active_audio_control_test_lock().lock().unwrap();
+    suspend_wake_abort_retries_for_ota(false);
+    let cancelled = register_wake_abort_retry().expect("retry registered before OTA");
+    suspend_wake_abort_retries_for_ota(true);
+    assert!(cancelled.load(Ordering::Acquire));
+    assert!(register_wake_abort_retry().is_none(), "OTA must block new retries");
+    suspend_wake_abort_retries_for_ota(false);
+    assert!(register_wake_abort_retry().is_some(), "retries may resume after OTA");
+}
+
+#[test]
 fn cancelled_wake_startup_expires_its_actual_queued_takeover_without_losing_capture() {
     let _guard = active_audio_control_test_lock().lock().unwrap();
     *active_audio_control_slot().lock().unwrap() = None;

@@ -2373,6 +2373,7 @@ impl Coordinator {
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok();
         if started {
+            crate::embedded_ble::suspend_wake_abort_retries_for_ota(true);
             // OTA owns the BLE link exclusively: kill any live dictation/wake path and
             // hide recording capsules so voice-activation cannot pop UI mid-upgrade.
             dictation::suppress_dictation_pipeline_for_firmware_ota(&self.inner);
@@ -2398,6 +2399,7 @@ impl Coordinator {
         self.inner
             .embedded_ble_ota_active
             .store(false, Ordering::SeqCst);
+        crate::embedded_ble::suspend_wake_abort_retries_for_ota(false);
         // Preflight, failed BEGIN, and exclusive handoff all send TYPE:BYE / tear notify.
         // Without re-arming here the device stays in BLE CONNECTED "找 Type" breathing LED
         // instead of TYPE_READY steady blue. Clear the OTA flag first so RecordingGate allows
