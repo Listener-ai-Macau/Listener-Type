@@ -644,8 +644,7 @@ mod platform {
             }
             save_calibration(phrase, BOOTSTRAP_KEYWORD_SCORE, BOOTSTRAP_KEYWORD_THRESHOLD)?;
             log::info!(
-                "[wake-phrase] upgraded less-sensitive calibration to bootstrap phrase={} was_score={:.1} was_threshold={:.2} score={:.1} threshold={:.2}",
-                phrase,
+                "[wake-phrase] upgraded less-sensitive calibration to bootstrap was_score={:.1} was_threshold={:.2} score={:.1} threshold={:.2}",
                 existing.score,
                 existing.threshold,
                 BOOTSTRAP_KEYWORD_SCORE,
@@ -655,8 +654,7 @@ mod platform {
         }
         save_calibration(phrase, BOOTSTRAP_KEYWORD_SCORE, BOOTSTRAP_KEYWORD_THRESHOLD)?;
         log::info!(
-            "[wake-phrase] verified bootstrap calibration saved phrase={} score={:.1} threshold={:.2}",
-            phrase,
+            "[wake-phrase] verified bootstrap calibration saved score={:.1} threshold={:.2}",
             BOOTSTRAP_KEYWORD_SCORE,
             BOOTSTRAP_KEYWORD_THRESHOLD
         );
@@ -1450,8 +1448,7 @@ mod platform {
                     Some(found) => {
                         let end_seconds = found.end_seconds + offset_s;
                         log::info!(
-                            "[wake-phrase] offline recall cascade hit phrase={} score={score:.1} threshold={threshold:.2} end_s={end_seconds:.3} window_start_ms={} pcm_ms={}",
-                            phrase,
+                            "[wake-phrase] offline recall cascade hit score={score:.1} threshold={threshold:.2} end_s={end_seconds:.3} window_start_ms={} pcm_ms={}",
                             start / 32,
                             pcm.len() / 32
                         );
@@ -1468,8 +1465,7 @@ mod platform {
             }
         }
         log::info!(
-            "[wake-phrase] offline recall cascade miss phrase={} pcm_ms={} configs={} windows={}",
-            phrase,
+            "[wake-phrase] offline recall cascade miss pcm_ms={} configs={} windows={}",
             pcm.len() / 32,
             RECALL_CASCADE.len(),
             offline_recall_windows(pcm.len()).len()
@@ -1502,10 +1498,9 @@ mod platform {
         })?;
         save_calibration(phrase, BOOTSTRAP_KEYWORD_SCORE, BOOTSTRAP_KEYWORD_THRESHOLD)?;
         log::info!(
-            "[wake-phrase] enrollment phrase verified (matched_at score={:.1} threshold={:.2}); runtime calibration pinned to bootstrap phrase={} score={:.1} threshold={:.2}",
+            "[wake-phrase] enrollment phrase verified (matched_at score={:.1} threshold={:.2}); runtime calibration pinned to bootstrap score={:.1} threshold={:.2}",
             detected_with.0,
             detected_with.1,
-            phrase,
             BOOTSTRAP_KEYWORD_SCORE,
             BOOTSTRAP_KEYWORD_THRESHOLD
         );
@@ -1516,8 +1511,7 @@ mod platform {
         let _ = persist_bootstrap_calibration_if_missing(phrase);
         let (score, threshold) = configured_keyword_values(phrase);
         log::info!(
-            "[wake-phrase] runtime KWS config phrase={} score={:.1} threshold={:.2}",
-            phrase,
+            "[wake-phrase] runtime KWS config score={:.1} threshold={:.2}",
             score,
             threshold
         );

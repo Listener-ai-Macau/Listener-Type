@@ -2148,12 +2148,12 @@ async fn persist_verified_wake_phrase_calibration(phrase: String) {
         Ok(Ok(_)) => {}
         Ok(Err(err)) => {
             log::warn!(
-                "[wake-phrase] verified runtime calibration was not persisted phrase={phrase}: {err}"
+                "[wake-phrase] verified runtime calibration was not persisted: {err}"
             );
         }
         Err(err) => {
             log::warn!(
-                "[wake-phrase] verified runtime calibration task failed phrase={phrase}: {err}"
+                "[wake-phrase] verified runtime calibration task failed: {err}"
             );
         }
     }

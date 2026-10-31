@@ -2296,9 +2296,8 @@ impl EmbeddedStreamingDictation {
             }
             let Some(wake_match) = wake_match else {
                 log::info!(
-                    "[wake-phrase] automatic candidate rejected embedded_session_id={} phrase={}",
-                    embedded_session_id,
-                    phrase
+                    "[wake-phrase] automatic candidate rejected embedded_session_id={}",
+                    embedded_session_id
                 );
                 if let Some(sid) = take_early_capsule_session_id(&mut candidate) {
                     dismiss_early_wake_recording_capsule(inner, sid);
@@ -2380,13 +2379,12 @@ impl EmbeddedStreamingDictation {
                 }
             };
             log::info!(
-                "[speaker-verification] automatic candidate decision embedded_session_id={} gate_allowed={} enrolled_owner_matched={} policy={} score={:.4} wake_phrase={} wake_end_s={:.3}",
+                "[speaker-verification] automatic candidate decision embedded_session_id={} gate_allowed={} enrolled_owner_matched={} policy={} score={:.4} wake_end_s={:.3}",
                 embedded_session_id,
                 result.matched,
                 enrolled_owner_matched,
                 result.policy_label(),
                 result.score,
-                phrase,
                 wake_match.end_seconds
             );
             let identity_seed = local_speaker_identity_seed(
@@ -4146,9 +4144,8 @@ impl EmbeddedStreamingDictation {
                 HiddenCandidateTransportState::Streaming,
             );
             log::info!(
-                "[wake-phrase] phrase matched but owner verification rejected embedded_session_id={} phrase={} result={:?}",
+                "[wake-phrase] phrase matched but owner verification rejected embedded_session_id={} result={:?}",
                 embedded_session_id,
-                phrase,
                 verification.as_ref().map(|result| result.score)
             );
             return Ok(false);
@@ -4576,9 +4573,8 @@ impl EmbeddedStreamingDictation {
         // Every earlier return drops the guard and cancels the queued write.
         startup_control.commit();
         log::info!(
-            "[wake-phrase] live automatic session activated and released embedded_session_id={} phrase={} phrase_signal={:?} wake_end_s={:.3} post_wake_pcm_bytes={} released_accepted_pcm_bytes={} released_unaccepted_pcm_bytes={} kws_ms={} local_confirmation_ms={} voiceprint_ms={} gate_total_ms={} recording_control=detached wake_to_capsule_request_ms={} latency_target_ms=1200 latency_target_pass={} latency_ceiling_ms=1500 latency_ceiling_pass={} phrase_tail_to_capsule_ms={} phrase_tail_target_ms=350 phrase_tail_target_pass={} phrase_tail_ceiling_ms=500 phrase_tail_ceiling_pass={}",
+            "[wake-phrase] live automatic session activated and released embedded_session_id={} phrase_signal={:?} wake_end_s={:.3} post_wake_pcm_bytes={} released_accepted_pcm_bytes={} released_unaccepted_pcm_bytes={} kws_ms={} local_confirmation_ms={} voiceprint_ms={} gate_total_ms={} recording_control=detached wake_to_capsule_request_ms={} latency_target_ms=1200 latency_target_pass={} latency_ceiling_ms=1500 latency_ceiling_pass={} phrase_tail_to_capsule_ms={} phrase_tail_target_ms=350 phrase_tail_target_pass={} phrase_tail_ceiling_ms=500 phrase_tail_ceiling_pass={}",
             embedded_session_id,
-            phrase,
             phrase_signal,
             wake_match.end_seconds,
             post_wake_pcm_bytes,
