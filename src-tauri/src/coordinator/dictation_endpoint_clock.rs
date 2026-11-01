@@ -360,11 +360,11 @@ const RECENT_STRONG_NON_TARGET_WINDOW_MS: u64 = 900;
 // analysis, not evidence of silence. It is never an owner watermark.
 const AUTOMATIC_STOP_VAD_MAX_LAG_MS: u64 = 250;
 const AUTOMATIC_STOP_VAD_STALLED_ANALYSIS_ESCAPE_MS: u64 = 3_000;
-// A provider can keep an otherwise valid trailing phrase provisional until
-// the input is closed.  Waiting for that confirmation before closing input
-// is circular.  Only a separately observed, continuously quiet microphone may
-// initiate the normal drain-and-finalize path; elapsed text age is not silence.
-const PENDING_RECOGNITION_QUIET_FINALIZE_MS: u64 = 8_000;
+// Recognizing or delivering a trailing phrase can depend on closing input.
+// Waiting for either obligation before closing input can be circular.  Only a
+// separately observed, continuously quiet microphone may initiate the normal
+// drain-and-finalize path; elapsed text age is not silence.
+const PENDING_BODY_QUIET_FINALIZE_MS: u64 = 8_000;
 const TENTATIVE_OWNER_CONTINUATION_MAX_WAIT_MS: u64 = 1_500;
 const MANUAL_TERMINAL_BRIDGE_MAX_MS: u64 = 3_000;
 const MANUAL_TERMINAL_BRIDGE_MIN_VISIBLE_CHARS: usize = 20;
@@ -538,11 +538,10 @@ impl SettledTargetEndpointClock {
             // quiet recording sends its retained tail through the usual final
             // recognition and delivery pipeline; any new onset revokes STOP.
             return self.automatic_wake_session
-                && self.pending_owner_delivery.as_ref().is_some_and(|p| p.recognition_pending)
                 && self.local_vad_stop_observation.as_ref()
                     .and_then(LocalVadStopObservation::confirmed_silence)
                     .is_some_and(|silence| endpoint.due_on_confirmed_silence(
-                        silence, captured_ms, now, timeout_ms.max(PENDING_RECOGNITION_QUIET_FINALIZE_MS)));
+                        silence, captured_ms, now, timeout_ms.max(PENDING_BODY_QUIET_FINALIZE_MS)));
         }
         // A still-fresh negative can end before newly captured audio was
         // analyzed. Revoke that authority for a new VAD source epoch, both
@@ -3405,6 +3404,33 @@ mod endpoint_clock_submission_tests {
         }, later);
         assert!(!clock.personal_presence_stop_due(12_080, later, 3_000),
             "a new possible utterance revokes the proposal before STOP");
+    }
+
+    #[test]
+    fn confirmed_undelivered_body_finalizes_after_quiet_but_not_during_dispatch() {
+        use crate::asr::volcengine::{LocalSpeechActivityState, LocalSpeechEvidence, PendingBodyDelivery};
+        use crate::personal_vad::{PresenceObservation, PresenceState};
+        let now = Instant::now();
+        let mut clock = automatic_body_clock();
+        clock.note_personal_presence(Some(PresenceObservation {
+            analyzed_end_ms: 31_296, last_positive_end_ms: Some(23_200),
+            last_unresolved_end_ms: None, source_history_complete: true,
+            state: PresenceState::Unknown, observed_at: now,
+        }), now);
+        clock.latest_update = Some(owner_update(31_296, 23_200));
+        clock.refresh_pending_body_delivery(Some(PendingBodyDelivery {
+            key: "confirmed but not delivered".into(), updated_at: now,
+            recognition_pending: false,
+        }), now);
+        clock.note_local_vad_evidence_at(LocalSpeechEvidence {
+            revision: 1, analyzed_through_ms: 31_296,
+            state: LocalSpeechActivityState::NonSpeech,
+            last_detected_speech_end_ms: Some(23_296), ..Default::default()
+        }, now);
+        assert!(clock.is_due(now, 3_000), "confirmed pending body must not keep a quiet capture open forever");
+        assert!(clock.pending_owner_delivery_active(now), "final processing still owns the undelivered tail");
+        assert!(clock.begin_text_submission(now, "confirmed body").is_some());
+        assert!(!clock.is_due(now, 3_000), "an in-flight editor dispatch still blocks capture STOP");
     }
 
     #[test]
