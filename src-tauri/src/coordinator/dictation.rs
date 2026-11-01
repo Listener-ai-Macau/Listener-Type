@@ -293,6 +293,13 @@ fn should_attempt_owned_final_replacement(
         && !already_covered && !competing_stream && !final_text.trim().is_empty()
 }
 
+fn final_delivery_may_be_incomplete(source_coverage: &str, streaming_finalized: Option<bool>) -> bool {
+    streaming_finalized != Some(true) && matches!(source_coverage,
+        "unresolved" | "ledger_missing" | "native_source_tail_not_submitted" |
+        "tail_not_submitted" | "terminal_suffix_not_appended" |
+        "source_supplement_unconfirmed" | "revisable_range_unconfirmed")
+}
+
 fn should_send_post_dictation_key(
     enabled: bool,
     key: PostDictationKey,
@@ -4743,6 +4750,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         None if pause_early_sticky => "ledger_missing",
         None => "full_submission",
     };
+    let possible_incomplete_delivery = final_delivery_may_be_incomplete(source_coverage, streaming_finalized);
     let status = delivery_submission.status;
     let original_target_confirmed = delivery_submission.target_confirmed;
     // 组字流式收尾:终局 commit/cancel 已做,这里只退驱动(幂等)。
@@ -4803,7 +4811,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         pause_early_sticky,
         &insert_text,
         &session.final_text,
-    ) || (unresolved_owned_replacement && !supplement_confirmed && pause_early_paste)
+    ) || ((possible_incomplete_delivery || (unresolved_owned_replacement && !supplement_confirmed)) && pause_early_paste)
         || (cfg!(target_os = "macos") && pause_early_sticky && delivery_submission.route == DeliveryRoute::Direct);
     let (clipboard_retention_satisfied, clipboard_result) = if retain_plain_dictation {
         retain_final_clipboard_with_foreground_budget(
@@ -4959,7 +4967,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         && !translation_active)
         .then(|| current_llm_auth_fingerprint().ok()).flatten()
         .filter(|fingerprint| current_llm_auth_is_rejected(*fingerprint));
-    let done_message = if unresolved_owned_replacement && !supplement_confirmed {
+    let done_message = if possible_incomplete_delivery || (unresolved_owned_replacement && !supplement_confirmed) {
         Some(if clipboard_retention_satisfied && retain_plain_dictation {
             "上屏内容可能不完整，完整文字在剪贴板；请核对后替换".to_string()
         } else if delivery_fact.persistence == DeliveryPersistenceOutcome::Saved {

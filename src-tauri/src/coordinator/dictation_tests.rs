@@ -11448,14 +11448,14 @@ fn target_speaker_endpoint_stop_ticket_is_revocable_and_one_shot() {
     let session_id = new_session_id();
     let mut dispatch = super::EndpointStopDispatchState::default();
     let first = dispatch
-        .propose(session_id, 7, 11, 3, true)
+        .propose(session_id, 7, 11, 3, true, false)
         .expect("first endpoint proposal");
     assert!(dispatch.is_current(first));
     assert!(dispatch.cancel_if_current(first));
     assert!(!dispatch.is_current(first));
 
     let second = dispatch
-        .propose(session_id, 8, 12, 4, true)
+        .propose(session_id, 8, 12, 4, true, false)
         .expect("watchdog stays retryable after a revoked proposal");
     assert_ne!(first.proposal_id, second.proposal_id);
     assert!(!dispatch.cancel_if_current(first));
@@ -11470,11 +11470,11 @@ fn target_speaker_endpoint_stop_ticket_rejects_stale_generation_before_send() {
     let session_id = new_session_id();
     let mut dispatch = super::EndpointStopDispatchState::default();
     let old = dispatch
-        .propose(session_id, 10, 21, 5, false)
+        .propose(session_id, 10, 21, 5, false, false)
         .expect("old endpoint proposal");
     assert!(dispatch.cancel_if_current(old));
     let current = dispatch
-        .propose(session_id, 11, 22, 6, false)
+        .propose(session_id, 11, 22, 6, false, false)
         .expect("new generation proposal");
     assert_ne!(old.endpoint_generation, current.endpoint_generation);
     assert!(!dispatch.begin_sending(old));
@@ -20384,6 +20384,21 @@ fn pause_early_final_remainder_splits_on_stability_key_prefix() {
         pause_early_final_remainder(final_text, "", ""),
         Some(final_text.trim().to_string())
     );
+}
+
+#[test]
+fn unresolved_final_delivery_is_not_reported_as_certain_success() {
+    use super::final_delivery_may_be_incomplete;
+    for coverage in ["unresolved", "ledger_missing", "native_source_tail_not_submitted",
+        "tail_not_submitted", "terminal_suffix_not_appended", "source_supplement_unconfirmed",
+        "revisable_range_unconfirmed"] {
+        assert!(final_delivery_may_be_incomplete(coverage, None), "{coverage}");
+        assert!(!final_delivery_may_be_incomplete(coverage, Some(true)), "a completed composition owns delivery");
+    }
+    for coverage in ["native_source_covered", "revisable_range_confirmed", "source_supplement_confirmed",
+        "native_source_tail_submitted", "covered", "tail_submitted", "clipboard_only", "full_submission"] {
+        assert!(!final_delivery_may_be_incomplete(coverage, None), "{coverage}");
+    }
 }
 
 #[test]

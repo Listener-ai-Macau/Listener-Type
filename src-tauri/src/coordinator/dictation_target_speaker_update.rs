@@ -166,19 +166,26 @@ impl EndpointStopAdmission {
         if !endpoint_current {
             return false;
         }
-        if self.asr.personal_vad_started() {
+        let pending_body_quiet_proposal = self.ticket.pending_body_quiet;
+        if self.asr.personal_vad_started() || pending_body_quiet_proposal {
             let now = Instant::now();
             let captured_ms = self.asr.endpoint_update_snapshot().audio_duration_ms.unwrap_or_default();
             let pending = pause_early_pending_body_delivery(inner, self.ticket.session_id, &self.asr);
             let mut clock = self.endpoint_clock.lock();
             clock.refresh_pending_body_delivery(pending, now);
-            let observation = self.asr.personal_vad_snapshot();
-            clock.note_personal_presence(observation, now);
+            if self.asr.personal_vad_started() {
+                let observation = self.asr.personal_vad_snapshot();
+                clock.note_personal_presence(observation, now);
+            }
             // Revalidate independently completed silence immediately before
             // STOP; a new short/possible utterance must revoke the proposal.
             clock.note_local_vad_evidence_at(self.asr.local_speech_activity_snapshot(), now);
             return clock.generation == self.ticket.endpoint_generation
-                && clock.personal_presence_stop_due(captured_ms, now, EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS);
+                && if pending_body_quiet_proposal {
+                    clock.pending_body_quiet_stop_due(captured_ms, now, EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS)
+                } else {
+                    clock.personal_presence_stop_due(captured_ms, now, EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS)
+                };
         }
         if !self.ticket.manual_vad_guard {
             let automatic_body_with_recent_owner = {
@@ -336,11 +343,12 @@ fn handle_target_speaker_endpoint_stop(
         );
     }
 
-    let (endpoint_generation, manual_vad_guard) = {
+    let (endpoint_generation, manual_vad_guard, pending_body_quiet) = {
         let clock = endpoint_clock.lock();
         (
             clock.generation,
             manual_endpoint_vad_allowed(inner, session_id, endpoint_policy, &update),
+            clock.pending_body_quiet_proposal,
         )
     };
     let vad_evidence = asr.local_speech_activity_snapshot();
@@ -352,6 +360,7 @@ fn handle_target_speaker_endpoint_stop(
             vad_evidence.revision,
             vad_evidence.activity_epoch,
             manual_vad_guard,
+            pending_body_quiet,
         )
     };
     let Some(ticket) = ticket else {

@@ -22,6 +22,7 @@ struct EndpointStopTicket {
     local_vad_revision: u64,
     activity_epoch: u64,
     manual_vad_guard: bool,
+    pending_body_quiet: bool,
 }
 
 #[derive(Debug, Default)]
@@ -64,6 +65,7 @@ impl EndpointStopDispatchState {
         local_vad_revision: u64,
         activity_epoch: u64,
         manual_vad_guard: bool,
+        pending_body_quiet: bool,
     ) -> Option<EndpointStopTicket> {
         if self.ticket.is_some() {
             return None;
@@ -76,6 +78,7 @@ impl EndpointStopDispatchState {
             local_vad_revision,
             activity_epoch,
             manual_vad_guard,
+            pending_body_quiet,
         };
         self.ticket = Some((EndpointStopPhase::Proposed, ticket));
         Some(ticket)
@@ -124,6 +127,7 @@ impl EndpointStopDispatchState {
 #[derive(Debug, Default)]
 struct SettledTargetEndpointClock {
     stop_proposed: bool,
+    pending_body_quiet_proposal: bool,
     generation: u64,
     armed_target_end_ms: Option<u64>,
     armed_at: Option<Instant>,
@@ -532,17 +536,10 @@ impl SettledTargetEndpointClock {
         if self.pending_body_dispatch.is_some() || !self.pending_body_receipts.is_empty() {
             return false;
         }
-        let Some(endpoint) = self.personal_presence_endpoint.as_ref() else { return false; };
         if self.pending_owner_delivery_active(now) {
-            // Do not treat the draft as confirmed or delivered.  Closing a
-            // quiet recording sends its retained tail through the usual final
-            // recognition and delivery pipeline; any new onset revokes STOP.
-            return self.automatic_wake_session
-                && self.local_vad_stop_observation.as_ref()
-                    .and_then(LocalVadStopObservation::confirmed_silence)
-                    .is_some_and(|silence| endpoint.due_on_confirmed_silence(
-                        silence, captured_ms, now, timeout_ms.max(PENDING_BODY_QUIET_FINALIZE_MS)));
+            return self.pending_body_quiet_stop_due(captured_ms, now, timeout_ms);
         }
+        let Some(endpoint) = self.personal_presence_endpoint.as_ref() else { return false; };
         // A still-fresh negative can end before newly captured audio was
         // analyzed. Revoke that authority for a new VAD source epoch, both
         // when proposing STOP and when admitting the queued physical STOP.
@@ -564,6 +561,30 @@ impl SettledTargetEndpointClock {
         self.local_vad_stop_observation.as_ref()
             .and_then(LocalVadStopObservation::confirmed_silence)
             .is_some_and(|silence| endpoint.due_on_confirmed_silence(silence, captured_ms, now, timeout_ms))
+    }
+
+    fn pending_body_quiet_stop_due(&self, captured_ms: u64, now: Instant, timeout_ms: u64) -> bool {
+        if !self.automatic_wake_session || self.pending_body_dispatch.is_some()
+            || !self.pending_body_receipts.is_empty()
+        {
+            return false;
+        }
+        let timeout_ms = timeout_ms.max(PENDING_BODY_QUIET_FINALIZE_MS);
+        if self.last_body_delivery_at.is_some_and(|at| {
+            now.saturating_duration_since(at) < Duration::from_millis(timeout_ms)
+        }) {
+            return false;
+        }
+        let Some(silence) = self.local_vad_stop_observation.as_ref()
+            .and_then(LocalVadStopObservation::confirmed_silence) else { return false; };
+        // Personal activity is optional across machines. In its absence, the
+        // independent VAD still has to prove a fresh full quiet interval.
+        // No recognized body is discarded or marked delivered here.
+        match self.personal_presence_endpoint.as_ref() {
+            Some(endpoint) => endpoint.due_on_confirmed_silence(silence, captured_ms, now, timeout_ms),
+            None => crate::personal_vad::PresenceEndpoint::default()
+                .due_on_confirmed_silence(silence, captured_ms, now, timeout_ms),
+        }
     }
 
     fn begin_text_submission(
@@ -2090,6 +2111,7 @@ impl SettledTargetEndpointClock {
         if self.stop_proposed {
             return false;
         }
+        self.pending_body_quiet_proposal = false;
         if self.pending_body_dispatch.is_some() || !self.pending_body_receipts.is_empty() {
             self.note_due_hold_diagnostic(self.generation, "body_receipt_pending");
             return false;
@@ -2097,7 +2119,8 @@ impl SettledTargetEndpointClock {
         if self.pending_owner_delivery_active(now) {
             let captured_ms = self.latest_update.as_ref()
                 .and_then(|update| update.audio_duration_ms).unwrap_or_default();
-            if self.personal_presence_stop_due(captured_ms, now, timeout_ms) {
+            if self.pending_body_quiet_stop_due(captured_ms, now, timeout_ms) {
+                self.pending_body_quiet_proposal = true;
                 return true;
             }
             let reason = if self.pending_owner_delivery.as_ref().is_some_and(|pending| pending.recognition_pending) {
@@ -3431,6 +3454,62 @@ mod endpoint_clock_submission_tests {
         assert!(clock.pending_owner_delivery_active(now), "final processing still owns the undelivered tail");
         assert!(clock.begin_text_submission(now, "confirmed body").is_some());
         assert!(!clock.is_due(now, 3_000), "an in-flight editor dispatch still blocks capture STOP");
+    }
+
+    #[test]
+    fn pending_body_quiet_recovery_without_personal_model_rechecks_new_speech() {
+        use crate::asr::volcengine::{LocalSpeechActivityState, LocalSpeechEvidence, PendingBodyDelivery};
+        let now = Instant::now();
+        for recognition_pending in [false, true] {
+            let mut clock = automatic_body_clock();
+            clock.latest_update = Some(owner_update(31_296, 23_200));
+            clock.refresh_pending_body_delivery(Some(PendingBodyDelivery {
+                key: "body".into(), updated_at: now, recognition_pending,
+            }), now);
+            assert!(clock.personal_presence_endpoint.is_none());
+            assert!(!clock.is_due(now, 3_000), "missing VAD is not quiet");
+            clock.note_local_vad_evidence_at(LocalSpeechEvidence {
+                revision: 1, analyzed_through_ms: 31_296,
+                state: LocalSpeechActivityState::NonSpeech,
+                last_detected_speech_end_ms: Some(23_296), ..Default::default()
+            }, now);
+            assert!(clock.is_due(now, 3_000));
+            assert!(clock.pending_body_quiet_proposal);
+            assert!(!clock.pending_body_quiet_stop_due(31_296, now + Duration::from_secs(1), 3_000),
+                "stale quiet cannot authorize physical STOP");
+            clock.refresh_pending_body_delivery(None, now);
+            clock.note_local_vad_evidence_at(LocalSpeechEvidence {
+                revision: 2, analyzed_through_ms: 31_360, activity_epoch: 1,
+                pending_speech_start_ms: Some(31_300), state: LocalSpeechActivityState::PendingSpeech,
+                ..Default::default()
+            }, now);
+            assert!(!clock.pending_body_quiet_stop_due(31_360, now, 3_000),
+                "pending removal cannot bypass a new onset at admission");
+        }
+    }
+
+    #[test]
+    fn quiet_pending_body_stop_retains_only_unsubmitted_final_tail() {
+        use crate::asr::volcengine::{LocalSpeechActivityState, LocalSpeechEvidence, PendingBodyDelivery};
+        let now = Instant::now();
+        let mut clock = automatic_body_clock();
+        clock.latest_update = Some(owner_update(31_296, 23_200));
+        clock.latest_update_at = Some(now);
+        clock.refresh_pending_body_delivery(Some(PendingBodyDelivery {
+            key: "最后几个字".into(), updated_at: now, recognition_pending: false,
+        }), now);
+        clock.note_local_vad_evidence_at(LocalSpeechEvidence {
+            revision: 1, analyzed_through_ms: 31_296,
+            state: LocalSpeechActivityState::NonSpeech,
+            last_detected_speech_end_ms: Some(23_296), ..Default::default()
+        }, now);
+        assert!(clock.latest_due_update(now, 3_000).is_some());
+        assert!(clock.pending_body_quiet_proposal && clock.stop_proposed);
+        assert!(clock.pending_owner_delivery_active(now), "STOP must not consume pending body");
+        let delivered = "这是前面的文字";
+        let final_text = "这是前面的文字，最后几个字。";
+        let key = embedded_audio_partial_preview_stability_key(delivered);
+        assert_eq!(pause_early_final_remainder(final_text, delivered, &key).as_deref(), Some("，最后几个字。"));
     }
 
     #[test]
