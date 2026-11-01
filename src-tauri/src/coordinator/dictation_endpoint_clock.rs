@@ -360,6 +360,11 @@ const RECENT_STRONG_NON_TARGET_WINDOW_MS: u64 = 900;
 // analysis, not evidence of silence. It is never an owner watermark.
 const AUTOMATIC_STOP_VAD_MAX_LAG_MS: u64 = 250;
 const AUTOMATIC_STOP_VAD_STALLED_ANALYSIS_ESCAPE_MS: u64 = 3_000;
+// A provider can keep an otherwise valid trailing phrase provisional until
+// the input is closed.  Waiting for that confirmation before closing input
+// is circular.  Only a separately observed, continuously quiet microphone may
+// initiate the normal drain-and-finalize path; elapsed text age is not silence.
+const PENDING_RECOGNITION_QUIET_FINALIZE_MS: u64 = 8_000;
 const TENTATIVE_OWNER_CONTINUATION_MAX_WAIT_MS: u64 = 1_500;
 const MANUAL_TERMINAL_BRIDGE_MAX_MS: u64 = 3_000;
 const MANUAL_TERMINAL_BRIDGE_MIN_VISIBLE_CHARS: usize = 20;
@@ -524,12 +529,21 @@ impl SettledTargetEndpointClock {
     fn personal_presence_stop_due(&self, captured_ms: u64, now: Instant, timeout_ms: u64) -> bool {
         // STOP admission calls this again after a proposal was scheduled. A
         // newly dispatched paste must hold it until its actual receipt arrives.
-        if self.pending_body_dispatch.is_some() || !self.pending_body_receipts.is_empty()
-            || self.pending_owner_delivery_active(now)
-        {
+        if self.pending_body_dispatch.is_some() || !self.pending_body_receipts.is_empty() {
             return false;
         }
         let Some(endpoint) = self.personal_presence_endpoint.as_ref() else { return false; };
+        if self.pending_owner_delivery_active(now) {
+            // Do not treat the draft as confirmed or delivered.  Closing a
+            // quiet recording sends its retained tail through the usual final
+            // recognition and delivery pipeline; any new onset revokes STOP.
+            return self.automatic_wake_session
+                && self.pending_owner_delivery.as_ref().is_some_and(|p| p.recognition_pending)
+                && self.local_vad_stop_observation.as_ref()
+                    .and_then(LocalVadStopObservation::confirmed_silence)
+                    .is_some_and(|silence| endpoint.due_on_confirmed_silence(
+                        silence, captured_ms, now, timeout_ms.max(PENDING_RECOGNITION_QUIET_FINALIZE_MS)));
+        }
         // A still-fresh negative can end before newly captured audio was
         // analyzed. Revoke that authority for a new VAD source epoch, both
         // when proposing STOP and when admitting the queued physical STOP.
@@ -2074,18 +2088,23 @@ impl SettledTargetEndpointClock {
 
     fn is_due(&mut self, now: Instant, timeout_ms: u64) -> bool {
         self.poll_body_receipts();
+        if self.stop_proposed {
+            return false;
+        }
         if self.pending_body_dispatch.is_some() || !self.pending_body_receipts.is_empty() {
             self.note_due_hold_diagnostic(self.generation, "body_receipt_pending");
             return false;
         }
         if self.pending_owner_delivery_active(now) {
+            let captured_ms = self.latest_update.as_ref()
+                .and_then(|update| update.audio_duration_ms).unwrap_or_default();
+            if self.personal_presence_stop_due(captured_ms, now, timeout_ms) {
+                return true;
+            }
             let reason = if self.pending_owner_delivery.as_ref().is_some_and(|pending| pending.recognition_pending) {
                 "body_recognition_pending"
             } else { "body_delivery_pending" };
             self.note_due_hold_diagnostic(self.generation, reason);
-            return false;
-        }
-        if self.stop_proposed {
             return false;
         }
         if self.personal_presence_endpoint.is_some() {
@@ -3348,6 +3367,44 @@ mod endpoint_clock_submission_tests {
             }), now);
             assert_eq!(clock.personal_presence_stop_due(audio_ms, now, 3_000), offset == 3_000);
         }
+    }
+
+    #[test]
+    fn provisional_recognition_finalizes_only_after_fresh_continuous_quiet() {
+        use crate::asr::volcengine::{LocalSpeechActivityState, LocalSpeechEvidence, PendingBodyDelivery};
+        use crate::personal_vad::{PresenceObservation, PresenceState};
+        let now = Instant::now();
+        let mut clock = automatic_body_clock();
+        clock.note_personal_presence(Some(PresenceObservation {
+            analyzed_end_ms: 11_999, last_positive_end_ms: Some(4_000),
+            last_unresolved_end_ms: None, source_history_complete: true,
+            state: PresenceState::Unknown, observed_at: now,
+        }), now);
+        clock.refresh_pending_body_delivery(Some(PendingBodyDelivery {
+            key: "unfinished".into(), updated_at: now, recognition_pending: true,
+        }), now);
+        let quiet = |end, revision| LocalSpeechEvidence {
+            revision, analyzed_through_ms: end,
+            state: LocalSpeechActivityState::NonSpeech,
+            last_detected_speech_end_ms: Some(4_000), ..Default::default()
+        };
+        clock.latest_update = Some(owner_update(11_999, 4_000));
+        clock.note_local_vad_evidence_at(quiet(11_999, 1), now);
+        assert!(!clock.is_due(now, 3_000), "7999 ms quiet is insufficient");
+        let later = now + Duration::from_millis(1);
+        clock.latest_update = Some(owner_update(12_000, 4_000));
+        clock.note_local_vad_evidence_at(quiet(12_000, 2), later);
+        assert!(clock.is_due(later, 3_000), "quiet must permit the existing finalization pipeline");
+        assert!(clock.pending_owner_delivery_active(later), "the unconfirmed tail must remain pending");
+        assert!(!clock.personal_presence_stop_due(12_000, later + Duration::from_secs(1), 3_000),
+            "stale VAD cannot authorize a stop");
+        clock.note_local_vad_evidence_at(LocalSpeechEvidence {
+            revision: 3, analyzed_through_ms: 12_080, activity_epoch: 1,
+            pending_speech_start_ms: Some(12_010), state: LocalSpeechActivityState::PendingSpeech,
+            ..Default::default()
+        }, later);
+        assert!(!clock.personal_presence_stop_due(12_080, later, 3_000),
+            "a new possible utterance revokes the proposal before STOP");
     }
 
     #[test]
