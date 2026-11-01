@@ -293,8 +293,8 @@ fn should_attempt_owned_final_replacement(
         && !already_covered && !competing_stream && !final_text.trim().is_empty()
 }
 
-fn final_delivery_may_be_incomplete(source_coverage: &str, streaming_finalized: Option<bool>) -> bool {
-    streaming_finalized != Some(true) && matches!(source_coverage,
+fn final_delivery_may_be_incomplete(source_coverage: &str) -> bool {
+    matches!(source_coverage,
         "unresolved" | "ledger_missing" | "native_source_tail_not_submitted" |
         "tail_not_submitted" | "terminal_suffix_not_appended" |
         "source_supplement_unconfirmed" | "revisable_range_unconfirmed")
@@ -4750,7 +4750,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         None if pause_early_sticky => "ledger_missing",
         None => "full_submission",
     };
-    let possible_incomplete_delivery = final_delivery_may_be_incomplete(source_coverage, streaming_finalized);
+    let possible_incomplete_delivery = final_delivery_may_be_incomplete(source_coverage);
     let status = delivery_submission.status;
     let original_target_confirmed = delivery_submission.target_confirmed;
     // 组字流式收尾:终局 commit/cancel 已做,这里只退驱动(幂等)。

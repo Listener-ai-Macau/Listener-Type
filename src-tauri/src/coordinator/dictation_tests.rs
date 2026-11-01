@@ -20392,12 +20392,11 @@ fn unresolved_final_delivery_is_not_reported_as_certain_success() {
     for coverage in ["unresolved", "ledger_missing", "native_source_tail_not_submitted",
         "tail_not_submitted", "terminal_suffix_not_appended", "source_supplement_unconfirmed",
         "revisable_range_unconfirmed"] {
-        assert!(final_delivery_may_be_incomplete(coverage, None), "{coverage}");
-        assert!(!final_delivery_may_be_incomplete(coverage, Some(true)), "a completed composition owns delivery");
+        assert!(final_delivery_may_be_incomplete(coverage), "{coverage}: even a successful composition cancel does not deliver the tail");
     }
     for coverage in ["native_source_covered", "revisable_range_confirmed", "source_supplement_confirmed",
         "native_source_tail_submitted", "covered", "tail_submitted", "clipboard_only", "full_submission"] {
-        assert!(!final_delivery_may_be_incomplete(coverage, None), "{coverage}");
+        assert!(!final_delivery_may_be_incomplete(coverage), "{coverage}");
     }
 }
 
