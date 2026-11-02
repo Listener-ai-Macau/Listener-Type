@@ -2850,13 +2850,22 @@ async fn end_embedded_ble_session_with_source_integrity(
 fn begin_stop_session_transition(inner: &Arc<Inner>, user_initiated: bool) -> DictationTransition {
     let mut state = inner.state.lock();
     let session_id = state.session_id;
-    apply_dictation_event(
+    let transition = apply_dictation_event(
         &mut state,
         DictationEvent::Stop {
             session_id,
             user_initiated,
         },
-    )
+    );
+    #[cfg(target_os = "windows")]
+    if matches!(&transition, DictationTransition::Applied { .. }) {
+        if let Some((owner, signal)) = inner.early_tsf_stop_signal.lock().as_ref() {
+            if *owner == session_id && signal.signal().is_err() {
+                log::warn!("[windows-ime] could not signal the early input stop event");
+            }
+        }
+    }
+    transition
 }
 
 fn finish_source_integrity_blocked(
@@ -4299,7 +4308,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     let paste_shortcut = prefs.paste_shortcut;
     #[cfg(target_os = "windows")]
     let early_tsf_pending_at_final = std::env::var("LISTENER_EXPERIMENTAL_EARLY_TSF").as_deref() == Ok("1")
-        && guard_pending_early_tsf_for_final(inner, current_session_id);
+        && await_early_tsf_before_final(inner, current_session_id).await;
     #[cfg(not(target_os = "windows"))]
     let early_tsf_pending_at_final = false;
     // Delivered bytes remain immutable. The exact sealed native source may
@@ -5297,6 +5306,12 @@ fn begin_cancel_session_transition(
                 log::info!("[coord] cancel ignored — already in Inserting phase, can't undo paste");
             }
             return None;
+        }
+        #[cfg(target_os = "windows")]
+        if let Some((owner, signal)) = inner.early_tsf_stop_signal.lock().as_ref() {
+            if *owner == session_id && signal.signal().is_err() {
+                log::warn!("[windows-ime] could not signal the early input cancel event");
+            }
         }
         (session_id, phase, transition)
     };

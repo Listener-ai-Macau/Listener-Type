@@ -2760,9 +2760,46 @@ fn guard_pending_early_tsf_for_final(inner: &Arc<Inner>, session_id: SessionId) 
 }
 
 #[cfg(target_os = "windows")]
+async fn await_early_tsf_before_final(inner: &Arc<Inner>, session_id: SessionId) -> bool {
+    // Give a cancelled or completed native request a short opportunity to
+    // update its ledger before final delivery consumes it. A timeout is not
+    // evidence of failure: retain the existing unknown-write safeguard.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(150);
+    loop {
+        let pending = {
+            let ledger = inner.embedded_audio_pause_early_delivery.lock();
+            ledger.session_id == Some(session_id) && ledger.unconfirmed_prior.is_some()
+        };
+        if !pending { return false; }
+        let now = tokio::time::Instant::now();
+        if now >= deadline { return guard_pending_early_tsf_for_final(inner, session_id); }
+        tokio::time::sleep_until((now + std::time::Duration::from_millis(10)).min(deadline)).await;
+    }
+}
+
+#[cfg(target_os = "windows")]
 fn early_tsf_session_listening(inner: &Arc<Inner>, session_id: SessionId) -> bool {
     let state = inner.state.lock();
     state.session_id == session_id && !state.cancelled && state.phase == SessionPhase::Listening
+}
+
+#[cfg(target_os = "windows")]
+fn early_tsf_stop_signal_for_session(inner: &Arc<Inner>, session_id: SessionId)
+    -> Result<Arc<crate::windows_ime_ipc::EarlyTsfStopSignal>, EarlyTsfOutcome> {
+    // Lock ordering is state -> stop signal, identical to STOP/CANCEL. Once
+    // STOP changes the phase, no new unsignalled event can be registered.
+    let state = inner.state.lock();
+    if state.session_id != session_id || state.cancelled || state.phase != SessionPhase::Listening {
+        return Err(EarlyTsfOutcome::Cancelled);
+    }
+    let mut slot = inner.early_tsf_stop_signal.lock();
+    if let Some((owner, signal)) = slot.as_ref() {
+        if *owner == session_id { return Ok(Arc::clone(signal)); }
+    }
+    let signal = Arc::new(crate::windows_ime_ipc::EarlyTsfStopSignal::new()
+        .map_err(|_| EarlyTsfOutcome::Unavailable)?);
+    *slot = Some((session_id, Arc::clone(&signal)));
+    Ok(signal)
 }
 
 /// Experimental non-clipboard append. The existing paste route remains the
@@ -2800,11 +2837,15 @@ async fn try_early_tsf_append(inner: &Arc<Inner>, session_id: SessionId,
         created_at: chrono::Utc::now().to_rfc3339(), target: Some(target),
     };
     let Some(foreground) = target_window else { return EarlyTsfOutcome::Unavailable; };
-    let result = inner.windows_ime.submit_prepared_exact(&prepared, request, foreground, move || {
+    let stop_signal = match early_tsf_stop_signal_for_session(inner, session_id) {
+        Ok(signal) => signal, Err(outcome) => return outcome,
+    };
+    let result = inner.windows_ime.submit_prepared_exact(&prepared, request, foreground, stop_signal.id(), move || {
         let current_session = early_tsf_session_listening(&guard_inner, session_id);
         current_session && delivery_target_is_current(target_window)
             && capture_ime_submit_target_for_window(target_window) == Some(target)
     }).await;
+    drop(stop_signal);
     match result {
         Ok(InsertStatus::Inserted) => EarlyTsfOutcome::Confirmed,
         Ok(InsertStatus::SubmittedUnconfirmed)
@@ -2821,7 +2862,7 @@ async fn try_early_tsf_append(inner: &Arc<Inner>, session_id: SessionId,
 fn guarded_terminal_session_current(inner: &Arc<Inner>, session_id: SessionId, finalizing: bool) -> bool {
     let state = inner.state.lock();
     state.session_id == session_id && !state.cancelled &&
-        if finalizing { state.phase == SessionPhase::Processing } else { state.phase == SessionPhase::Listening }
+        if finalizing { state.phase == SessionPhase::Inserting } else { state.phase == SessionPhase::Listening }
 }
 
 #[cfg(target_os = "windows")]
@@ -2855,11 +2896,18 @@ async fn try_guarded_tsf_terminal(inner: &Arc<Inner>, session_id: SessionId,
         created_at: chrono::Utc::now().to_rfc3339(), target: Some(target),
     };
     let Some(foreground) = target_window else { return EarlyTsfOutcome::Unavailable; };
-    let result = inner.windows_ime.submit_terminal_prepared_exact(&prepared, request, expected.to_owned(), foreground, move || {
+    let stop_signal = if finalizing { None } else {
+        match early_tsf_stop_signal_for_session(inner, session_id) {
+            Ok(signal) => Some(signal), Err(outcome) => return outcome,
+        }
+    };
+    let stop_id = stop_signal.as_ref().map(|signal| signal.id());
+    let result = inner.windows_ime.submit_terminal_prepared_exact(&prepared, request, expected.to_owned(), foreground, stop_id, move || {
         guarded_terminal_session_current(&guard_inner, session_id, finalizing)
             && delivery_target_is_current(target_window)
             && capture_ime_submit_target_for_window(target_window) == Some(target)
     }).await;
+    drop(stop_signal);
     match result {
         Ok(InsertStatus::Inserted) => EarlyTsfOutcome::Confirmed,
         Ok(InsertStatus::SubmittedUnconfirmed)
@@ -3338,6 +3386,14 @@ async fn pause_early_delivery_tick(
     let direct_terminal_confirmed = matches!(direct_terminal, EarlyTsfOutcome::Confirmed);
     #[cfg(not(target_os = "windows"))]
     let direct_terminal_confirmed = false;
+    #[cfg(target_os = "windows")]
+    if pause_early_terminal_punctuation_only(delta) && !direct_terminal_confirmed
+        && std::env::var("LISTENER_EXPERIMENTAL_EARLY_TSF").as_deref() == Ok("1")
+        && !early_tsf_session_listening(inner, session_id) {
+        pause_early_delivery_rollback(inner, session_id);
+        endpoint_clock.lock().settle_text_submission(body_submission, false, None);
+        return;
+    }
     let terminal_status = if pause_early_terminal_punctuation_only(delta) && !direct_terminal_confirmed {
         match inner.inserter.insert_session_terminal_suffix(session_id, &delivered_display, delta, prefs.paste_shortcut) {
             Ok(status) => Some(status),
@@ -3474,5 +3530,96 @@ mod reversible_visual_activation_tests {
             ),
             Some("正文里再说开始录音也要保留".to_string())
         );
+    }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod guarded_terminal_phase_tests {
+    use super::*;
+
+    fn stopped(signal: &crate::windows_ime_ipc::EarlyTsfStopSignal) -> bool {
+        use std::os::windows::io::AsRawHandle;
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn OpenEventW(access: u32, inherit: i32, name: *const u16) -> *mut std::ffi::c_void;
+            fn WaitForSingleObject(handle: *mut std::ffi::c_void, timeout: u32) -> u32;
+        }
+        use std::os::windows::io::FromRawHandle;
+        let name: Vec<u16> = format!(r"Local\ListenerTypeEarlyStop-{}", signal.id())
+            .encode_utf16().chain(std::iter::once(0)).collect();
+        let raw = unsafe { OpenEventW(0x00100000, 0, name.as_ptr()) };
+        assert!(!raw.is_null());
+        let handle = unsafe { std::os::windows::io::OwnedHandle::from_raw_handle(raw) };
+        unsafe { WaitForSingleObject(handle.as_raw_handle(), 0) == 0 }
+    }
+
+    #[test]
+    fn actual_stop_and_cancel_signal_pending_input_and_prevent_new_signal() {
+        for cancel in [false, true] {
+            let coordinator = Coordinator::new();
+            let inner = &coordinator.inner;
+            let session = new_session_id();
+            {
+                let mut state = inner.state.lock();
+                state.session_id = session;
+                state.phase = SessionPhase::Listening;
+                state.cancelled = false;
+            }
+            let signal = early_tsf_stop_signal_for_session(inner, session).unwrap();
+            assert!(!stopped(&signal));
+            if cancel {
+                assert!(begin_cancel_session_transition(inner).is_some());
+            } else {
+                assert!(matches!(begin_stop_session_transition(inner, true), DictationTransition::Applied { .. }));
+            }
+            assert!(stopped(&signal));
+            assert!(matches!(early_tsf_stop_signal_for_session(inner, session), Err(EarlyTsfOutcome::Cancelled)));
+        }
+    }
+
+    #[tokio::test]
+    async fn final_waits_for_proven_rollback_but_guards_unknown_write() {
+        let coordinator = Coordinator::new();
+        let inner = Arc::clone(&coordinator.inner);
+        let session = new_session_id();
+        {
+            let mut state = inner.state.lock();
+            state.session_id = session;
+            state.phase = SessionPhase::Inserting;
+        }
+        pause_early_delivery_reserve(&inner, session, "synthetic".into(), "synthetic".into(), "synthetic".into());
+        let worker = Arc::clone(&inner);
+        let done = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            pause_early_delivery_rollback(&worker, session);
+        });
+        assert!(!await_early_tsf_before_final(&inner, session).await);
+        done.await.unwrap();
+        assert!(!streaming_composition_contaminated(&inner, session));
+        pause_early_delivery_reserve(&inner, session, "synthetic".into(), "synthetic".into(), "synthetic".into());
+        assert!(await_early_tsf_before_final(&inner, session).await);
+        assert!(streaming_composition_contaminated(&inner, session));
+    }
+
+    #[test]
+    fn final_terminal_guard_tracks_actual_insertion_transition() {
+        let coordinator = Coordinator::new();
+        let inner = &coordinator.inner;
+        let session = new_session_id();
+        {
+            let mut state = inner.state.lock();
+            state.session_id = session;
+            state.phase = SessionPhase::Processing;
+            state.cancelled = false;
+            assert!(matches!(apply_dictation_event(&mut state, DictationEvent::InsertionStarted {
+                session_id: session, already_streamed: true,
+            }), DictationTransition::Applied { .. }));
+            assert_eq!(state.phase, SessionPhase::Inserting);
+        }
+        assert!(guarded_terminal_session_current(inner, session, true));
+        assert!(!guarded_terminal_session_current(inner, session, false));
+        assert!(!guarded_terminal_session_current(inner, new_session_id(), true));
+        inner.state.lock().cancelled = true;
+        assert!(!guarded_terminal_session_current(inner, session, true));
     }
 }

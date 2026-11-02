@@ -487,7 +487,7 @@ void ListenerTypePipeServer::HandleSubmitLine(HANDLE pipe, const std::string& li
 
   if (message.type == L"probeForegroundGuard") {
     if (!message.text.empty()) { WriteResult(pipe, message.session_id, L"failed", L"protocolError"); return; }
-    WriteResult(pipe, message.session_id, L"failed", L"foregroundGuardVersion1");
+    WriteResult(pipe, message.session_id, L"failed", L"foregroundStopGuardVersion2");
     return;
   }
 

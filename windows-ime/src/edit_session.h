@@ -1,6 +1,7 @@
 #pragma once
 
 #include <msctf.h>
+#include <atomic>
 #include <memory>
 #include <string>
 #include <windows.h>
@@ -16,6 +17,18 @@ struct ListenerTypeAsyncEditState {
   HANDLE event = nullptr;
   DWORD create_error = ERROR_SUCCESS;
   HRESULT result = E_UNEXPECTED;
+};
+
+// One request holds its own reference to the OS event through a delayed edit.
+// The flag is proof that this callback returned before attempting a write;
+// it is not proof that an already-started insertion can be cancelled.
+struct ListenerTypeStopSignal {
+  explicit ListenerTypeStopSignal(HANDLE handle) : event(handle) {}
+  ListenerTypeStopSignal(const ListenerTypeStopSignal&) = delete;
+  ListenerTypeStopSignal& operator=(const ListenerTypeStopSignal&) = delete;
+  ~ListenerTypeStopSignal() { if (event != nullptr) CloseHandle(event); }
+  HANDLE event = nullptr;
+  std::atomic<bool> prevented_write{false};
 };
 
 // 组字流式(2026-09-22 讯飞式逐字上屏)的操作类型。kInsertOnce 是既有的一次性
@@ -44,7 +57,8 @@ class ListenerTypeEditSession final : public ITfEditSession {
       std::shared_ptr<ListenerTypeAsyncEditState> async_state = nullptr,
       ITfThreadMgr* focus_guard = nullptr,
       std::wstring expected_body = {},
-      HWND expected_foreground = nullptr);
+      HWND expected_foreground = nullptr,
+      std::shared_ptr<ListenerTypeStopSignal> stop_signal = nullptr);
   ListenerTypeEditSession(const ListenerTypeEditSession&) = delete;
   ListenerTypeEditSession& operator=(const ListenerTypeEditSession&) = delete;
   ~ListenerTypeEditSession();
@@ -57,6 +71,7 @@ class ListenerTypeEditSession final : public ITfEditSession {
  private:
   HRESULT InsertText(TfEditCookie edit_cookie);
   HRESULT RunCompositionOp(TfEditCookie edit_cookie);
+  bool StopRequestedBeforeWrite();
 
   LONG ref_count_ = 1;
   ITfContext* context_ = nullptr;
@@ -69,4 +84,5 @@ class ListenerTypeEditSession final : public ITfEditSession {
   ITfThreadMgr* focus_guard_ = nullptr;
   std::wstring expected_body_;
   HWND expected_foreground_ = nullptr;
+  std::shared_ptr<ListenerTypeStopSignal> stop_signal_;
 };

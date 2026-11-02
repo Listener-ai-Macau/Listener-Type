@@ -59,7 +59,8 @@ class ListenerTypeTextService final : public ITfTextInputProcessorEx {
       const std::wstring& expected_body,
       std::shared_ptr<ListenerTypeAsyncEditState>* async_completion,
       bool* wait_for_async_completion,
-      bool* edit_requested);
+      bool* edit_requested,
+      std::shared_ptr<ListenerTypeStopSignal>* stop_proof);
   // 释放当前组字(Deactivate 清场用;不在 edit cookie 内,只做 Release,
   // 由 TSF 在 context 销毁时回收)。
   void DropActiveComposition();

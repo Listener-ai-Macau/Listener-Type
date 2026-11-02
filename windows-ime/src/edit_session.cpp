@@ -32,7 +32,8 @@ ListenerTypeEditSession::ListenerTypeEditSession(
     std::shared_ptr<ListenerTypeAsyncEditState> async_state,
     ITfThreadMgr* focus_guard,
     std::wstring expected_body,
-    HWND expected_foreground)
+    HWND expected_foreground,
+    std::shared_ptr<ListenerTypeStopSignal> stop_signal)
     : context_(context),
       text_(std::move(text)),
       op_(op),
@@ -40,7 +41,8 @@ ListenerTypeEditSession::ListenerTypeEditSession(
       async_state_(std::move(async_state)),
       focus_guard_(focus_guard),
       expected_body_(std::move(expected_body)),
-      expected_foreground_(expected_foreground) {
+      expected_foreground_(expected_foreground),
+      stop_signal_(std::move(stop_signal)) {
   // TSF may hold an asynchronous edit after the text service deactivates.
   // Keep DllCanUnloadNow false until the edit session's last reference ends.
   InterlockedIncrement(&g_object_count);
@@ -88,6 +90,14 @@ STDMETHODIMP_(ULONG) ListenerTypeEditSession::Release() {
 
 STDMETHODIMP ListenerTypeEditSession::DoEditSession(TfEditCookie edit_cookie) {
   HRESULT hr;
+  if (StopRequestedBeforeWrite()) {
+    hr = HRESULT_FROM_WIN32(ERROR_CANCELLED);
+    if (async_state_) {
+      async_state_->result = hr;
+      if (async_state_->event != nullptr) SetEvent(async_state_->event);
+    }
+    return hr;
+  }
   switch (op_) {
     case ListenerTypeCompositionOp::kInsertOnce:
       hr = InsertText(edit_cookie);
@@ -108,7 +118,7 @@ STDMETHODIMP ListenerTypeEditSession::DoEditSession(TfEditCookie edit_cookie) {
       if (already == ListenerTerminalTail::kMatches) { hr = S_FALSE; break; }
       if (already == ListenerTerminalTail::kUnavailable) { hr = E_FAIL; break; }
       const auto before = ListenerInspectTerminalTail(context_, edit_cookie, expected_body_);
-      hr = before == ListenerTerminalTail::kMatches &&
+      hr = before == ListenerTerminalTail::kMatches && !StopRequestedBeforeWrite() &&
                    (expected_foreground_ == nullptr || GetForegroundWindow() == expected_foreground_) &&
                    ListenerFocusedContextIs(focus_guard_, context_)
                ? InsertText(edit_cookie) : HRESULT_FROM_WIN32(ERROR_CANCELLED);
@@ -130,6 +140,17 @@ STDMETHODIMP ListenerTypeEditSession::DoEditSession(TfEditCookie edit_cookie) {
     }
   }
   return hr;
+}
+
+bool ListenerTypeEditSession::StopRequestedBeforeWrite() {
+  if (!stop_signal_) return false;
+  // Missing/invalid event is not authority to write. Only an unsignalled
+  // valid event permits the request to proceed.
+  if (stop_signal_->event != nullptr && WaitForSingleObject(stop_signal_->event, 0) == WAIT_TIMEOUT) {
+    return false;
+  }
+  stop_signal_->prevented_write.store(true, std::memory_order_release);
+  return true;
 }
 
 HRESULT ListenerTypeEditSession::InsertText(TfEditCookie edit_cookie) {
@@ -156,9 +177,13 @@ HRESULT ListenerTypeEditSession::InsertText(TfEditCookie edit_cookie) {
 
   if (SUCCEEDED(hr)) {
     ITfRange* committed_range = nullptr;
-    hr = insert_at_selection->InsertTextAtSelection(
-        edit_cookie, 0, text_.c_str(), static_cast<LONG>(text_.size()),
-        &committed_range);
+    if (StopRequestedBeforeWrite()) {
+      hr = HRESULT_FROM_WIN32(ERROR_CANCELLED);
+    } else {
+      hr = insert_at_selection->InsertTextAtSelection(
+          edit_cookie, 0, text_.c_str(), static_cast<LONG>(text_.size()),
+          &committed_range);
+    }
     if (committed_range != nullptr) {
       if (SUCCEEDED(hr)) {
         const HRESULT collapse_hr =

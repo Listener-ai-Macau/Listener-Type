@@ -305,6 +305,8 @@ struct Inner {
     windows_ime: WindowsImeSessionController,
     #[cfg(target_os = "windows")]
     prepared_windows_ime_session: Arc<Mutex<Vec<PreparedWindowsImeSessionSlot>>>,
+    #[cfg(target_os = "windows")]
+    early_tsf_stop_signal: Mutex<Option<(SessionId, Arc<crate::windows_ime_ipc::EarlyTsfStopSignal>)>>,
     state: Mutex<SessionState>,
     /// Single product recording lifecycle shared by BLE actor and ASR endpoint
     /// callbacks. Evidence paths may be concurrent; transitions are not.
@@ -1141,6 +1143,8 @@ impl Coordinator {
                     embedded_audio_final_result: Mutex::new(None),
                     embedded_audio_preview: Mutex::new(Default::default()),
                     embedded_audio_pause_early_delivery: Mutex::new(Default::default()),
+                    #[cfg(target_os = "windows")]
+                    early_tsf_stop_signal: Mutex::new(None),
                     streaming_composition: Mutex::new(Default::default()),
                     native_composition: Mutex::new(Default::default()),
                     embedded_audio_automatic_wake_guard: Mutex::new(None),
@@ -1238,6 +1242,8 @@ impl Coordinator {
                 embedded_audio_final_result: Mutex::new(None),
                 embedded_audio_preview: Mutex::new(Default::default()),
                 embedded_audio_pause_early_delivery: Mutex::new(Default::default()),
+                #[cfg(target_os = "windows")]
+                early_tsf_stop_signal: Mutex::new(None),
                 streaming_composition: Mutex::new(Default::default()),
                 native_composition: Mutex::new(Default::default()),
                 embedded_audio_automatic_wake_guard: Mutex::new(None),

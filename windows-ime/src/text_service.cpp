@@ -27,6 +27,7 @@ struct SubmitTextRequest {
   std::wstring expected_body;
   ListenerTypeCompositionOp op = ListenerTypeCompositionOp::kInsertOnce;
   std::shared_ptr<ListenerTypeAsyncEditState> async_completion;
+  std::shared_ptr<ListenerTypeStopSignal> stop_proof;
   bool wait_for_async_completion = false;
   bool edit_requested = false;
   std::atomic<bool> handler_finished{false};
@@ -38,11 +39,24 @@ PendingRequestRegistry<SubmitTextRequest> g_submit_requests;
 // New guarded sessions encode the original foreground HWND in a unique token.
 // Older experimental tokens intentionally keep their old behavior for private
 // regression fixtures; production requires a version capability probe first.
-bool ParseForegroundToken(const std::wstring& token, HWND* expected) {
+bool ParseForegroundToken(const std::wstring& token, HWND* expected, std::wstring* stop_id) {
   *expected = nullptr;
+  stop_id->clear();
   if (token.rfind(L"fg:", 0) != 0) return true;
   const size_t end = token.find(L':', 3);
   if (end == std::wstring::npos || end == 3 || end + 1 >= token.size()) return false;
+  const size_t stop_start = token.find(L':', end + 1);
+  if (stop_start != std::wstring::npos) {
+    if (stop_start == end + 1) return false;
+    *stop_id = token.substr(stop_start + 1);
+    if (stop_id->size() != 36) return false;
+    for (size_t i = 0; i < stop_id->size(); ++i) {
+      const wchar_t c = (*stop_id)[i];
+      const bool dash = i == 8 || i == 13 || i == 18 || i == 23;
+      if (dash ? c != L'-' : !((c >= L'0' && c <= L'9') ||
+          (c >= L'a' && c <= L'f') || (c >= L'A' && c <= L'F'))) return false;
+    }
+  }
   const std::wstring value = token.substr(3, end - 3);
   if (value.find_first_not_of(L"0123456789abcdefABCDEF") != std::wstring::npos) return false;
   wchar_t* tail = nullptr;
@@ -215,8 +229,9 @@ HRESULT ListenerTypeTextService::SubmitEditOnOwnerThread(
   *definitely_not_dispatched = true;
   if (GetCurrentThreadId() == owner_thread_id_) {
     bool requested = false;
-    const HRESULT result = CommitTextOnOwnerThread(session_id, text, op, expected_body, nullptr, nullptr, &requested);
-    *definitely_not_dispatched = !requested;
+    std::shared_ptr<ListenerTypeStopSignal> stop_proof;
+    const HRESULT result = CommitTextOnOwnerThread(session_id, text, op, expected_body, nullptr, nullptr, &requested, &stop_proof);
+    *definitely_not_dispatched = !requested || (stop_proof && stop_proof->prevented_write.load(std::memory_order_acquire));
     return result;
   }
 
@@ -255,7 +270,15 @@ HRESULT ListenerTypeTextService::SubmitEditOnOwnerThread(
   *definitely_not_dispatched = !request->edit_requested;
 
   if (request->wait_for_async_completion) {
-    return WaitForAsyncEditCompletion(request->async_completion);
+    const HRESULT result = WaitForAsyncEditCompletion(request->async_completion);
+    if (request->stop_proof && request->stop_proof->prevented_write.load(std::memory_order_acquire)) {
+      *definitely_not_dispatched = true;
+    }
+    return result;
+  }
+
+  if (request->stop_proof && request->stop_proof->prevented_write.load(std::memory_order_acquire)) {
+    *definitely_not_dispatched = true;
   }
 
   return request->result;
@@ -320,17 +343,32 @@ HRESULT ListenerTypeTextService::CommitTextOnOwnerThread(
     const std::wstring& expected_body,
     std::shared_ptr<ListenerTypeAsyncEditState>* async_completion,
     bool* wait_for_async_completion,
-    bool* edit_requested) {
+    bool* edit_requested,
+    std::shared_ptr<ListenerTypeStopSignal>* stop_proof) {
   if (thread_mgr_ == nullptr || client_id_ == TF_CLIENTID_NULL) {
     return E_UNEXPECTED;
   }
 
   HWND expected_foreground = nullptr;
+  std::wstring stop_id;
   if (op == ListenerTypeCompositionOp::kBindDirectTarget ||
       op == ListenerTypeCompositionOp::kInsertGuarded ||
       op == ListenerTypeCompositionOp::kInsertGuardedTerminal) {
-    if (!ParseForegroundToken(session_id, &expected_foreground)) return E_INVALIDARG;
+    if (!ParseForegroundToken(session_id, &expected_foreground, &stop_id)) return E_INVALIDARG;
     if (expected_foreground != nullptr && GetForegroundWindow() != expected_foreground) {
+      return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+    }
+  }
+
+  std::shared_ptr<ListenerTypeStopSignal> stop_signal;
+  if (!stop_id.empty()) {
+    const std::wstring name = L"Local\\ListenerTypeEarlyStop-" + stop_id;
+    HANDLE event = OpenEventW(SYNCHRONIZE, FALSE, name.c_str());
+    if (event == nullptr) return HRESULT_FROM_WIN32(GetLastError());
+    stop_signal = std::make_shared<ListenerTypeStopSignal>(event);
+    if (stop_proof != nullptr) *stop_proof = stop_signal;
+    if (WaitForSingleObject(event, 0) != WAIT_TIMEOUT) {
+      stop_signal->prevented_write.store(true, std::memory_order_release);
       return HRESULT_FROM_WIN32(ERROR_CANCELLED);
     }
   }
@@ -384,7 +422,7 @@ HRESULT ListenerTypeTextService::CommitTextOnOwnerThread(
   auto* session = new (std::nothrow) ListenerTypeEditSession(
       context, text, op, composition_slot, nullptr,
       (op == ListenerTypeCompositionOp::kInsertGuarded || op == ListenerTypeCompositionOp::kInsertGuardedTerminal)
-          ? thread_mgr_ : nullptr, expected_body, expected_foreground);
+          ? thread_mgr_ : nullptr, expected_body, expected_foreground, stop_signal);
   if (session == nullptr) {
     context->Release();
     return E_OUTOFMEMORY;
@@ -426,7 +464,7 @@ HRESULT ListenerTypeTextService::CommitTextOnOwnerThread(
   auto* async_session = new (std::nothrow) ListenerTypeEditSession(
       context, text, op, composition_slot, completion,
       (op == ListenerTypeCompositionOp::kInsertGuarded || op == ListenerTypeCompositionOp::kInsertGuardedTerminal)
-          ? thread_mgr_ : nullptr, expected_body, expected_foreground);
+          ? thread_mgr_ : nullptr, expected_body, expected_foreground, stop_signal);
   if (async_session == nullptr) {
     context->Release();
     return E_OUTOFMEMORY;
@@ -473,7 +511,7 @@ LRESULT CALLBACK ListenerTypeTextService::MessageWindowProc(HWND window,
     request->result = service->CommitTextOnOwnerThread(
         request->session_id, request->text, request->op, request->expected_body,
         &request->async_completion, &request->wait_for_async_completion,
-        &request->edit_requested);
+        &request->edit_requested, &request->stop_proof);
     request->handler_finished.store(true, std::memory_order_release);
     return 1;
   }
