@@ -234,7 +234,7 @@ HRESULT ListenerTypeTextService::SubmitEditOnOwnerThread(
     bool requested = false;
     std::shared_ptr<ListenerTypeStopSignal> stop_proof;
     const HRESULT result = CommitTextOnOwnerThread(session_id, text, op, expected_body, expected_document, nullptr, nullptr, &requested, &stop_proof);
-    *definitely_not_dispatched = !requested || (stop_proof && stop_proof->prevented_write.load(std::memory_order_acquire));
+    *definitely_not_dispatched = !requested || ListenerWriteDefinitelyPrevented(stop_proof);
     return result;
   }
 
@@ -275,13 +275,13 @@ HRESULT ListenerTypeTextService::SubmitEditOnOwnerThread(
 
   if (request->wait_for_async_completion) {
     const HRESULT result = WaitForAsyncEditCompletion(request->async_completion);
-    if (request->stop_proof && request->stop_proof->prevented_write.load(std::memory_order_acquire)) {
+    if (ListenerWriteDefinitelyPrevented(request->stop_proof)) {
       *definitely_not_dispatched = true;
     }
     return result;
   }
 
-  if (request->stop_proof && request->stop_proof->prevented_write.load(std::memory_order_acquire)) {
+  if (ListenerWriteDefinitelyPrevented(request->stop_proof)) {
     *definitely_not_dispatched = true;
   }
 
@@ -376,6 +376,11 @@ HRESULT ListenerTypeTextService::CommitTextOnOwnerThread(
       stop_signal->prevented_write.store(true, std::memory_order_release);
       return HRESULT_FROM_WIN32(ERROR_CANCELLED);
     }
+  }
+  if (!stop_signal && (op == ListenerTypeCompositionOp::kInsertGuarded ||
+                       op == ListenerTypeCompositionOp::kInsertGuardedTerminal)) {
+    stop_signal = std::make_shared<ListenerTypeStopSignal>(nullptr);
+    if (stop_proof != nullptr) *stop_proof = stop_signal;
   }
 
   ITfDocumentMgr* document_mgr = nullptr;

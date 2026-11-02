@@ -169,19 +169,27 @@ int wmain(int argc, wchar_t **argv) {
       << ",\"editor_matches_expected\":" << (exact ? "true" : "false")
       << ",\"prevented_write\":"
       << (stop_signal->prevented_write.load() ? "true" : "false")
+      << ",\"write_attempted\":"
+      << (stop_signal->write_attempted.load() ? "true" : "false")
       << ",\"second_context_ready\":"
       << ((SUCCEEDED(c2) && SUCCEEDED(d2) && SUCCEEDED(e2) && SUCCEEDED(focus2))
               ? "true"
               : "false")
       << "}";
   out.close();
-  const bool passed =
+  auto prior_attempt = std::make_shared<ListenerTypeStopSignal>(nullptr);
+  prior_attempt->prevented_write.store(true);
+  const bool unattempted_is_proven = ListenerWriteDefinitelyPrevented(prior_attempt);
+  prior_attempt->write_attempted.store(true);
+  const bool attempted_is_unconfirmed = !ListenerWriteDefinitelyPrevented(prior_attempt);
+  const bool passed = unattempted_is_proven && attempted_is_unconfirmed &&
       SUCCEEDED(a) && SUCCEEDED(b) && SUCCEEDED(c) && SUCCEEDED(d) &&
       SUCCEEDED(e) && SUCCEEDED(f) && SUCCEEDED(req) && callback && exact &&
       ((stop_before_callback || document_mismatch)
            ? completion->result == HRESULT_FROM_WIN32(ERROR_CANCELLED)
            : SUCCEEDED(completion->result)) &&
-      stop_signal->prevented_write.load() == stop_before_callback;
+      stop_signal->prevented_write.load() == (stop_before_callback || document_mismatch) &&
+      stop_signal->write_attempted.load() == !(stop_before_callback || document_mismatch);
   if (doc2 && SUCCEEDED(e2))
     doc2->Pop(TF_POPF_ALL);
   if (ctx2)

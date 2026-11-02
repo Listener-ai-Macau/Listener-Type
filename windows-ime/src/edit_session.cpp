@@ -107,26 +107,35 @@ STDMETHODIMP ListenerTypeEditSession::DoEditSession(TfEditCookie edit_cookie) {
       break;
     case ListenerTypeCompositionOp::kInsertGuarded:
       // Async edit callbacks may run after the user has changed controls.
-      hr = (expected_foreground_ == nullptr || GetForegroundWindow() == expected_foreground_) &&
-                   ListenerFocusedContextIs(focus_guard_, context_) &&
-                   (!expected_document_ || ListenerContextDocumentEquals(context_, edit_cookie, *expected_document_))
-               ? InsertText(edit_cookie) : HRESULT_FROM_WIN32(ERROR_CANCELLED);
+      if ((expected_foreground_ != nullptr && GetForegroundWindow() != expected_foreground_) ||
+          !ListenerFocusedContextIs(focus_guard_, context_) ||
+          (expected_document_ && !ListenerContextDocumentEquals(context_, edit_cookie, *expected_document_))) {
+        MarkWritePrevented();
+        hr = HRESULT_FROM_WIN32(ERROR_CANCELLED);
+      } else {
+        hr = InsertText(edit_cookie);
+      }
       break;
     case ListenerTypeCompositionOp::kInsertGuardedTerminal: {
       if ((expected_foreground_ != nullptr && GetForegroundWindow() != expected_foreground_) ||
           !ListenerFocusedContextIs(focus_guard_, context_) ||
           (expected_document_ && !ListenerContextDocumentEquals(context_, edit_cookie, *expected_document_))) {
+        MarkWritePrevented();
         hr = HRESULT_FROM_WIN32(ERROR_CANCELLED);
         break;
       }
       const auto already = ListenerInspectTerminalTail(context_, edit_cookie, expected_body_ + text_);
       if (already == ListenerTerminalTail::kMatches) { hr = S_FALSE; break; }
-      if (already == ListenerTerminalTail::kUnavailable) { hr = E_FAIL; break; }
+      if (already == ListenerTerminalTail::kUnavailable) { MarkWritePrevented(); hr = E_FAIL; break; }
       const auto before = ListenerInspectTerminalTail(context_, edit_cookie, expected_body_);
-      hr = before == ListenerTerminalTail::kMatches && !StopRequestedBeforeWrite() &&
-                   (expected_foreground_ == nullptr || GetForegroundWindow() == expected_foreground_) &&
-                   ListenerFocusedContextIs(focus_guard_, context_)
-               ? InsertText(edit_cookie) : HRESULT_FROM_WIN32(ERROR_CANCELLED);
+      if (before != ListenerTerminalTail::kMatches || StopRequestedBeforeWrite() ||
+          (expected_foreground_ != nullptr && GetForegroundWindow() != expected_foreground_) ||
+          !ListenerFocusedContextIs(focus_guard_, context_)) {
+        MarkWritePrevented();
+        hr = HRESULT_FROM_WIN32(ERROR_CANCELLED);
+      } else {
+        hr = InsertText(edit_cookie);
+      }
       break;
     }
     case ListenerTypeCompositionOp::kStreamUpdate:
@@ -148,14 +157,18 @@ STDMETHODIMP ListenerTypeEditSession::DoEditSession(TfEditCookie edit_cookie) {
 }
 
 bool ListenerTypeEditSession::StopRequestedBeforeWrite() {
-  if (!stop_signal_) return false;
-  // Missing/invalid event is not authority to write. Only an unsignalled
-  // valid event permits the request to proceed.
-  if (stop_signal_->event != nullptr && WaitForSingleObject(stop_signal_->event, 0) == WAIT_TIMEOUT) {
+  if (!stop_signal_ || stop_signal_->event == nullptr) return false;
+  // When an event was supplied, only a valid unsignalled event permits the
+  // request to proceed. A missing named event is rejected before dispatch.
+  if (WaitForSingleObject(stop_signal_->event, 0) == WAIT_TIMEOUT) {
     return false;
   }
   stop_signal_->prevented_write.store(true, std::memory_order_release);
   return true;
+}
+
+void ListenerTypeEditSession::MarkWritePrevented() {
+  if (stop_signal_) stop_signal_->prevented_write.store(true, std::memory_order_release);
 }
 
 HRESULT ListenerTypeEditSession::InsertText(TfEditCookie edit_cookie) {
@@ -185,6 +198,7 @@ HRESULT ListenerTypeEditSession::InsertText(TfEditCookie edit_cookie) {
     if (StopRequestedBeforeWrite()) {
       hr = HRESULT_FROM_WIN32(ERROR_CANCELLED);
     } else {
+      if (stop_signal_) stop_signal_->write_attempted.store(true, std::memory_order_release);
       hr = insert_at_selection->InsertTextAtSelection(
           edit_cookie, 0, text_.c_str(), static_cast<LONG>(text_.size()),
           &committed_range);

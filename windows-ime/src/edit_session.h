@@ -21,8 +21,9 @@ struct ListenerTypeAsyncEditState {
 };
 
 // One request holds its own reference to the OS event through a delayed edit.
-// The flag is proof that this callback returned before attempting a write;
-// it is not proof that an already-started insertion can be cancelled.
+// The flag proves that a callback returned before attempting a write; it is
+// not proof that an already-started insertion can be cancelled. A null event
+// means this request has no stop signal but can still report a proven guard.
 struct ListenerTypeStopSignal {
   explicit ListenerTypeStopSignal(HANDLE handle) : event(handle) {}
   ListenerTypeStopSignal(const ListenerTypeStopSignal&) = delete;
@@ -30,7 +31,13 @@ struct ListenerTypeStopSignal {
   ~ListenerTypeStopSignal() { if (event != nullptr) CloseHandle(event); }
   HANDLE event = nullptr;
   std::atomic<bool> prevented_write{false};
+  std::atomic<bool> write_attempted{false};
 };
+
+inline bool ListenerWriteDefinitelyPrevented(const std::shared_ptr<ListenerTypeStopSignal>& proof) {
+  return proof && proof->prevented_write.load(std::memory_order_acquire) &&
+         !proof->write_attempted.load(std::memory_order_acquire);
+}
 
 // 组字流式(2026-09-22 讯飞式逐字上屏)的操作类型。kInsertOnce 是既有的一次性
 // 插入路径,行为不变;其余三个维护 service 持有的那条组字:
@@ -74,6 +81,7 @@ class ListenerTypeEditSession final : public ITfEditSession {
   HRESULT InsertText(TfEditCookie edit_cookie);
   HRESULT RunCompositionOp(TfEditCookie edit_cookie);
   bool StopRequestedBeforeWrite();
+  void MarkWritePrevented();
 
   LONG ref_count_ = 1;
   ITfContext* context_ = nullptr;
