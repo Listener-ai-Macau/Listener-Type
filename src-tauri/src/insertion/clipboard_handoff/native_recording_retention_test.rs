@@ -1,5 +1,40 @@
 use super::*;
 
+/// Reproduce a copy made after the worker's initial ownership check but before
+/// its final publication. This test uses only its private station clipboard.
+#[test]
+#[ignore = "requires an isolated clipboard window station"]
+fn retained_publication_preserves_copy_between_check_and_write() {
+    use std::ffi::c_void;
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetProcessWindowStation() -> *mut c_void;
+        fn GetUserObjectInformationW(handle: *mut c_void, index: i32,
+            info: *mut c_void, length: u32, needed: *mut u32) -> i32;
+    }
+    let mut name = [0u16; 128];
+    let mut needed = 0;
+    assert_ne!(unsafe { GetUserObjectInformationW(GetProcessWindowStation(), 2,
+        name.as_mut_ptr().cast(), (name.len() * 2) as u32, &mut needed) }, 0);
+    let end = name.iter().position(|c| *c == 0).unwrap_or(name.len());
+    assert!(String::from_utf16_lossy(&name[..end]).starts_with("ListenerClipboardCase_"));
+
+    let mut board = arboard::Clipboard::new().unwrap();
+    for newer in ["newer user copy", "transport fragment"] {
+        board.set_text("transport fragment").unwrap();
+        let checked_revision = clipboard_revision();
+        assert_eq!(checked_revision, clipboard_revision()); // worker's earlier check
+        board.set_text(newer).unwrap(); // another app copies before publication
+        assert_ne!(checked_revision, clipboard_revision());
+        assert_eq!(publish_retained_if_current("complete final text", checked_revision),
+            RetentionResult::Superseded);
+        assert_eq!(board.get_text().unwrap(), newer);
+    }
+    let current = clipboard_revision();
+    assert_eq!(publish_retained_if_current("完整文字 English 𝄞", current), RetentionResult::Stored);
+    assert_eq!(board.get_text().unwrap(), "完整文字 English 𝄞");
+}
+
 /// A controlled counterexample: the product worker's actual queue and the
 /// station's real clipboard, with paste dispatch replaced by a fake target
 /// that intentionally has not read yet. Never sends keys or accesses the

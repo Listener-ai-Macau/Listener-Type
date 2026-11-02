@@ -1030,11 +1030,7 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                     }
                     *owner = owner.wrapping_add(1);
                     paste_receipt = None;
-                    let result = if super::copy_to_clipboard_now(&text) {
-                        RetentionResult::Stored
-                    } else {
-                        RetentionResult::Failed
-                    };
+                    let result = publish_retained_if_current(&text, ticket.revision);
                     let _ = reply.send(result);
                     continue;
                 }
@@ -1056,12 +1052,10 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                         continue;
                     }
                     *owner = owner.wrapping_add(1);
-                    let result = if super::copy_to_clipboard_now(&text) {
+                    let result = publish_retained_if_current(&text, ticket.revision);
+                    if result == RetentionResult::Stored {
                         log::info!("[insertion] full clipboard published from identical transport ticket={} chars={}", ticket.id, text.chars().count());
-                        RetentionResult::Stored
-                    } else {
-                        RetentionResult::Failed
-                    };
+                    }
                     paste_receipt = None;
                     let _ = reply.send(result);
                     continue;
@@ -1120,12 +1114,10 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                 continue;
             }
             *owner = owner.wrapping_add(1);
-            let result = if super::copy_to_clipboard_now(&job.text) {
+            let result = publish_retained_if_current(&job.text, receipt.revision);
+            if result == RetentionResult::Stored {
                 log::info!("[insertion] full clipboard retained after target paste receipt ticket={} chars={}", job.ticket, job.text.chars().count());
-                RetentionResult::Stored
-            } else {
-                RetentionResult::Failed
-            };
+            }
             drop(owner);
             finish(&mut pending, result);
             paste_receipt = None;
@@ -1220,6 +1212,31 @@ fn clipboard_revision() -> Option<u64> {
     {
         None
     }
+}
+
+/// The OS clipboard lock, rather than only our worker mutex, must cover both
+/// the sequence check and publication: another process can copy between them.
+#[cfg(target_os = "windows")]
+fn publish_retained_if_current(text: &str, expected_revision: Option<u64>) -> RetentionResult {
+    let mut clipboard = match arboard::Clipboard::new() {
+        Ok(clipboard) => clipboard,
+        Err(_) => return RetentionResult::Failed,
+    };
+    // arboard 3.6's set() opens the OS clipboard and holds it until text()
+    // returns or this writer is dropped. Failed opens remain errors in writer.
+    let writer = clipboard.set();
+    if expected_revision.is_none() || clipboard_revision() != expected_revision {
+        return RetentionResult::Superseded;
+    }
+    match writer.text(text.to_owned()) {
+        Ok(()) => RetentionResult::Stored,
+        Err(_) => RetentionResult::Failed,
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn publish_retained_if_current(text: &str, _expected_revision: Option<u64>) -> RetentionResult {
+    if super::copy_to_clipboard_now(text) { RetentionResult::Stored } else { RetentionResult::Failed }
 }
 
 fn paste_consumption_proof(
