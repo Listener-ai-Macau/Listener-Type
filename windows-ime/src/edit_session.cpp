@@ -2,6 +2,8 @@
 
 #include <utility>
 
+extern LONG g_object_count;
+
 ListenerTypeAsyncEditState::ListenerTypeAsyncEditState()
     : event(CreateEventW(nullptr, TRUE, FALSE, nullptr)) {
   if (event == nullptr) {
@@ -31,6 +33,9 @@ ListenerTypeEditSession::ListenerTypeEditSession(
       op_(op),
       composition_slot_(composition_slot),
       async_state_(std::move(async_state)) {
+  // TSF may hold an asynchronous edit after the text service deactivates.
+  // Keep DllCanUnloadNow false until the edit session's last reference ends.
+  InterlockedIncrement(&g_object_count);
   if (context_ != nullptr) {
     context_->AddRef();
   }
@@ -41,6 +46,7 @@ ListenerTypeEditSession::~ListenerTypeEditSession() {
     context_->Release();
     context_ = nullptr;
   }
+  InterlockedDecrement(&g_object_count);
 }
 
 STDMETHODIMP ListenerTypeEditSession::QueryInterface(REFIID iid, void** object) {

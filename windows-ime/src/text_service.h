@@ -28,12 +28,14 @@ class ListenerTypeTextService final : public ITfTextInputProcessorEx {
                           DWORD flags) override;
 
   HRESULT SubmitTextFromPipe(const std::wstring& session_id,
-                             const std::wstring& text);
+                             const std::wstring& text,
+                             bool* definitely_not_dispatched);
   // 组字流式(2026-09-22 讯飞式):update 原地替换组字内容;commit 终稿落定;
   // cancel 清空。会话切换时旧组字先 cancel。
   HRESULT StreamCompositionFromPipe(const std::wstring& session_id,
                                     const std::wstring& text,
-                                    ListenerTypeCompositionOp op);
+                                    ListenerTypeCompositionOp op,
+                                    bool* definitely_not_dispatched);
 
  private:
   HRESULT StartIpcServer();
@@ -42,13 +44,15 @@ class ListenerTypeTextService final : public ITfTextInputProcessorEx {
   void DestroyMessageWindow();
   HRESULT SubmitEditOnOwnerThread(const std::wstring& session_id,
                                   const std::wstring& text,
-                                  ListenerTypeCompositionOp op);
+                                  ListenerTypeCompositionOp op,
+                                  bool* definitely_not_dispatched);
   HRESULT CommitTextOnOwnerThread(
       const std::wstring& session_id,
       const std::wstring& text,
       ListenerTypeCompositionOp op,
       std::shared_ptr<ListenerTypeAsyncEditState>* async_completion,
-      bool* wait_for_async_completion);
+      bool* wait_for_async_completion,
+      bool* edit_requested);
   // 释放当前组字(Deactivate 清场用;不在 edit cookie 内,只做 Release,
   // 由 TSF 在 context 销毁时回收)。
   void DropActiveComposition();

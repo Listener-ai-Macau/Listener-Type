@@ -1,5 +1,6 @@
 #include "text_service.h"
 
+#include <atomic>
 #include <memory>
 #include <new>
 
@@ -21,6 +22,8 @@ struct SubmitTextRequest {
   ListenerTypeCompositionOp op = ListenerTypeCompositionOp::kInsertOnce;
   std::shared_ptr<ListenerTypeAsyncEditState> async_completion;
   bool wait_for_async_completion = false;
+  bool edit_requested = false;
+  std::atomic<bool> handler_finished{false};
   HRESULT result = E_UNEXPECTED;
 };
 
@@ -138,24 +141,33 @@ STDMETHODIMP ListenerTypeTextService::Deactivate() {
 
 HRESULT ListenerTypeTextService::SubmitTextFromPipe(
     const std::wstring& session_id,
-    const std::wstring& text) {
+    const std::wstring& text,
+    bool* definitely_not_dispatched) {
   return SubmitEditOnOwnerThread(session_id, text,
-                                 ListenerTypeCompositionOp::kInsertOnce);
+                                 ListenerTypeCompositionOp::kInsertOnce,
+                                 definitely_not_dispatched);
 }
 
 HRESULT ListenerTypeTextService::StreamCompositionFromPipe(
     const std::wstring& session_id,
     const std::wstring& text,
-    ListenerTypeCompositionOp op) {
-  return SubmitEditOnOwnerThread(session_id, text, op);
+    ListenerTypeCompositionOp op,
+    bool* definitely_not_dispatched) {
+  return SubmitEditOnOwnerThread(session_id, text, op, definitely_not_dispatched);
 }
 
 HRESULT ListenerTypeTextService::SubmitEditOnOwnerThread(
     const std::wstring& session_id,
     const std::wstring& text,
-    ListenerTypeCompositionOp op) {
+    ListenerTypeCompositionOp op,
+    bool* definitely_not_dispatched) {
+  if (definitely_not_dispatched == nullptr) return E_POINTER;
+  *definitely_not_dispatched = true;
   if (GetCurrentThreadId() == owner_thread_id_) {
-    return CommitTextOnOwnerThread(session_id, text, op, nullptr, nullptr);
+    bool requested = false;
+    const HRESULT result = CommitTextOnOwnerThread(session_id, text, op, nullptr, nullptr, &requested);
+    *definitely_not_dispatched = !requested;
+    return result;
   }
 
   if (message_window_ == nullptr) {
@@ -175,10 +187,21 @@ HRESULT ListenerTypeTextService::SubmitEditOnOwnerThread(
   const DWORD send_error = sent == 0 ? GetLastError() : ERROR_SUCCESS;
   // If undelivered, cancel the registry entry. A handler which already took
   // the request retains its own shared reference until it actually returns.
-  g_submit_requests.Cancel(token);
+  const bool not_taken = g_submit_requests.Cancel(token);
   if (sent == 0) {
+    // If the handler already took ownership it may still edit after timeout.
+    *definitely_not_dispatched = not_taken;
     return HRESULT_FROM_WIN32(send_error != ERROR_SUCCESS ? send_error : ERROR_TIMEOUT);
   }
+
+  // A receiver can release a synchronous sender early with ReplyMessage.
+  // Do not read mutable request fields until our handler itself has finished.
+  if (!request->handler_finished.load(std::memory_order_acquire)) {
+    *definitely_not_dispatched = false;
+    return HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+  }
+
+  *definitely_not_dispatched = !request->edit_requested;
 
   if (request->wait_for_async_completion) {
     return WaitForAsyncEditCompletion(request->async_completion);
@@ -244,7 +267,8 @@ HRESULT ListenerTypeTextService::CommitTextOnOwnerThread(
     const std::wstring& text,
     ListenerTypeCompositionOp op,
     std::shared_ptr<ListenerTypeAsyncEditState>* async_completion,
-    bool* wait_for_async_completion) {
+    bool* wait_for_async_completion,
+    bool* edit_requested) {
   UNREFERENCED_PARAMETER(session_id);
 
   if (thread_mgr_ == nullptr || client_id_ == TF_CLIENTID_NULL) {
@@ -282,6 +306,7 @@ HRESULT ListenerTypeTextService::CommitTextOnOwnerThread(
   }
 
   HRESULT edit_result = S_OK;
+  if (edit_requested != nullptr) *edit_requested = true;
   hr = context->RequestEditSession(client_id_, session,
                                    TF_ES_SYNC | TF_ES_READWRITE, &edit_result);
   session->Release();
@@ -360,7 +385,9 @@ LRESULT CALLBACK ListenerTypeTextService::MessageWindowProc(HWND window,
 
     request->result = service->CommitTextOnOwnerThread(
         request->session_id, request->text, request->op,
-        &request->async_completion, &request->wait_for_async_completion);
+        &request->async_completion, &request->wait_for_async_completion,
+        &request->edit_requested);
+    request->handler_finished.store(true, std::memory_order_release);
     return 1;
   }
 

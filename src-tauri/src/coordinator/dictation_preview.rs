@@ -2733,6 +2733,86 @@ fn pause_early_delivery_rollback(inner: &Arc<Inner>, session_id: SessionId) {
     ledger.reserved_body_consumption = None;
 }
 
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EarlyTsfOutcome { Confirmed, Unavailable, Cancelled, Unconfirmed }
+
+#[cfg(target_os = "windows")]
+fn guard_unconfirmed_early_tsf(inner: &Arc<Inner>, session_id: SessionId) {
+    let state = inner.state.lock();
+    if state.session_id != session_id { return; }
+    let mut streaming = inner.streaming_composition.lock();
+    if streaming.session_id != Some(session_id) {
+        *streaming = StreamingCompositionState::default();
+        streaming.session_id = Some(session_id);
+    }
+    streaming_state_fail(&mut streaming, "early_tsf_unconfirmed", true);
+}
+
+#[cfg(target_os = "windows")]
+fn guard_pending_early_tsf_for_final(inner: &Arc<Inner>, session_id: SessionId) -> bool {
+    let pending = {
+        let ledger = inner.embedded_audio_pause_early_delivery.lock();
+        ledger.session_id == Some(session_id) && ledger.unconfirmed_prior.is_some()
+    };
+    if pending { guard_unconfirmed_early_tsf(inner, session_id); }
+    pending
+}
+
+#[cfg(target_os = "windows")]
+fn early_tsf_session_listening(inner: &Arc<Inner>, session_id: SessionId) -> bool {
+    let state = inner.state.lock();
+    state.session_id == session_id && !state.cancelled && state.phase == SessionPhase::Listening
+}
+
+/// Experimental non-clipboard append. The existing paste route remains the
+/// default until real-target ownership, punctuation and end-to-end tests pass.
+#[cfg(target_os = "windows")]
+async fn try_early_tsf_append(inner: &Arc<Inner>, session_id: SessionId,
+    target_window: Option<usize>, text: &str) -> EarlyTsfOutcome {
+    if std::env::var("LISTENER_EXPERIMENTAL_EARLY_TSF").as_deref() != Ok("1")
+        || pause_early_paste_delivered(inner, session_id)
+        || pause_early_terminal_punctuation_only(text) {
+        return EarlyTsfOutcome::Unavailable;
+    }
+    let prepared = inner.prepared_windows_ime_session.lock().iter()
+        .find(|slot| slot.session_id == session_id).map(|slot| slot.prepared.clone());
+    let Some(prepared) = prepared.filter(|value| value.is_ready_for_tsf_submit()) else {
+        return EarlyTsfOutcome::Unavailable;
+    };
+    // The exact focused control must positively describe an editable input;
+    // unknown capability must keep the already-supported clipboard route.
+    let focus = {
+        let (reader, focus) = crate::selection::PasteReader::capture_with_focus();
+        drop(reader);
+        focus
+    };
+    if focus != crate::selection::FocusedInputState::Editable
+        || !delivery_target_is_current(target_window) {
+        return EarlyTsfOutcome::Unavailable;
+    }
+    let Some(target) = capture_ime_submit_target_for_window(target_window) else {
+        return EarlyTsfOutcome::Unavailable;
+    };
+    let guard_inner = Arc::clone(inner);
+    let request = crate::windows_ime_ipc::ImeSubmitRequest {
+        session_id: session_id.to_string(), text: text.to_owned(),
+        created_at: chrono::Utc::now().to_rfc3339(), target: Some(target),
+    };
+    let result = inner.windows_ime.submit_prepared_exact(&prepared, request, move || {
+        let current_session = early_tsf_session_listening(&guard_inner, session_id);
+        current_session && delivery_target_is_current(target_window)
+            && capture_ime_submit_target_for_window(target_window) == Some(target)
+    }).await;
+    match result {
+        Ok(InsertStatus::Inserted) => EarlyTsfOutcome::Confirmed,
+        Ok(InsertStatus::SubmittedUnconfirmed)
+        | Err(crate::windows_ime_session::WindowsImeSessionError::Unconfirmed(_)) => EarlyTsfOutcome::Unconfirmed,
+        Err(crate::windows_ime_session::WindowsImeSessionError::NotDispatched) => EarlyTsfOutcome::Cancelled,
+        _ => EarlyTsfOutcome::Unavailable,
+    }
+}
+
 /// 本会话是否确实上屏过停顿落屏文本（跨回滚粘滞）。终稿交付的硬底线。
 pub(super) fn pause_early_ever_delivered(inner: &Arc<Inner>, session_id: SessionId) -> bool {
     let ledger = inner.embedded_audio_pause_early_delivery.lock();
@@ -3204,9 +3284,35 @@ async fn pause_early_delivery_tick(
         if let Some(status) = terminal_status {
             (status, DeliveryRoute::Paste, None)
         } else {
-            let result = insert_via_non_tsf_fallback_scoped(inner, delta, restore_clipboard, prefs.paste_shortcut,
-                Some(crate::insertion::SessionPasteScope { session_id, previous_body: delivered_display.clone(), replace: false }));
-            (result.status, result.route, result.receipt)
+            match try_early_tsf_append(inner, session_id, delivery_target, delta).await {
+                EarlyTsfOutcome::Confirmed => (InsertStatus::Inserted, DeliveryRoute::Tsf, None),
+                EarlyTsfOutcome::Unavailable => {
+                    // A stop can arrive during the asynchronous client probe.
+                    // Do not start a new paste after finalization has begun.
+                    if std::env::var("LISTENER_EXPERIMENTAL_EARLY_TSF").as_deref() == Ok("1")
+                        && !early_tsf_session_listening(inner, session_id) {
+                        pause_early_delivery_rollback(inner, session_id);
+                        endpoint_clock.lock().settle_text_submission(body_submission, false, None);
+                        return;
+                    }
+                    let result = insert_via_non_tsf_fallback_scoped(inner, delta, restore_clipboard, prefs.paste_shortcut,
+                        Some(crate::insertion::SessionPasteScope { session_id, previous_body: delivered_display.clone(), replace: false }));
+                    (result.status, result.route, result.receipt)
+                }
+                EarlyTsfOutcome::Cancelled => {
+                    pause_early_delivery_rollback(inner, session_id);
+                    endpoint_clock.lock().settle_text_submission(body_submission, false, None);
+                    return;
+                }
+                EarlyTsfOutcome::Unconfirmed => {
+                    // An unconfirmed native edit may still arrive. Prevent a
+                    // later clipboard fallback from inserting the same text.
+                    guard_unconfirmed_early_tsf(inner, session_id);
+                    pause_early_delivery_rollback(inner, session_id);
+                    endpoint_clock.lock().settle_text_submission(body_submission, false, None);
+                    return;
+                }
+            }
         }
     };
     #[cfg(not(target_os = "windows"))]

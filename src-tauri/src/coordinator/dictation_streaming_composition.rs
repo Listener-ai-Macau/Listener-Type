@@ -707,4 +707,25 @@ mod streaming_composition_tests {
         assert!(reply.send(true).is_err());
         assert!(!streaming_composition_active(&inner, session));
     }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn stop_during_reserved_early_tsf_blocks_duplicate_final_dispatch() {
+        let coordinator = crate::coordinator::Coordinator::new();
+        let inner = &coordinator.inner;
+        let session = crate::coordinator_state::new_session_id();
+        {
+            let mut state = inner.state.lock();
+            state.session_id = session;
+            state.phase = SessionPhase::Inserting;
+        }
+        pause_early_delivery_reserve(inner, session, "synthetic".into(), "synthetic".into(), "synthetic".into());
+        assert!(guard_pending_early_tsf_for_final(inner, session));
+        assert!(streaming_composition_contaminated(inner, session));
+        assert!(!early_tsf_session_listening(inner, session));
+        assert!(take_pause_early_delivery(inner, session).is_some());
+        // A delayed successful response cannot clear the final safeguard.
+        pause_early_delivery_confirm(inner, session);
+        assert!(streaming_composition_contaminated(inner, session));
+    }
 }

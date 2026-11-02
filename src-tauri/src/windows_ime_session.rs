@@ -10,12 +10,14 @@ pub enum WindowsImeSessionError {
     Profile(String),
     Ipc(String),
     Unconfirmed(String),
+    NotDispatched,
 }
 
 impl std::fmt::Display for WindowsImeSessionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Profile(message) | Self::Ipc(message) | Self::Unconfirmed(message) => write!(f, "{message}"),
+            Self::NotDispatched => write!(f, "IME request cancelled before dispatch"),
         }
     }
 }
@@ -51,6 +53,7 @@ pub fn should_fallback_after_ime_result(status: ImeSubmitStatus) -> bool {
 fn session_ipc_error(error: WindowsImeIpcError) -> WindowsImeSessionError {
     match error {
         WindowsImeIpcError::AfterDispatch(message) => WindowsImeSessionError::Unconfirmed(message),
+        WindowsImeIpcError::NotDispatched => WindowsImeSessionError::NotDispatched,
         other => WindowsImeSessionError::Ipc(other.to_string()),
     }
 }
@@ -188,6 +191,21 @@ impl WindowsImeSessionController {
         request: ImeSubmitRequest,
     ) -> Result<InsertStatus, WindowsImeSessionError> {
         self.submit_message_prepared(prepared, request).await
+    }
+
+    #[cfg(target_os = "windows")]
+    pub async fn submit_prepared_exact(
+        &self,
+        prepared: &PreparedWindowsImeSession,
+        request: ImeSubmitRequest,
+        before_write: impl FnOnce() -> bool + Send,
+    ) -> Result<InsertStatus, WindowsImeSessionError> {
+        if !prepared.is_ready_for_tsf_submit() {
+            return Err(WindowsImeSessionError::NotDispatched);
+        }
+        let status = self.ipc.submit_text_exact(request, before_write).await
+            .map_err(session_ipc_error)?;
+        Ok(map_ime_status_to_insert_status(status))
     }
 
     /// 组字流式(2026-09-22 讯飞式):三个操作共用 prepared session 闸门与

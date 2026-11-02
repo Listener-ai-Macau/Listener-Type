@@ -28,9 +28,9 @@ class PendingRequestRegistry {
     return request;
   }
 
-  void Cancel(std::uintptr_t token) {
+  bool Cancel(std::uintptr_t token) {
     std::lock_guard<std::mutex> lock(mutex_);
-    pending_.erase(token);
+    return pending_.erase(token) != 0;
   }
 
  private:

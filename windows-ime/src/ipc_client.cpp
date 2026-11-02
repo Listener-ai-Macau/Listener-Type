@@ -456,6 +456,14 @@ void ListenerTypePipeServer::HandleSubmitLine(HANDLE pipe, const std::string& li
     return;
   }
 
+  // A capability probe contains no user text and never opens an edit session.
+  // Older loaded DLLs answer protocolError, so the host can safely keep its
+  // existing transport instead of sending live text to an unknown version.
+  if (message.type == L"probeDirect") {
+    WriteResult(pipe, message.session_id, L"failed", L"safeDirectVersion1");
+    return;
+  }
+
   // 组字流式(2026-09-22):streamUpdate=原地替换组字内容;streamCommit=终稿
   // 落定;streamCancel=清空。submitText=既有一次性插入,行为不变。
   ListenerTypeCompositionOp op;
@@ -472,16 +480,21 @@ void ListenerTypePipeServer::HandleSubmitLine(HANDLE pipe, const std::string& li
     return;
   }
 
+  bool definitely_not_dispatched = true;
   const HRESULT hr = op == ListenerTypeCompositionOp::kInsertOnce
                          ? service_->SubmitTextFromPipe(message.session_id,
-                                                        message.text)
+                                                        message.text,
+                                                        &definitely_not_dispatched)
                          : service_->StreamCompositionFromPipe(
-                               message.session_id, message.text, op);
+                               message.session_id, message.text, op,
+                               &definitely_not_dispatched);
   if (SUCCEEDED(hr)) {
     WriteResult(pipe, message.session_id, L"committed", nullptr);
   } else {
     const std::wstring error_code = HResultErrorCode(hr);
-    WriteResult(pipe, message.session_id, L"rejected", error_code.c_str());
+    WriteResult(pipe, message.session_id,
+                definitely_not_dispatched ? L"failed" : L"rejected",
+                error_code.c_str());
   }
 }
 

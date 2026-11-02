@@ -18,7 +18,7 @@ int main() {
     auto sender = std::make_shared<Request>(L"never dispatched");
     std::weak_ptr<Request> weak = sender;
     const auto token = registry.Register(sender);
-    registry.Cancel(token);
+    assert(registry.Cancel(token));  // Never taken: definitely no dispatch.
     assert(!registry.Take(token));
     sender.reset();
     assert(weak.expired());
@@ -47,7 +47,7 @@ int main() {
       condition.wait(lock, [&] { return taken; });
     }
     // Simulate a SendMessageTimeout after the receiving thread started.
-    registry.Cancel(token);
+    assert(!registry.Cancel(token));  // Already taken: completion is unknown.
     assert(!registry.Take(token));  // A second delivery cannot replay it.
     sender.reset();
     assert(!weak.expired());  // Receiver still owns text after sender returns.

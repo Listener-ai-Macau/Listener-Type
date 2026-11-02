@@ -15562,6 +15562,15 @@ fn clipboard_failure_notice_does_not_claim_pending_or_superseded_copy_failed() {
 
 #[test]
 #[cfg(target_os = "windows")]
+fn unconfirmed_native_edit_keeps_clipboard_available_but_prior_paste_stays_guarded() {
+    let (status, route) = super::unconfirmed_streaming_delivery_route(false);
+    assert!(!super::unconfirmed_paste_uses_clipboard(status, route, false, "tail", "full"));
+    let (status, route) = super::unconfirmed_streaming_delivery_route(true);
+    assert!(super::unconfirmed_paste_uses_clipboard(status, route, true, "tail", "full"));
+}
+
+#[test]
+#[cfg(target_os = "windows")]
 fn completion_notice_is_readable_without_delaying_quiet_success() {
     assert_eq!(super::completion_notice_hide_delay(None, false), super::CAPSULE_SUCCESS_HIDE_DELAY_MS);
     assert_eq!(super::completion_notice_hide_delay(Some("  "), false), super::CAPSULE_SUCCESS_HIDE_DELAY_MS);

@@ -4297,6 +4297,11 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             .map(|value| value == "1")
             .unwrap_or(false);
     let paste_shortcut = prefs.paste_shortcut;
+    #[cfg(target_os = "windows")]
+    let early_tsf_pending_at_final = std::env::var("LISTENER_EXPERIMENTAL_EARLY_TSF").as_deref() == Ok("1")
+        && guard_pending_early_tsf_for_final(inner, current_session_id);
+    #[cfg(not(target_os = "windows"))]
+    let early_tsf_pending_at_final = false;
     // Delivered bytes remain immutable. The exact sealed native source may
     // supplement holes, but only through the worker's receipted session range;
     // a final full paste at the current cursor remains forbidden.
@@ -4483,10 +4488,11 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                 .unwrap_or(0),
             polished.chars().count()
         );
+        let (status, route) = unconfirmed_streaming_delivery_route(pause_early_paste);
         DeliverySubmission {
-            status: InsertStatus::PasteSent,
+            status,
             target_confirmed: false,
-            route: DeliveryRoute::Paste,
+            route,
             submitted_text: pause_early_delivered
                 .as_ref()
                 .map(|(display, _)| display.clone()),
@@ -4750,7 +4756,8 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         None if pause_early_sticky => "ledger_missing",
         None => "full_submission",
     };
-    let possible_incomplete_delivery = final_delivery_may_be_incomplete(source_coverage);
+    let possible_incomplete_delivery = early_tsf_pending_at_final || streaming_contaminated
+        || final_delivery_may_be_incomplete(source_coverage);
     let status = delivery_submission.status;
     let original_target_confirmed = delivery_submission.target_confirmed;
     // 组字流式收尾:终局 commit/cancel 已做,这里只退驱动(幂等)。
@@ -5028,6 +5035,17 @@ fn clipboard_failure_completion_notice(message: Option<String>, enabled: bool,
         Some(message) if !message.is_empty() => format!("{message}；{notice}"),
         _ => notice.to_string(),
     })
+}
+
+fn unconfirmed_streaming_delivery_route(prior_paste: bool) -> (InsertStatus, DeliveryRoute) {
+    if prior_paste || !cfg!(target_os = "windows") {
+        // A prior paste may still be using the clipboard transport.
+        (InsertStatus::PasteSent, DeliveryRoute::Paste)
+    } else {
+        // An unresolved native edit does not itself borrow the clipboard. The
+        // full final body can still be retained if no newer user copy won.
+        (InsertStatus::SubmittedUnconfirmed, DeliveryRoute::Tsf)
+    }
 }
 
 fn translation_completion_error_code(
