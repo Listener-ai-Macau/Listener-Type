@@ -4307,7 +4307,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             .unwrap_or(false);
     let paste_shortcut = prefs.paste_shortcut;
     #[cfg(target_os = "windows")]
-    let early_tsf_pending_at_final = std::env::var("LISTENER_EXPERIMENTAL_EARLY_TSF").as_deref() == Ok("1")
+    let early_tsf_pending_at_final = experimental_early_tsf_enabled()
         && await_early_tsf_before_final(inner, current_session_id).await;
     #[cfg(not(target_os = "windows"))]
     let early_tsf_pending_at_final = false;

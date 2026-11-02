@@ -2784,6 +2784,17 @@ fn early_tsf_session_listening(inner: &Arc<Inner>, session_id: SessionId) -> boo
 }
 
 #[cfg(target_os = "windows")]
+fn experimental_early_tsf_enabled() -> bool {
+    // Equal document text and window identity do not prove the same editor.
+    // A private Chromium regression wrote to the address bar while UIA's
+    // focused textarea contained identical text. Keep even the explicit
+    // experimental opt-in disabled until editor identity is proven.
+    const EDITOR_IDENTITY_PROVEN: bool = false;
+    EDITOR_IDENTITY_PROVEN
+        && std::env::var("LISTENER_EXPERIMENTAL_EARLY_TSF").as_deref() == Ok("1")
+}
+
+#[cfg(target_os = "windows")]
 fn guarded_focused_editor_document(target_window: Option<usize>) -> Option<String> {
     if !delivery_target_is_current(target_window) { return None; }
     let (reader, focus) = crate::selection::PasteReader::capture_with_focus();
@@ -2824,7 +2835,7 @@ fn early_tsf_stop_signal_for_session(inner: &Arc<Inner>, session_id: SessionId)
 #[cfg(target_os = "windows")]
 async fn try_early_tsf_append(inner: &Arc<Inner>, session_id: SessionId,
     target_window: Option<usize>, text: &str) -> EarlyTsfOutcome {
-    if std::env::var("LISTENER_EXPERIMENTAL_EARLY_TSF").as_deref() != Ok("1")
+    if !experimental_early_tsf_enabled()
         || pause_early_paste_delivered(inner, session_id)
         || pause_early_terminal_punctuation_only(text) {
         return EarlyTsfOutcome::Unavailable;
@@ -2883,7 +2894,7 @@ fn guarded_terminal_session_current(inner: &Arc<Inner>, session_id: SessionId, f
 async fn try_guarded_tsf_terminal(inner: &Arc<Inner>, session_id: SessionId,
     target_window: Option<usize>, expected: &str, suffix: &str,
     prior_paste: bool, finalizing: bool) -> EarlyTsfOutcome {
-    if std::env::var("LISTENER_EXPERIMENTAL_EARLY_TSF").as_deref() != Ok("1")
+    if !experimental_early_tsf_enabled()
         || prior_paste || expected.is_empty() || !pause_early_terminal_punctuation_only(suffix) {
         return EarlyTsfOutcome::Unavailable;
     }
@@ -3398,7 +3409,7 @@ async fn pause_early_delivery_tick(
     let direct_terminal_confirmed = false;
     #[cfg(target_os = "windows")]
     if pause_early_terminal_punctuation_only(delta) && !direct_terminal_confirmed
-        && std::env::var("LISTENER_EXPERIMENTAL_EARLY_TSF").as_deref() == Ok("1")
+        && experimental_early_tsf_enabled()
         && !early_tsf_session_listening(inner, session_id) {
         pause_early_delivery_rollback(inner, session_id);
         endpoint_clock.lock().settle_text_submission(body_submission, false, None);
@@ -3432,7 +3443,7 @@ async fn pause_early_delivery_tick(
                 EarlyTsfOutcome::Unavailable => {
                     // A stop can arrive during the asynchronous client probe.
                     // Do not start a new paste after finalization has begun.
-                    if std::env::var("LISTENER_EXPERIMENTAL_EARLY_TSF").as_deref() == Ok("1")
+                    if experimental_early_tsf_enabled()
                         && !early_tsf_session_listening(inner, session_id) {
                         pause_early_delivery_rollback(inner, session_id);
                         endpoint_clock.lock().settle_text_submission(body_submission, false, None);
@@ -3546,6 +3557,11 @@ mod reversible_visual_activation_tests {
 #[cfg(all(test, target_os = "windows"))]
 mod guarded_terminal_phase_tests {
     use super::*;
+
+    #[test]
+    fn experimental_direct_input_stays_disabled_until_editor_identity_is_proven() {
+        assert!(!experimental_early_tsf_enabled());
+    }
 
     fn stopped(signal: &crate::windows_ime_ipc::EarlyTsfStopSignal) -> bool {
         use std::os::windows::io::AsRawHandle;
