@@ -15561,10 +15561,11 @@ fn clipboard_failure_notice_does_not_claim_pending_or_superseded_copy_failed() {
 }
 
 #[test]
+#[cfg(target_os = "windows")]
 fn completion_notice_is_readable_without_delaying_quiet_success() {
-    assert_eq!(super::completion_notice_hide_delay(None), super::CAPSULE_SUCCESS_HIDE_DELAY_MS);
-    assert_eq!(super::completion_notice_hide_delay(Some("  ")), super::CAPSULE_SUCCESS_HIDE_DELAY_MS);
-    assert_eq!(super::completion_notice_hide_delay(Some("剪贴板未能更新，完整文字可在历史记录复制")),
+    assert_eq!(super::completion_notice_hide_delay(None, false), super::CAPSULE_SUCCESS_HIDE_DELAY_MS);
+    assert_eq!(super::completion_notice_hide_delay(Some("  "), false), super::CAPSULE_SUCCESS_HIDE_DELAY_MS);
+    assert_eq!(super::completion_notice_hide_delay(Some("剪贴板未能更新，完整文字可在历史记录复制"), false),
         super::CAPSULE_ACTIONABLE_ERROR_HIDE_DELAY_MS);
 }
 

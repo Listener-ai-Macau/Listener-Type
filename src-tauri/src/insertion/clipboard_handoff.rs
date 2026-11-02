@@ -605,6 +605,7 @@ impl PasteReceipt {
         }
         // A focused control may disappear before the five-second deadline.
         // Compare once around the 25th observation as well as at timeout.
+        #[cfg(target_os = "windows")]
         if !self.observation.consumed && self.observation.attempts == 25 {
             self.log_pattern_diagnostic("early");
         }

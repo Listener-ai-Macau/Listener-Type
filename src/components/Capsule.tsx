@@ -432,7 +432,7 @@ function Pill({
       break;
     }
     case 'done':
-      center = message
+      center = os === 'win' && message
         ? <CenterText os={os} kind="error" text={message} color="#9B5100" />
         : <CompletionMark label={t('capsule.inserted')} />;
       break;
