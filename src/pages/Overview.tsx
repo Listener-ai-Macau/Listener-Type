@@ -82,6 +82,8 @@ export function Overview({ showFirstUseGuide = true, onDismissOverview, onOpenPr
   const [embeddedBleProbeMessage, setEmbeddedBleProbeMessage] = useState('');
   const [lastBleRepairResult, setLastBleRepairResult] = useState<EmbeddedBleRepairResult | null>(null);
   const [bleDiagnosticStatus, setBleDiagnosticStatus] = useState<'idle' | 'busy' | 'ok' | 'err'>('idle');
+  const [microphoneSwitchStatus, setMicrophoneSwitchStatus] = useState<'idle' | 'busy' | 'err'>('idle');
+  const microphoneSwitchPending = useRef(false);
   const embeddedBleProbeRunId = useRef(0);
   const [creds, setCreds] = useState<CredentialsStatus>({
     activeAsrProvider: 'volcengine',
@@ -236,15 +238,24 @@ export function Overview({ showFirstUseGuide = true, onDismissOverview, onOpenPr
       console.warn('[overview] open bluetooth settings failed', err);
     });
   }, []);
-  const useMicrophoneInput = useCallback(() => {
-    void updatePrefs(current => ({
-      ...current,
-      dictationInputSource: 'microphone',
-      dictationInputSourceUserOverridden: true,
-    })).catch(err => {
+  const useMicrophoneInput = useCallback(async () => {
+    if (!prefs || microphoneSwitchPending.current) return;
+    microphoneSwitchPending.current = true;
+    setMicrophoneSwitchStatus('busy');
+    try {
+      await updatePrefs(current => ({
+        ...current,
+        dictationInputSource: 'microphone',
+        dictationInputSourceUserOverridden: true,
+      }));
+      setMicrophoneSwitchStatus('idle');
+    } catch (err) {
       console.warn('[overview] switch to microphone failed', err);
-    });
-  }, [updatePrefs]);
+      setMicrophoneSwitchStatus('err');
+    } finally {
+      microphoneSwitchPending.current = false;
+    }
+  }, [prefs, updatePrefs]);
   const runEmbeddedBleProbe = useCallback(async () => {
     if (!embeddedBleSupported || embeddedBleProbeStatus === 'checking') return;
     const runId = embeddedBleProbeRunId.current + 1;
@@ -324,6 +335,9 @@ export function Overview({ showFirstUseGuide = true, onDismissOverview, onOpenPr
           {credsLoaded && !credsError && !creds.asrConfigured && onOpenProvidersSettings && (
             <Btn size="sm" variant="blue" icon="settings" onClick={onOpenProvidersSettings}>{t('overview.firstDictationSetup')}</Btn>
           )}
+          {credsLoaded && !credsError && !creds.asrConfigured && onOpenLocalAsrSettings && detectOS() === 'win' && (
+            <Btn size="sm" variant="ghost" icon="bolt" onClick={onOpenLocalAsrSettings}>{t('overview.quickStartLocal')}</Btn>
+          )}
           {onOpenRecordingSettings && (
             <Btn size="sm" variant="ghost" icon="mic" onClick={onOpenRecordingSettings}>{t('overview.firstDictationInput')}</Btn>
           )}
@@ -389,10 +403,16 @@ export function Overview({ showFirstUseGuide = true, onDismissOverview, onOpenPr
           onProbe={() => void runEmbeddedBleProbe()}
           onRepair={() => void recoverEmbeddedBle()}
           onOpenRecordingSettings={onOpenRecordingSettings}
-          onUseMicrophone={useMicrophoneInput}
+          onUseMicrophone={() => void useMicrophoneInput()}
+          microphoneSwitchDisabled={!prefs || microphoneSwitchStatus === 'busy'}
           onExportDiagnostics={() => void exportBleDiagnostics()}
           diagnosticStatus={bleDiagnosticStatus}
         />
+        {microphoneSwitchStatus === 'err' && (
+          <div role="alert" style={{ marginTop: 8, color: 'var(--ol-err)', fontSize: 12 }}>
+            {t('settings.recording.embeddedBleUseMicrophoneFailed')}
+          </div>
+        )}
       </div>
 
       {/* Quick start guidance when providers aren't configured */}

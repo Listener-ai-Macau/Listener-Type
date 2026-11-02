@@ -829,6 +829,7 @@ export const ko: typeof zhCN = {
       embeddedBleRetry: '다시 시도',
       embeddedBleRepair: '원클릭 복구',
       embeddedBleUseMicrophone: '마이크 사용',
+      embeddedBleUseMicrophoneFailed: '마이크 전환을 저장하지 못했습니다. 다시 시도하거나 녹음 설정에서 현재 입력을 확인하세요.',
       embeddedBlePackets: '{{received}} / {{expected}} 패킷',
       embeddedBleMissing: '{{count}} 누락',
       embeddedBleDuration: '{{seconds}}초',

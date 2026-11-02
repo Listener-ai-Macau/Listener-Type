@@ -873,6 +873,7 @@ export const en: typeof zhCN = {
       embeddedBleRetry: 'Retry',
       embeddedBleRepair: 'One-click repair',
       embeddedBleUseMicrophone: 'Use microphone',
+      embeddedBleUseMicrophoneFailed: 'Could not save the microphone switch. Retry or check the current input in Recording settings.',
       embeddedBlePackets: '{{received}} / {{expected}} packets',
       embeddedBleMissing: '{{count}} missing',
       embeddedBleDuration: '{{seconds}}s',

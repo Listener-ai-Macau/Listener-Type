@@ -14,6 +14,7 @@ export function EmbeddedBleStatusPanel({
   onRepair,
   onOpenRecordingSettings,
   onUseMicrophone,
+  microphoneSwitchDisabled = false,
   onExportDiagnostics,
   diagnosticStatus = 'idle',
 }: {
@@ -23,6 +24,7 @@ export function EmbeddedBleStatusPanel({
   onRepair?: () => void;
   onOpenRecordingSettings?: () => void;
   onUseMicrophone?: () => void;
+  microphoneSwitchDisabled?: boolean;
   onExportDiagnostics?: () => void;
   diagnosticStatus?: DiagnosticExportStatus;
 }) {
@@ -84,7 +86,7 @@ export function EmbeddedBleStatusPanel({
               </Btn>
             )}
             {recovery.showUseMicrophone && onUseMicrophone && (
-              <Btn variant="soft" size="sm" icon="mic" onClick={onUseMicrophone}>
+              <Btn variant="soft" size="sm" icon="mic" disabled={microphoneSwitchDisabled} onClick={onUseMicrophone}>
                 {t('settings.recording.embeddedBleUseMicrophone')}
               </Btn>
             )}

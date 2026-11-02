@@ -871,6 +871,7 @@ export const zhTW: typeof zhCN = {
       embeddedBleRetry: '重試',
       embeddedBleRepair: '一鍵修復',
       embeddedBleUseMicrophone: '改用麥克風',
+      embeddedBleUseMicrophoneFailed: '無法儲存麥克風切換。請重試或開啟錄音設定確認目前輸入。',
       embeddedBlePackets: '{{received}} / {{expected}} 包',
       embeddedBleMissing: '缺失 {{count}}',
       embeddedBleDuration: '{{seconds}} 秒',

@@ -829,6 +829,7 @@ export const ja: typeof zhCN = {
       embeddedBleRetry: '再試行',
       embeddedBleRepair: 'ワンクリック修復',
       embeddedBleUseMicrophone: 'マイクを使用',
+      embeddedBleUseMicrophoneFailed: 'マイクへの切り替えを保存できませんでした。再試行するか、録音設定で現在の入力を確認してください。',
       embeddedBlePackets: '{{received}} / {{expected}} パケット',
       embeddedBleMissing: '欠落 {{count}}',
       embeddedBleDuration: '{{seconds}} 秒',

@@ -869,6 +869,7 @@ export const zhCN = {
       embeddedBleRetry: '重试',
       embeddedBleRepair: '一键修复',
       embeddedBleUseMicrophone: '改用麦克风',
+      embeddedBleUseMicrophoneFailed: '未能保存麦克风切换。请重试或打开录音设置检查当前输入。',
       embeddedBlePackets: '{{received}} / {{expected}} 包',
       embeddedBleMissing: '缺失 {{count}}',
       embeddedBleDuration: '{{seconds}} 秒',
