@@ -5061,6 +5061,14 @@ fn completion_message_with_auth_notice(message: Option<String>, auth_notice: boo
     })
 }
 
+fn completion_notice_hide_delay(message: Option<&str>) -> u64 {
+    if message.is_some_and(|value| !value.trim().is_empty()) {
+        CAPSULE_ACTIONABLE_ERROR_HIDE_DELAY_MS
+    } else {
+        CAPSULE_SUCCESS_HIDE_DELAY_MS
+    }
+}
+
 fn publish_dictation_completion_with_notice(
     inner: &Arc<Inner>,
     session_id: SessionId,
@@ -5078,14 +5086,14 @@ fn publish_dictation_completion_with_notice(
     // Claim a once-per-credential notice only for an admitted completion. A
     // retired task must not consume the warning before a later session shows it.
     let auth_notice = take_auth_notice();
+    let message = completion_message_with_auth_notice(message, auth_notice);
+    let hide_delay = completion_notice_hide_delay(message.as_deref());
     publish_dictation_transition(inner, transition, 0.0,
-        completion_message_with_auth_notice(message, auth_notice), inserted_chars);
+        message, inserted_chars);
     // Presentation duration only: recording, actual insertion, clipboard and
     // endpoint clocks have already settled. The existing idle scheduler yields
     // to a new dictation or QA session.
-    schedule_capsule_idle(inner,
-        if auth_notice { 2_500 } else { CAPSULE_SUCCESS_HIDE_DELAY_MS },
-        Some(session_id));
+    schedule_capsule_idle(inner, hide_delay, Some(session_id));
     true
 }
 

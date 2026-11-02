@@ -432,7 +432,9 @@ function Pill({
       break;
     }
     case 'done':
-      center = <CompletionMark label={t('capsule.inserted')} />;
+      center = message
+        ? <CenterText os={os} kind="error" text={message} color="#9B5100" />
+        : <CompletionMark label={t('capsule.inserted')} />;
       break;
     case 'cancelled':
       center = <CenterText os={os} kind="default" text={t('capsule.cancelled')} />;

@@ -301,7 +301,8 @@ impl WindowsSelectionReader {
     /// text or grants permission to change the clipboard or editor.
     pub(crate) fn compare_fresh_paste_pattern(&self) -> Result<(usize, usize, bool), &'static str> {
         let check_current = || match self.current_observation() {
-            Ok(true) => Ok(()), Ok(false) => Err("not_current"), Err(_) => Err("unavailable"),
+            Ok(true) => Ok(()), Ok(false) => Err(self.paste_diagnostic_not_current_reason()),
+            Err(_) => Err("unavailable"),
         };
         check_current()?;
         let cached = self.bounded_document().map_err(|_| "unavailable")?;
@@ -313,6 +314,30 @@ impl WindowsSelectionReader {
         if fresh.chars().count() > 8_192 { return Err("unavailable"); }
         check_current()?;
         Ok((cached.chars().count(), fresh.chars().count(), cached == fresh))
+    }
+
+    /// A best-effort diagnosis after an identity check has already failed.
+    /// These observations never authorize a paste or a clipboard write.
+    fn paste_diagnostic_not_current_reason(&self) -> &'static str {
+        unsafe {
+            if GetForegroundWindow().0 as usize != self.target_hwnd { return "foreground_changed"; }
+            let Ok(focused) = self.automation.GetFocusedElement() else { return "other_or_unavailable"; };
+            match self.automation.CompareElements(&self.focused, &focused) {
+                Ok(same) if !same.as_bool() => return "element_changed",
+                Err(_) => return "other_or_unavailable",
+                _ => {}
+            }
+            match self.focused.CurrentHasKeyboardFocus() {
+                Ok(focus) if !focus.as_bool() => return "focus_lost",
+                Err(_) => return "other_or_unavailable",
+                _ => {}
+            }
+            match self.focused.CurrentIsEnabled() {
+                Ok(enabled) if !enabled.as_bool() => return "disabled",
+                _ => {}
+            }
+        }
+        "other_or_unavailable"
     }
 
     /// Independent same-control value readback for paste receipt only. It does

@@ -519,17 +519,21 @@ impl PasteReceipt {
                 before.chars().count(), after.as_ref().map(|value| value.chars().count()),
                 after.as_ref().map(|value| value == before));
         }
-        // Diagnosis only: the comparison never constitutes a paste receipt.
-        // It happens once on timeout, uses the same current native element,
-        // and logs no editor content, window identity, or session identifier.
-        match self.reader.as_ref().ok_or("unavailable").and_then(|reader| reader.compare_fresh_paste_pattern()) {
-            Ok((cached, fresh, equal)) => log::info!("[insertion] paste pattern diagnostic status=compared cached_chars={cached} fresh_chars={fresh} equal={equal}"),
-            Err(status) => log::info!("[insertion] paste pattern diagnostic status={status}"),
-        }
+        self.log_pattern_diagnostic("timeout");
         self.complete(observed_at, PasteReceiptOutcome::TimedOut);
         self.reader = None;
         self.before = None;
         true
+    }
+
+    // Same-current-control diagnostics only; never a consumption receipt.
+    // No content, window identity, or session identifier is logged.
+    fn log_pattern_diagnostic(&self, stage: &'static str) {
+        match self.reader.as_ref().ok_or("unavailable").and_then(|reader| reader.compare_fresh_paste_pattern()) {
+            Ok((cached, fresh, equal)) => log::info!("[insertion] paste pattern diagnostic stage={stage} status=compared cached_chars={cached} fresh_chars={fresh} equal={equal}"),
+            Err("unavailable") => log::info!("[insertion] paste pattern diagnostic stage={stage} status=unavailable"),
+            Err(reason) => log::info!("[insertion] paste pattern diagnostic stage={stage} status=not_current reason={reason}"),
+        }
     }
 
     fn observe_session_document(&mut self, after: &str, caret_at_end: Option<bool>) {
@@ -598,6 +602,11 @@ impl PasteReceipt {
                 self.observation.attempts += 1;
                 self.observation.read_failed = true;
             }
+        }
+        // A focused control may disappear before the five-second deadline.
+        // Compare once around the 25th observation as well as at timeout.
+        if !self.observation.consumed && self.observation.attempts == 25 {
+            self.log_pattern_diagnostic("early");
         }
         if self.observation.consumed {
             let observed_at = Instant::now();
