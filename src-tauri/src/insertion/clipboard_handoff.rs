@@ -519,6 +519,13 @@ impl PasteReceipt {
                 before.chars().count(), after.as_ref().map(|value| value.chars().count()),
                 after.as_ref().map(|value| value == before));
         }
+        // Diagnosis only: the comparison never constitutes a paste receipt.
+        // It happens once on timeout, uses the same current native element,
+        // and logs no editor content, window identity, or session identifier.
+        match self.reader.as_ref().ok_or("unavailable").and_then(|reader| reader.compare_fresh_paste_pattern()) {
+            Ok((cached, fresh, equal)) => log::info!("[insertion] paste pattern diagnostic status=compared cached_chars={cached} fresh_chars={fresh} equal={equal}"),
+            Err(status) => log::info!("[insertion] paste pattern diagnostic status={status}"),
+        }
         self.complete(observed_at, PasteReceiptOutcome::TimedOut);
         self.reader = None;
         self.before = None;

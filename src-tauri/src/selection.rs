@@ -371,6 +371,13 @@ impl PasteReader {
         { Err("independent paste value unavailable".into()) }
     }
 
+    pub(crate) fn compare_fresh_paste_pattern(&self) -> Result<(usize, usize, bool), &'static str> {
+        #[cfg(target_os = "windows")]
+        { self.reader.compare_fresh_paste_pattern() }
+        #[cfg(not(target_os = "windows"))]
+        { Err("unavailable") }
+    }
+
     pub(crate) fn expected_document_after_paste(&self, before: &(String, String), payload: &str) -> Result<String, String> {
         #[cfg(target_os = "windows")]
         { self.reader.expected_document_after_paste(before, payload) }

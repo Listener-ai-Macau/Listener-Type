@@ -296,6 +296,25 @@ impl WindowsSelectionReader {
         Ok(value)
     }
 
+    /// Compare the held and freshly obtained text patterns for the same still
+    /// focused element. Used only on an unconfirmed receipt; never exposes
+    /// text or grants permission to change the clipboard or editor.
+    pub(crate) fn compare_fresh_paste_pattern(&self) -> Result<(usize, usize, bool), &'static str> {
+        let check_current = || match self.current_observation() {
+            Ok(true) => Ok(()), Ok(false) => Err("not_current"), Err(_) => Err("unavailable"),
+        };
+        check_current()?;
+        let cached = self.bounded_document().map_err(|_| "unavailable")?;
+        let pattern: IUIAutomationTextPattern = unsafe { self.focused.GetCurrentPatternAs(UIA_TextPatternId) }.map_err(|_| "unavailable")?;
+        let range = unsafe { pattern.DocumentRange() }.map_err(|_| "unavailable")?;
+        let fresh = if unsafe { range.CompareEndpoints(TextPatternRangeEndpoint_Start, &range, TextPatternRangeEndpoint_End) }.map_err(|_| "unavailable")? == 0 {
+            String::new()
+        } else { unsafe { range.GetText(8_193) }.map_err(|_| "unavailable")?.to_string() };
+        if fresh.chars().count() > 8_192 { return Err("unavailable"); }
+        check_current()?;
+        Ok((cached.chars().count(), fresh.chars().count(), cached == fresh))
+    }
+
     /// Independent same-control value readback for paste receipt only. It does
     /// not grant permission to select or replace a session's editor range.
     pub(crate) fn paste_value(&self) -> Result<String, String> {
