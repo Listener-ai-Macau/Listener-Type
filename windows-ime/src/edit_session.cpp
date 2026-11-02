@@ -1,5 +1,6 @@
 #include "edit_session.h"
 #include "focus_context_guard.h"
+#include "terminal_tail_guard.h"
 
 #include <utility>
 
@@ -29,13 +30,15 @@ ListenerTypeEditSession::ListenerTypeEditSession(
     ListenerTypeCompositionOp op,
     ITfComposition** composition_slot,
     std::shared_ptr<ListenerTypeAsyncEditState> async_state,
-    ITfThreadMgr* focus_guard)
+    ITfThreadMgr* focus_guard,
+    std::wstring expected_body)
     : context_(context),
       text_(std::move(text)),
       op_(op),
       composition_slot_(composition_slot),
       async_state_(std::move(async_state)),
-      focus_guard_(focus_guard) {
+      focus_guard_(focus_guard),
+      expected_body_(std::move(expected_body)) {
   // TSF may hold an asynchronous edit after the text service deactivates.
   // Keep DllCanUnloadNow false until the edit session's last reference ends.
   InterlockedIncrement(&g_object_count);
@@ -92,6 +95,19 @@ STDMETHODIMP ListenerTypeEditSession::DoEditSession(TfEditCookie edit_cookie) {
       hr = ListenerFocusedContextIs(focus_guard_, context_)
                ? InsertText(edit_cookie) : HRESULT_FROM_WIN32(ERROR_CANCELLED);
       break;
+    case ListenerTypeCompositionOp::kInsertGuardedTerminal: {
+      if (!ListenerFocusedContextIs(focus_guard_, context_)) {
+        hr = HRESULT_FROM_WIN32(ERROR_CANCELLED);
+        break;
+      }
+      const auto already = ListenerInspectTerminalTail(context_, edit_cookie, expected_body_ + text_);
+      if (already == ListenerTerminalTail::kMatches) { hr = S_FALSE; break; }
+      if (already == ListenerTerminalTail::kUnavailable) { hr = E_FAIL; break; }
+      const auto before = ListenerInspectTerminalTail(context_, edit_cookie, expected_body_);
+      hr = before == ListenerTerminalTail::kMatches && ListenerFocusedContextIs(focus_guard_, context_)
+               ? InsertText(edit_cookie) : HRESULT_FROM_WIN32(ERROR_CANCELLED);
+      break;
+    }
     case ListenerTypeCompositionOp::kStreamUpdate:
     case ListenerTypeCompositionOp::kStreamCommit:
     case ListenerTypeCompositionOp::kStreamCancel:
@@ -150,15 +166,18 @@ HRESULT ListenerTypeEditSession::InsertText(TfEditCookie edit_cookie) {
           // The text may already be present. Report an uncertain outcome for
           // guarded streaming rather than claim success and risk writing the
           // next segment at a stale or selected position.
-          if (op_ == ListenerTypeCompositionOp::kInsertGuarded && FAILED(selection_hr)) {
+          if ((op_ == ListenerTypeCompositionOp::kInsertGuarded ||
+               op_ == ListenerTypeCompositionOp::kInsertGuardedTerminal) && FAILED(selection_hr)) {
             hr = selection_hr;
           }
-        } else if (op_ == ListenerTypeCompositionOp::kInsertGuarded) {
+        } else if (op_ == ListenerTypeCompositionOp::kInsertGuarded ||
+                   op_ == ListenerTypeCompositionOp::kInsertGuardedTerminal) {
           hr = collapse_hr;
         }
       }
       committed_range->Release();
-    } else if (SUCCEEDED(hr) && op_ == ListenerTypeCompositionOp::kInsertGuarded) {
+    } else if (SUCCEEDED(hr) && (op_ == ListenerTypeCompositionOp::kInsertGuarded ||
+                                 op_ == ListenerTypeCompositionOp::kInsertGuardedTerminal)) {
       hr = E_UNEXPECTED;  // Insert may have happened, but its caret is unknown.
     }
   }

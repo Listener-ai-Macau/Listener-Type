@@ -4568,6 +4568,42 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         // finalizing. Only a fresh editor witness can authorize this suffix;
         // the historical paste receipt still belongs to clipboard closeout.
         execute_delivery_submission(delivery_request.clone(), |_| async {
+        #[cfg(target_os = "windows")]
+        {
+            let target = current_delivery_target();
+            match try_guarded_tsf_terminal(inner, current_session_id, target, expected, &insert_text,
+                pause_early_paste, true).await {
+                EarlyTsfOutcome::Confirmed => {
+                    return DeliverySubmission {
+                        status: InsertStatus::Inserted,
+                        target_confirmed: true,
+                        route: DeliveryRoute::Tsf,
+                        submitted_text: Some(insert_text.clone()),
+                    };
+                },
+                EarlyTsfOutcome::Unconfirmed => {
+                    // The suffix may arrive late. Never follow it with a
+                    // clipboard paste, and report possible incomplete delivery.
+                    terminal_suffix_skipped = true;
+                    return DeliverySubmission {
+                        status: InsertStatus::SubmittedUnconfirmed,
+                        target_confirmed: false,
+                        route: DeliveryRoute::Tsf,
+                        submitted_text: None,
+                    };
+                },
+                EarlyTsfOutcome::Cancelled => {
+                    terminal_suffix_skipped = true;
+                    return DeliverySubmission {
+                        status: InsertStatus::Inserted,
+                        target_confirmed: false,
+                        route: DeliveryRoute::Tsf,
+                        submitted_text: None,
+                    };
+                },
+                EarlyTsfOutcome::Unavailable => {},
+            }
+        }
         let result = inner.inserter.insert_terminal_suffix_scoped(current_session_id, expected, &insert_text, restore_clipboard, paste_shortcut);
         let status = match result {
             Ok(status) => status,

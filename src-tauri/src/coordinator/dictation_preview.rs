@@ -2813,6 +2813,61 @@ async fn try_early_tsf_append(inner: &Arc<Inner>, session_id: SessionId,
     }
 }
 
+/// Only a TSF edit lock can authorize a punctuation-only append when the
+/// regular accessibility reader cannot inspect the editor. This remains
+/// experimental and never borrows a prior clipboard paste's permission.
+#[cfg(target_os = "windows")]
+fn guarded_terminal_session_current(inner: &Arc<Inner>, session_id: SessionId, finalizing: bool) -> bool {
+    let state = inner.state.lock();
+    state.session_id == session_id && !state.cancelled &&
+        if finalizing { state.phase == SessionPhase::Processing } else { state.phase == SessionPhase::Listening }
+}
+
+#[cfg(target_os = "windows")]
+async fn try_guarded_tsf_terminal(inner: &Arc<Inner>, session_id: SessionId,
+    target_window: Option<usize>, expected: &str, suffix: &str,
+    prior_paste: bool, finalizing: bool) -> EarlyTsfOutcome {
+    if std::env::var("LISTENER_EXPERIMENTAL_EARLY_TSF").as_deref() != Ok("1")
+        || prior_paste || expected.is_empty() || !pause_early_terminal_punctuation_only(suffix) {
+        return EarlyTsfOutcome::Unavailable;
+    }
+    let prepared = inner.prepared_windows_ime_session.lock().iter()
+        .find(|slot| slot.session_id == session_id).map(|slot| slot.prepared.clone());
+    let Some(prepared) = prepared.filter(|value| value.is_ready_for_tsf_submit()) else {
+        return EarlyTsfOutcome::Unavailable;
+    };
+    let focus = {
+        let (reader, focus) = crate::selection::PasteReader::capture_with_focus();
+        drop(reader);
+        focus
+    };
+    if focus != crate::selection::FocusedInputState::Editable
+        || !delivery_target_is_current(target_window) {
+        return EarlyTsfOutcome::Unavailable;
+    }
+    let Some(target) = capture_ime_submit_target_for_window(target_window) else {
+        return EarlyTsfOutcome::Unavailable;
+    };
+    let guard_inner = Arc::clone(inner);
+    let request = crate::windows_ime_ipc::ImeSubmitRequest {
+        session_id: session_id.to_string(), text: suffix.to_owned(),
+        created_at: chrono::Utc::now().to_rfc3339(), target: Some(target),
+    };
+    let result = inner.windows_ime.submit_terminal_prepared_exact(&prepared, request, expected.to_owned(), move || {
+        guarded_terminal_session_current(&guard_inner, session_id, finalizing)
+            && delivery_target_is_current(target_window)
+            && capture_ime_submit_target_for_window(target_window) == Some(target)
+    }).await;
+    match result {
+        Ok(InsertStatus::Inserted) => EarlyTsfOutcome::Confirmed,
+        Ok(InsertStatus::SubmittedUnconfirmed)
+        | Err(crate::windows_ime_session::WindowsImeSessionError::Unconfirmed(_)) => EarlyTsfOutcome::Unconfirmed,
+        Err(crate::windows_ime_session::WindowsImeSessionError::NotDispatched) => EarlyTsfOutcome::Cancelled,
+        _ if !guarded_terminal_session_current(inner, session_id, finalizing) => EarlyTsfOutcome::Cancelled,
+        _ => EarlyTsfOutcome::Unavailable,
+    }
+}
+
 /// 本会话是否确实上屏过停顿落屏文本（跨回滚粘滞）。终稿交付的硬底线。
 pub(super) fn pause_early_ever_delivered(inner: &Arc<Inner>, session_id: SessionId) -> bool {
     let ledger = inner.embedded_audio_pause_early_delivery.lock();
@@ -3263,7 +3318,25 @@ async fn pause_early_delivery_tick(
     // 落屏的却是恢复后的旧剪贴板)。会话内剪贴板暂存听写增量无碍;终稿
     // 交付仍按用户偏好恢复,那才是剪贴板所有权归还的正当时机。
     let restore_clipboard = false;
-    let terminal_status = if pause_early_terminal_punctuation_only(delta) {
+    #[cfg(target_os = "windows")]
+    let direct_terminal = if pause_early_terminal_punctuation_only(delta) {
+        try_guarded_tsf_terminal(inner, session_id, delivery_target, &delivered_display, delta,
+            pause_early_paste_delivered(inner, session_id), false).await
+    } else { EarlyTsfOutcome::Unavailable };
+    #[cfg(target_os = "windows")]
+    if matches!(direct_terminal, EarlyTsfOutcome::Cancelled | EarlyTsfOutcome::Unconfirmed) {
+        if matches!(direct_terminal, EarlyTsfOutcome::Unconfirmed) {
+            guard_unconfirmed_early_tsf(inner, session_id);
+        }
+        pause_early_delivery_rollback(inner, session_id);
+        endpoint_clock.lock().settle_text_submission(body_submission, false, None);
+        return;
+    }
+    #[cfg(target_os = "windows")]
+    let direct_terminal_confirmed = matches!(direct_terminal, EarlyTsfOutcome::Confirmed);
+    #[cfg(not(target_os = "windows"))]
+    let direct_terminal_confirmed = false;
+    let terminal_status = if pause_early_terminal_punctuation_only(delta) && !direct_terminal_confirmed {
         match inner.inserter.insert_session_terminal_suffix(session_id, &delivered_display, delta, prefs.paste_shortcut) {
             Ok(status) => Some(status),
             Err(crate::insertion::TerminalAppendDecision::AlreadyPresent) => Some(InsertStatus::Inserted),
@@ -3281,7 +3354,9 @@ async fn pause_early_delivery_tick(
     };
     #[cfg(target_os = "windows")]
     let (status, route, receipt) = {
-        if let Some(status) = terminal_status {
+        if direct_terminal_confirmed {
+            (InsertStatus::Inserted, DeliveryRoute::Tsf, None)
+        } else if let Some(status) = terminal_status {
             (status, DeliveryRoute::Paste, None)
         } else {
             match try_early_tsf_append(inner, session_id, delivery_target, delta).await {

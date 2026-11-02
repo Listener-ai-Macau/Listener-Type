@@ -33,6 +33,8 @@ class ListenerTypeTextService final : public ITfTextInputProcessorEx {
   HRESULT BindDirectTargetFromPipe(const std::wstring& token, bool* definitely_not_dispatched);
   HRESULT SubmitGuardedFromPipe(const std::wstring& token, const std::wstring& text,
                                 bool* definitely_not_dispatched);
+  HRESULT SubmitTerminalFromPipe(const std::wstring& token, const std::wstring& text,
+                                 const std::wstring& expected_body, bool* definitely_not_dispatched);
   // 组字流式(2026-09-22 讯飞式):update 原地替换组字内容;commit 终稿落定;
   // cancel 清空。会话切换时旧组字先 cancel。
   HRESULT StreamCompositionFromPipe(const std::wstring& session_id,
@@ -48,11 +50,13 @@ class ListenerTypeTextService final : public ITfTextInputProcessorEx {
   HRESULT SubmitEditOnOwnerThread(const std::wstring& session_id,
                                   const std::wstring& text,
                                   ListenerTypeCompositionOp op,
-                                  bool* definitely_not_dispatched);
+                                  bool* definitely_not_dispatched,
+                                  const std::wstring& expected_body = {});
   HRESULT CommitTextOnOwnerThread(
       const std::wstring& session_id,
       const std::wstring& text,
       ListenerTypeCompositionOp op,
+      const std::wstring& expected_body,
       std::shared_ptr<ListenerTypeAsyncEditState>* async_completion,
       bool* wait_for_async_completion,
       bool* edit_requested);

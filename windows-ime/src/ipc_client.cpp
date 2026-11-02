@@ -1,6 +1,7 @@
 #include "ipc_client.h"
 
 #include <cstdint>
+#include <cwctype>
 #include <string>
 
 #include "text_service.h"
@@ -15,12 +16,29 @@ struct SubmitMessage {
   std::wstring type;
   std::wstring session_id;
   std::wstring text;
+  std::wstring expected_body;
   int protocol_version = 0;
   bool has_type = false;
   bool has_session_id = false;
   bool has_text = false;
+  bool has_expected_body = false;
   bool has_protocol_version = false;
 };
+
+bool IsTerminalSuffix(const std::wstring& text) {
+  bool terminal = false;
+  for (const wchar_t ch : text) {
+    switch (ch) {
+      case L'。': case L'.': case L'！': case L'!': case L'？': case L'?': case L'…':
+        terminal = true; break;
+      case L'”': case L'’': case L'"': case L'\'': case L'）': case L')': case L'】': case L']':
+        break;
+      default:
+        if (!std::iswspace(ch) && ch != L'\u3000') return false;
+    }
+  }
+  return terminal;
+}
 
 std::wstring HResultErrorCode(HRESULT hr) {
   constexpr wchar_t kHexDigits[] = L"0123456789ABCDEF";
@@ -269,6 +287,9 @@ bool ParseSubmitMessage(const std::string& json, SubmitMessage* message) {
       if (!message->has_text) {
         return false;
       }
+    } else if (key == L"expectedBody") {
+      message->has_expected_body = ParseJsonString(json, &pos, &message->expected_body);
+      if (!message->has_expected_body) return false;
     } else if (key == L"protocolVersion") {
       message->has_protocol_version =
           ParseJsonInteger(json, &pos, &message->protocol_version);
@@ -476,7 +497,13 @@ void ListenerTypePipeServer::HandleSubmitLine(HANDLE pipe, const std::string& li
   // 组字流式(2026-09-22):streamUpdate=原地替换组字内容;streamCommit=终稿
   // 落定;streamCancel=清空。submitText=既有一次性插入,行为不变。
   ListenerTypeCompositionOp op;
-  if (message.type == L"submitGuarded") {
+  if (message.type == L"submitTerminal") {
+    if (!message.has_expected_body || message.expected_body.empty() || !IsTerminalSuffix(message.text)) {
+      WriteResult(pipe, message.session_id, L"failed", L"protocolError");
+      return;
+    }
+    op = ListenerTypeCompositionOp::kInsertGuardedTerminal;
+  } else if (message.type == L"submitGuarded") {
     op = ListenerTypeCompositionOp::kInsertGuarded;
   } else if (message.type == L"submitText") {
     op = ListenerTypeCompositionOp::kInsertOnce;
@@ -492,7 +519,10 @@ void ListenerTypePipeServer::HandleSubmitLine(HANDLE pipe, const std::string& li
   }
 
   bool definitely_not_dispatched = true;
-  const HRESULT hr = op == ListenerTypeCompositionOp::kInsertGuarded
+  const HRESULT hr = op == ListenerTypeCompositionOp::kInsertGuardedTerminal
+                         ? service_->SubmitTerminalFromPipe(message.session_id, message.text,
+                                                           message.expected_body, &definitely_not_dispatched)
+                     : op == ListenerTypeCompositionOp::kInsertGuarded
                          ? service_->SubmitGuardedFromPipe(message.session_id, message.text,
                                                           &definitely_not_dispatched)
                      : op == ListenerTypeCompositionOp::kInsertOnce
@@ -505,7 +535,8 @@ void ListenerTypePipeServer::HandleSubmitLine(HANDLE pipe, const std::string& li
   if (SUCCEEDED(hr)) {
     WriteResult(pipe, message.session_id, L"committed", nullptr);
   } else {
-    if (op == ListenerTypeCompositionOp::kInsertGuarded && definitely_not_dispatched &&
+    if ((op == ListenerTypeCompositionOp::kInsertGuarded ||
+         op == ListenerTypeCompositionOp::kInsertGuardedTerminal) && definitely_not_dispatched &&
         hr == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
       WriteResult(pipe, message.session_id, L"failed", L"guardMismatch");
       return;

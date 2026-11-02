@@ -208,6 +208,22 @@ impl WindowsImeSessionController {
         Ok(map_ime_status_to_insert_status(status))
     }
 
+    #[cfg(target_os = "windows")]
+    pub async fn submit_terminal_prepared_exact(
+        &self,
+        prepared: &PreparedWindowsImeSession,
+        request: ImeSubmitRequest,
+        expected_body: String,
+        before_write: impl FnOnce() -> bool + Send,
+    ) -> Result<InsertStatus, WindowsImeSessionError> {
+        if !prepared.is_ready_for_tsf_submit() {
+            return Err(WindowsImeSessionError::NotDispatched);
+        }
+        let status = self.ipc.submit_terminal_exact(request, expected_body, before_write).await
+            .map_err(session_ipc_error)?;
+        Ok(map_ime_status_to_insert_status(status))
+    }
+
     /// 组字流式(2026-09-22 讯飞式):三个操作共用 prepared session 闸门与
     /// 回退语义。Cancel 允许在 session 不活跃时静默成功(清场是尽力而为)。
     pub async fn stream_prepared(

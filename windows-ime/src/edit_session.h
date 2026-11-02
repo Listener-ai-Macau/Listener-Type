@@ -28,6 +28,7 @@ enum class ListenerTypeCompositionOp {
   kInsertOnce,
   kBindDirectTarget,
   kInsertGuarded,
+  kInsertGuardedTerminal,
   kStreamUpdate,
   kStreamCommit,
   kStreamCancel,
@@ -41,7 +42,8 @@ class ListenerTypeEditSession final : public ITfEditSession {
       ListenerTypeCompositionOp op = ListenerTypeCompositionOp::kInsertOnce,
       ITfComposition** composition_slot = nullptr,
       std::shared_ptr<ListenerTypeAsyncEditState> async_state = nullptr,
-      ITfThreadMgr* focus_guard = nullptr);
+      ITfThreadMgr* focus_guard = nullptr,
+      std::wstring expected_body = {});
   ListenerTypeEditSession(const ListenerTypeEditSession&) = delete;
   ListenerTypeEditSession& operator=(const ListenerTypeEditSession&) = delete;
   ~ListenerTypeEditSession();
@@ -64,4 +66,5 @@ class ListenerTypeEditSession final : public ITfEditSession {
   ITfComposition** composition_slot_ = nullptr;
   std::shared_ptr<ListenerTypeAsyncEditState> async_state_;
   ITfThreadMgr* focus_guard_ = nullptr;
+  std::wstring expected_body_;
 };

@@ -194,6 +194,16 @@ impl WindowsImeIpcServer {
         windows_pipe::submit_text_exact_over_pipe(request, before_write).await
     }
 
+    #[cfg(target_os = "windows")]
+    pub async fn submit_terminal_exact(
+        &self,
+        request: ImeSubmitRequest,
+        expected_body: String,
+        before_write: impl FnOnce() -> bool + Send,
+    ) -> WindowsImeIpcResult<ImeSubmitStatus> {
+        windows_pipe::submit_guarded_exact_over_pipe(request, Some(expected_body), before_write).await
+    }
+
     pub async fn submit_stream_op(
         &self,
         op: ImeStreamOp,
@@ -280,7 +290,20 @@ mod windows_pipe {
         request: ImeSubmitRequest,
         before_write: impl FnOnce() -> bool + Send,
     ) -> WindowsImeIpcResult<crate::windows_ime_protocol::ImeSubmitStatus> {
+        submit_guarded_exact_over_pipe(request, None, before_write).await
+    }
+
+    pub async fn submit_guarded_exact_over_pipe(
+        request: ImeSubmitRequest,
+        expected_body: Option<String>,
+        before_write: impl FnOnce() -> bool + Send,
+    ) -> WindowsImeIpcResult<crate::windows_ime_protocol::ImeSubmitStatus> {
         let ImeSubmitRequest { session_id: _, text, created_at, target } = request;
+        if let Some(expected) = expected_body.as_ref() {
+            if expected.is_empty() || !crate::transcript_boundary::terminal_punctuation_only(&text) {
+                return Err(WindowsImeIpcError::NotDispatched);
+            }
+        }
         let target = target.ok_or(WindowsImeIpcError::NoReadyClient)?;
         // A unique token prevents a delayed or concurrent bind from ever
         // authorizing another request to a different context.
@@ -296,9 +319,15 @@ mod windows_pipe {
             Ok(Ok(crate::windows_ime_protocol::ImeSubmitStatus::Committed)) => {},
             _ => return Err(WindowsImeIpcError::NoReadyClient),
         }
-        let message = ImePipeMessage::SubmitGuarded {
-            protocol_version: LISTENER_TYPE_IME_PROTOCOL_VERSION,
-            session_id: token, text, created_at,
+        let message = match expected_body {
+            Some(expected_body) => ImePipeMessage::SubmitTerminal {
+                protocol_version: LISTENER_TYPE_IME_PROTOCOL_VERSION,
+                session_id: token, text, expected_body, created_at,
+            },
+            None => ImePipeMessage::SubmitGuarded {
+                protocol_version: LISTENER_TYPE_IME_PROTOCOL_VERSION,
+                session_id: token, text, created_at,
+            },
         };
         submit_message_over_pipe(message, Some(target), true, before_write).await
     }
@@ -347,6 +376,7 @@ mod windows_pipe {
             ImePipeMessage::SubmitText { session_id, .. }
             | ImePipeMessage::BindDirect { session_id, .. }
             | ImePipeMessage::SubmitGuarded { session_id, .. }
+            | ImePipeMessage::SubmitTerminal { session_id, .. }
             | ImePipeMessage::StreamUpdate { session_id, .. }
             | ImePipeMessage::StreamCommit { session_id, .. }
             | ImePipeMessage::StreamCancel { session_id, .. } => session_id.clone(),
@@ -753,6 +783,18 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[tokio::test]
+    async fn guarded_terminal_rejects_non_punctuation_before_contacting_target() {
+        let request = ImeSubmitRequest {
+            session_id: "test".into(), text: "not punctuation".into(), created_at: "test".into(),
+            target: Some(ImeSubmitTarget { process_id: std::process::id(), thread_id: 4_000_000_007 }),
+        };
+        let result = WindowsImeIpcServer::new().submit_terminal_exact(request, "synthetic".into(),
+            || panic!("invalid suffix must not contact the target")).await;
+        assert!(matches!(result, Err(WindowsImeIpcError::NotDispatched)));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[tokio::test]
     #[ignore = "requires an isolated station and a dedicated synthetic TSF host"]
     async fn exact_streaming_submits_two_segments_to_private_native_tsf() {
         use std::ffi::c_void;
@@ -776,11 +818,18 @@ mod tests {
         let origin = inserter.clipboard_retention_ticket();
         let sequence_before = unsafe { windows::Win32::System::DataExchange::GetClipboardSequenceNumber() };
         let server = WindowsImeIpcServer::new();
-        for text in ["合成 test 𝄞", " 第二段。"] {
+        for text in ["合成 test 𝄞", " 第二段"] {
             let result = server.submit_text_exact(ImeSubmitRequest {
                 session_id: "private-synthetic".into(), text: text.into(), created_at: "test".into(),
                 target: Some(ImeSubmitTarget { process_id, thread_id }),
             }, || true).await;
+            assert_eq!(result.unwrap(), ImeSubmitStatus::Committed);
+        }
+        for _ in 0..2 {
+            let result = server.submit_terminal_exact(ImeSubmitRequest {
+                session_id: "private-synthetic".into(), text: "。".into(), created_at: "test".into(),
+                target: Some(ImeSubmitTarget { process_id, thread_id }),
+            }, "合成 test 𝄞 第二段".into(), || true).await;
             assert_eq!(result.unwrap(), ImeSubmitStatus::Committed);
         }
         let sequence_after = unsafe { windows::Win32::System::DataExchange::GetClipboardSequenceNumber() };

@@ -69,6 +69,14 @@ pub enum ImePipeMessage {
         text: String,
         created_at: String,
     },
+    /// Append a terminal suffix only while the delivered body and caret match.
+    SubmitTerminal {
+        protocol_version: u32,
+        session_id: String,
+        text: String,
+        expected_body: String,
+        created_at: String,
+    },
     /// 组字流式(2026-09-22 讯飞式):原地替换目标窗口里的下划线组字内容。
     StreamUpdate {
         protocol_version: u32,

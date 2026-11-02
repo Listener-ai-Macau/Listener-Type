@@ -158,6 +158,7 @@
     <ClInclude Include="src\pending_request_registry.h" />
     <ClInclude Include="src\registry.h" />
     <ClInclude Include="src\text_service.h" />
+    <ClInclude Include="src\terminal_tail_guard.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="src\resource.rc" />
