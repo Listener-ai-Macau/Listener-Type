@@ -3,6 +3,7 @@
 #include <msctf.h>
 #include <atomic>
 #include <memory>
+#include <optional>
 #include <string>
 #include <windows.h>
 
@@ -58,7 +59,8 @@ class ListenerTypeEditSession final : public ITfEditSession {
       ITfThreadMgr* focus_guard = nullptr,
       std::wstring expected_body = {},
       HWND expected_foreground = nullptr,
-      std::shared_ptr<ListenerTypeStopSignal> stop_signal = nullptr);
+      std::shared_ptr<ListenerTypeStopSignal> stop_signal = nullptr,
+      std::optional<std::wstring> expected_document = std::nullopt);
   ListenerTypeEditSession(const ListenerTypeEditSession&) = delete;
   ListenerTypeEditSession& operator=(const ListenerTypeEditSession&) = delete;
   ~ListenerTypeEditSession();
@@ -85,4 +87,5 @@ class ListenerTypeEditSession final : public ITfEditSession {
   std::wstring expected_body_;
   HWND expected_foreground_ = nullptr;
   std::shared_ptr<ListenerTypeStopSignal> stop_signal_;
+  std::optional<std::wstring> expected_document_;
 };

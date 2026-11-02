@@ -17,11 +17,13 @@ struct SubmitMessage {
   std::wstring session_id;
   std::wstring text;
   std::wstring expected_body;
+  std::wstring expected_document;
   int protocol_version = 0;
   bool has_type = false;
   bool has_session_id = false;
   bool has_text = false;
   bool has_expected_body = false;
+  bool has_expected_document = false;
   bool has_protocol_version = false;
 };
 
@@ -290,6 +292,9 @@ bool ParseSubmitMessage(const std::string& json, SubmitMessage* message) {
     } else if (key == L"expectedBody") {
       message->has_expected_body = ParseJsonString(json, &pos, &message->expected_body);
       if (!message->has_expected_body) return false;
+    } else if (key == L"expectedDocument") {
+      message->has_expected_document = ParseJsonString(json, &pos, &message->expected_document);
+      if (!message->has_expected_document) return false;
     } else if (key == L"protocolVersion") {
       message->has_protocol_version =
           ParseJsonInteger(json, &pos, &message->protocol_version);
@@ -487,7 +492,7 @@ void ListenerTypePipeServer::HandleSubmitLine(HANDLE pipe, const std::string& li
 
   if (message.type == L"probeForegroundGuard") {
     if (!message.text.empty()) { WriteResult(pipe, message.session_id, L"failed", L"protocolError"); return; }
-    WriteResult(pipe, message.session_id, L"failed", L"foregroundStopGuardVersion2");
+    WriteResult(pipe, message.session_id, L"failed", L"foregroundDocumentGuardVersion3");
     return;
   }
 
@@ -505,6 +510,13 @@ void ListenerTypePipeServer::HandleSubmitLine(HANDLE pipe, const std::string& li
   // 组字流式(2026-09-22):streamUpdate=原地替换组字内容;streamCommit=终稿
   // 落定;streamCancel=清空。submitText=既有一次性插入,行为不变。
   ListenerTypeCompositionOp op;
+  if ((message.type == L"submitTerminal" || message.type == L"submitGuarded") &&
+      message.session_id.rfind(L"fg:", 0) == 0 && !message.has_expected_document) {
+    WriteResult(pipe, message.session_id, L"failed", L"protocolError");
+    return;
+  }
+  const std::optional<std::wstring> expected_document = message.has_expected_document
+      ? std::make_optional(message.expected_document) : std::nullopt;
   if (message.type == L"submitTerminal") {
     if (!message.has_expected_body || message.expected_body.empty() || !IsTerminalSuffix(message.text)) {
       WriteResult(pipe, message.session_id, L"failed", L"protocolError");
@@ -529,10 +541,10 @@ void ListenerTypePipeServer::HandleSubmitLine(HANDLE pipe, const std::string& li
   bool definitely_not_dispatched = true;
   const HRESULT hr = op == ListenerTypeCompositionOp::kInsertGuardedTerminal
                          ? service_->SubmitTerminalFromPipe(message.session_id, message.text,
-                                                           message.expected_body, &definitely_not_dispatched)
+                                                           message.expected_body, &definitely_not_dispatched, expected_document)
                      : op == ListenerTypeCompositionOp::kInsertGuarded
                          ? service_->SubmitGuardedFromPipe(message.session_id, message.text,
-                                                          &definitely_not_dispatched)
+                                                          &definitely_not_dispatched, expected_document)
                      : op == ListenerTypeCompositionOp::kInsertOnce
                          ? service_->SubmitTextFromPipe(message.session_id,
                                                         message.text,

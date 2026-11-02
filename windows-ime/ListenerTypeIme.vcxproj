@@ -151,6 +151,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\class_factory.h" />
+    <ClInclude Include="src\context_document_guard.h" />
     <ClInclude Include="src\edit_session.h" />
     <ClInclude Include="src\focus_context_guard.h" />
     <ClInclude Include="src\guids.h" />

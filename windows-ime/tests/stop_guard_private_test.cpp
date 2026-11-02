@@ -54,8 +54,8 @@ public:
       h = start->GetText(ec, 0, buf, 128, &n);
     if (SUCCEEDED(h))
       exact = std::wstring(buf, n) ==
-              (GetEnvironmentVariableW(L"LISTENER_PRIVATE_SIGNAL_STOP", nullptr,
-                                       0) > 0
+              ((GetEnvironmentVariableW(L"LISTENER_PRIVATE_SIGNAL_STOP", nullptr,
+                                       0) > 0 || GetEnvironmentVariableW(L"LISTENER_PRIVATE_DOCUMENT_MISMATCH", nullptr, 0) > 0)
                    ? L""
                    : L"合成 test 𝄞");
     if (start)
@@ -107,12 +107,14 @@ int wmain(int argc, wchar_t **argv) {
   bool callback = false;
   bool keep = false;
   bool stop_before_callback = false;
+  const bool document_mismatch = GetEnvironmentVariableW(
+      L"LISTENER_PRIVATE_DOCUMENT_MISMATCH", nullptr, 0) > 0;
   if (ctx) {
     auto *edit = new ListenerTypeEditSession(
         ctx, L"合成 test 𝄞", ListenerTypeCompositionOp::kInsertGuarded, nullptr,
         completion, tm, L"",
         reinterpret_cast<HWND>(static_cast<std::uintptr_t>(0x1234)),
-        stop_signal);
+        stop_signal, document_mismatch ? L"another document" : L"");
     req = ctx->RequestEditSession(id, edit, TF_ES_ASYNC | TF_ES_READWRITE,
                                   &session_result);
     edit->Release();
@@ -155,10 +157,11 @@ int wmain(int argc, wchar_t **argv) {
       << ",\"edit_result\":" << static_cast<unsigned long>(session_result)
       << ",\"simulated_stop_before_callback\":"
       << (stop_before_callback ? "true" : "false")
+      << ",\"document_mismatch\":" << (document_mismatch ? "true" : "false")
       << ",\"callback_ran\":" << (callback ? "true" : "false")
       << ",\"result_matches\":"
       << ((callback &&
-           (stop_before_callback
+           ((stop_before_callback || document_mismatch)
                 ? completion->result == HRESULT_FROM_WIN32(ERROR_CANCELLED)
                 : SUCCEEDED(completion->result)))
               ? "true"
@@ -175,7 +178,7 @@ int wmain(int argc, wchar_t **argv) {
   const bool passed =
       SUCCEEDED(a) && SUCCEEDED(b) && SUCCEEDED(c) && SUCCEEDED(d) &&
       SUCCEEDED(e) && SUCCEEDED(f) && SUCCEEDED(req) && callback && exact &&
-      (stop_before_callback
+      ((stop_before_callback || document_mismatch)
            ? completion->result == HRESULT_FROM_WIN32(ERROR_CANCELLED)
            : SUCCEEDED(completion->result)) &&
       stop_signal->prevented_write.load() == stop_before_callback;

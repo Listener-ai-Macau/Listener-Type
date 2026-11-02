@@ -25,6 +25,7 @@ struct SubmitTextRequest {
   std::wstring session_id;
   std::wstring text;
   std::wstring expected_body;
+  std::optional<std::wstring> expected_document;
   ListenerTypeCompositionOp op = ListenerTypeCompositionOp::kInsertOnce;
   std::shared_ptr<ListenerTypeAsyncEditState> async_completion;
   std::shared_ptr<ListenerTypeStopSignal> stop_proof;
@@ -199,16 +200,17 @@ HRESULT ListenerTypeTextService::BindDirectTargetFromPipe(
 }
 
 HRESULT ListenerTypeTextService::SubmitGuardedFromPipe(
-    const std::wstring& token, const std::wstring& text, bool* definitely_not_dispatched) {
+    const std::wstring& token, const std::wstring& text, bool* definitely_not_dispatched,
+    const std::optional<std::wstring>& expected_document) {
   return SubmitEditOnOwnerThread(token, text, ListenerTypeCompositionOp::kInsertGuarded,
-                                 definitely_not_dispatched);
+                                 definitely_not_dispatched, {}, expected_document);
 }
 
 HRESULT ListenerTypeTextService::SubmitTerminalFromPipe(
     const std::wstring& token, const std::wstring& text, const std::wstring& expected_body,
-    bool* definitely_not_dispatched) {
+    bool* definitely_not_dispatched, const std::optional<std::wstring>& expected_document) {
   return SubmitEditOnOwnerThread(token, text, ListenerTypeCompositionOp::kInsertGuardedTerminal,
-                                 definitely_not_dispatched, expected_body);
+                                 definitely_not_dispatched, expected_body, expected_document);
 }
 
 HRESULT ListenerTypeTextService::StreamCompositionFromPipe(
@@ -224,13 +226,14 @@ HRESULT ListenerTypeTextService::SubmitEditOnOwnerThread(
     const std::wstring& text,
     ListenerTypeCompositionOp op,
     bool* definitely_not_dispatched,
-    const std::wstring& expected_body) {
+    const std::wstring& expected_body,
+    const std::optional<std::wstring>& expected_document) {
   if (definitely_not_dispatched == nullptr) return E_POINTER;
   *definitely_not_dispatched = true;
   if (GetCurrentThreadId() == owner_thread_id_) {
     bool requested = false;
     std::shared_ptr<ListenerTypeStopSignal> stop_proof;
-    const HRESULT result = CommitTextOnOwnerThread(session_id, text, op, expected_body, nullptr, nullptr, &requested, &stop_proof);
+    const HRESULT result = CommitTextOnOwnerThread(session_id, text, op, expected_body, expected_document, nullptr, nullptr, &requested, &stop_proof);
     *definitely_not_dispatched = !requested || (stop_proof && stop_proof->prevented_write.load(std::memory_order_acquire));
     return result;
   }
@@ -243,6 +246,7 @@ HRESULT ListenerTypeTextService::SubmitEditOnOwnerThread(
   request->session_id = session_id;
   request->text = text;
   request->expected_body = expected_body;
+  request->expected_document = expected_document;
   request->op = op;
   const auto token = g_submit_requests.Register(request);
   DWORD_PTR message_result = 0;
@@ -341,6 +345,7 @@ HRESULT ListenerTypeTextService::CommitTextOnOwnerThread(
     const std::wstring& text,
     ListenerTypeCompositionOp op,
     const std::wstring& expected_body,
+    const std::optional<std::wstring>& expected_document,
     std::shared_ptr<ListenerTypeAsyncEditState>* async_completion,
     bool* wait_for_async_completion,
     bool* edit_requested,
@@ -422,7 +427,7 @@ HRESULT ListenerTypeTextService::CommitTextOnOwnerThread(
   auto* session = new (std::nothrow) ListenerTypeEditSession(
       context, text, op, composition_slot, nullptr,
       (op == ListenerTypeCompositionOp::kInsertGuarded || op == ListenerTypeCompositionOp::kInsertGuardedTerminal)
-          ? thread_mgr_ : nullptr, expected_body, expected_foreground, stop_signal);
+          ? thread_mgr_ : nullptr, expected_body, expected_foreground, stop_signal, expected_document);
   if (session == nullptr) {
     context->Release();
     return E_OUTOFMEMORY;
@@ -464,7 +469,7 @@ HRESULT ListenerTypeTextService::CommitTextOnOwnerThread(
   auto* async_session = new (std::nothrow) ListenerTypeEditSession(
       context, text, op, composition_slot, completion,
       (op == ListenerTypeCompositionOp::kInsertGuarded || op == ListenerTypeCompositionOp::kInsertGuardedTerminal)
-          ? thread_mgr_ : nullptr, expected_body, expected_foreground, stop_signal);
+          ? thread_mgr_ : nullptr, expected_body, expected_foreground, stop_signal, expected_document);
   if (async_session == nullptr) {
     context->Release();
     return E_OUTOFMEMORY;
@@ -509,7 +514,7 @@ LRESULT CALLBACK ListenerTypeTextService::MessageWindowProc(HWND window,
     }
 
     request->result = service->CommitTextOnOwnerThread(
-        request->session_id, request->text, request->op, request->expected_body,
+        request->session_id, request->text, request->op, request->expected_body, request->expected_document,
         &request->async_completion, &request->wait_for_async_completion,
         &request->edit_requested, &request->stop_proof);
     request->handler_finished.store(true, std::memory_order_release);

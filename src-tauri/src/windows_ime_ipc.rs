@@ -245,7 +245,7 @@ impl WindowsImeIpcServer {
         expected_body: String,
         before_write: impl FnOnce() -> bool + Send,
     ) -> WindowsImeIpcResult<ImeSubmitStatus> {
-        windows_pipe::submit_guarded_exact_over_pipe(request, Some(expected_body), None, None, before_write).await
+        windows_pipe::submit_guarded_exact_over_pipe(request, Some(expected_body), None, None, None, before_write).await
     }
 
     #[cfg(target_os = "windows")]
@@ -253,12 +253,13 @@ impl WindowsImeIpcServer {
         &self,
         request: ImeSubmitRequest,
         expected_body: Option<String>,
+        expected_document: String,
         foreground: usize,
         stop_id: Option<uuid::Uuid>,
         before_write: impl FnOnce() -> bool + Send,
     ) -> WindowsImeIpcResult<ImeSubmitStatus> {
         if foreground == 0 { return Err(WindowsImeIpcError::NotDispatched); }
-        windows_pipe::submit_guarded_exact_over_pipe(request, expected_body, Some(foreground), stop_id, before_write).await
+        windows_pipe::submit_guarded_exact_over_pipe(request, expected_body, Some(expected_document), Some(foreground), stop_id, before_write).await
     }
 
     pub async fn submit_stream_op(
@@ -348,12 +349,13 @@ mod windows_pipe {
         request: ImeSubmitRequest,
         before_write: impl FnOnce() -> bool + Send,
     ) -> WindowsImeIpcResult<crate::windows_ime_protocol::ImeSubmitStatus> {
-        submit_guarded_exact_over_pipe(request, None, None, None, before_write).await
+        submit_guarded_exact_over_pipe(request, None, None, None, None, before_write).await
     }
 
     pub async fn submit_guarded_exact_over_pipe(
         request: ImeSubmitRequest,
         expected_body: Option<String>,
+        expected_document: Option<String>,
         foreground: Option<usize>,
         stop_id: Option<uuid::Uuid>,
         before_write: impl FnOnce() -> bool + Send,
@@ -393,11 +395,11 @@ mod windows_pipe {
         let message = match expected_body {
             Some(expected_body) => ImePipeMessage::SubmitTerminal {
                 protocol_version: LISTENER_TYPE_IME_PROTOCOL_VERSION,
-                session_id: token, text, expected_body, created_at,
+                session_id: token, text, expected_body, expected_document, created_at,
             },
             None => ImePipeMessage::SubmitGuarded {
                 protocol_version: LISTENER_TYPE_IME_PROTOCOL_VERSION,
-                session_id: token, text, created_at,
+                session_id: token, text, expected_document, created_at,
             },
         };
         submit_message_over_pipe(message, Some(target), true, before_write).await
@@ -422,7 +424,7 @@ mod windows_pipe {
                 if protocol_version == LISTENER_TYPE_IME_PROTOCOL_VERSION
                     && session_id == "foreground-capability"
                     && status == crate::windows_ime_protocol::ImeSubmitStatus::Failed
-                    && error_code.as_deref() == Some("foregroundStopGuardVersion2") => Ok(()),
+                    && error_code.as_deref() == Some("foregroundDocumentGuardVersion3") => Ok(()),
             _ => Err(WindowsImeIpcError::NoReadyClient),
         }
     }
@@ -901,14 +903,14 @@ mod tests {
             server.connect().await.unwrap();
             let mut probe = String::new();
             BufReader::new(&mut server).read_line(&mut probe).await.unwrap();
-            server.write_all(b"{\"type\":\"submitResult\",\"protocolVersion\":1,\"sessionId\":\"foreground-capability\",\"status\":\"failed\",\"errorCode\":\"foregroundGuardVersion1\"}\n").await.unwrap();
+            server.write_all(b"{\"type\":\"submitResult\",\"protocolVersion\":1,\"sessionId\":\"foreground-capability\",\"status\":\"failed\",\"errorCode\":\"foregroundStopGuardVersion2\"}\n").await.unwrap();
             server.flush().await.unwrap();
             probe
         });
         let result = WindowsImeIpcServer::new().submit_foreground_exact(ImeSubmitRequest {
             session_id: "test".into(), text: "sensitive-synthetic".into(), created_at: "test".into(),
             target: Some(ImeSubmitTarget { process_id, thread_id }),
-        }, None, 0x1234, None, || panic!("old service must receive no text")).await;
+        }, None, "".into(), 0x1234, None, || panic!("old service must receive no text")).await;
         assert!(matches!(result, Err(WindowsImeIpcError::NoReadyClient)));
         let probe = received.await.unwrap();
         assert!(probe.contains("probeForegroundGuard") && !probe.contains("sensitive-synthetic"));
@@ -929,7 +931,7 @@ mod tests {
             BufReader::new(&mut first).read_line(&mut probe).await.unwrap();
             assert!(probe.contains("probeForegroundGuard") && !probe.contains("synthetic"));
             let mut second = ServerOptions::new().create(&name).unwrap();
-            first.write_all(b"{\"type\":\"submitResult\",\"protocolVersion\":1,\"sessionId\":\"foreground-capability\",\"status\":\"failed\",\"errorCode\":\"foregroundStopGuardVersion2\"}\n").await.unwrap();
+            first.write_all(b"{\"type\":\"submitResult\",\"protocolVersion\":1,\"sessionId\":\"foreground-capability\",\"status\":\"failed\",\"errorCode\":\"foregroundDocumentGuardVersion3\"}\n").await.unwrap();
             first.flush().await.unwrap();
             second.connect().await.unwrap();
             let mut bind = String::new();
@@ -947,8 +949,9 @@ mod tests {
             let mut submission = String::new();
             BufReader::new(&mut third).read_line(&mut submission).await.unwrap();
             match crate::windows_ime_protocol::decode_message(submission.trim()).unwrap() {
-                ImePipeMessage::SubmitGuarded { session_id, text, .. } => {
+                ImePipeMessage::SubmitGuarded { session_id, text, expected_document, .. } => {
                     assert_eq!(session_id, token); assert_eq!(text, "synthetic");
+                    assert_eq!(expected_document.as_deref(), Some("baseline"));
                 },
                 _ => panic!("expected guarded submission"),
             }
@@ -958,7 +961,7 @@ mod tests {
         let result = WindowsImeIpcServer::new().submit_foreground_exact(ImeSubmitRequest {
             session_id: "test".into(), text: "synthetic".into(), created_at: "test".into(),
             target: Some(ImeSubmitTarget { process_id, thread_id }),
-        }, None, 0x1234, None, || true).await;
+        }, None, "baseline".into(), 0x1234, None, || true).await;
         assert_eq!(result.unwrap(), ImeSubmitStatus::Committed);
         received.await.unwrap();
     }
@@ -1076,7 +1079,7 @@ mod tests {
         let result = WindowsImeIpcServer::new().submit_foreground_exact(ImeSubmitRequest {
             session_id: "private-background".into(), text: "synthetic".into(), created_at: "test".into(),
             target: Some(ImeSubmitTarget { process_id, thread_id }),
-        }, None, foreground, None, || panic!("a background target must be rejected before text is sent")).await;
+        }, None, "".into(), foreground, None, || panic!("a background target must be rejected before text is sent")).await;
         assert!(matches!(result, Err(WindowsImeIpcError::NotDispatched)), "{result:?}");
     }
 

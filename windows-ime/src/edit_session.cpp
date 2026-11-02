@@ -1,4 +1,5 @@
 #include "edit_session.h"
+#include "context_document_guard.h"
 #include "focus_context_guard.h"
 #include "terminal_tail_guard.h"
 
@@ -33,7 +34,8 @@ ListenerTypeEditSession::ListenerTypeEditSession(
     ITfThreadMgr* focus_guard,
     std::wstring expected_body,
     HWND expected_foreground,
-    std::shared_ptr<ListenerTypeStopSignal> stop_signal)
+    std::shared_ptr<ListenerTypeStopSignal> stop_signal,
+    std::optional<std::wstring> expected_document)
     : context_(context),
       text_(std::move(text)),
       op_(op),
@@ -42,7 +44,8 @@ ListenerTypeEditSession::ListenerTypeEditSession(
       focus_guard_(focus_guard),
       expected_body_(std::move(expected_body)),
       expected_foreground_(expected_foreground),
-      stop_signal_(std::move(stop_signal)) {
+      stop_signal_(std::move(stop_signal)),
+      expected_document_(std::move(expected_document)) {
   // TSF may hold an asynchronous edit after the text service deactivates.
   // Keep DllCanUnloadNow false until the edit session's last reference ends.
   InterlockedIncrement(&g_object_count);
@@ -105,12 +108,14 @@ STDMETHODIMP ListenerTypeEditSession::DoEditSession(TfEditCookie edit_cookie) {
     case ListenerTypeCompositionOp::kInsertGuarded:
       // Async edit callbacks may run after the user has changed controls.
       hr = (expected_foreground_ == nullptr || GetForegroundWindow() == expected_foreground_) &&
-                   ListenerFocusedContextIs(focus_guard_, context_)
+                   ListenerFocusedContextIs(focus_guard_, context_) &&
+                   (!expected_document_ || ListenerContextDocumentEquals(context_, edit_cookie, *expected_document_))
                ? InsertText(edit_cookie) : HRESULT_FROM_WIN32(ERROR_CANCELLED);
       break;
     case ListenerTypeCompositionOp::kInsertGuardedTerminal: {
       if ((expected_foreground_ != nullptr && GetForegroundWindow() != expected_foreground_) ||
-          !ListenerFocusedContextIs(focus_guard_, context_)) {
+          !ListenerFocusedContextIs(focus_guard_, context_) ||
+          (expected_document_ && !ListenerContextDocumentEquals(context_, edit_cookie, *expected_document_))) {
         hr = HRESULT_FROM_WIN32(ERROR_CANCELLED);
         break;
       }

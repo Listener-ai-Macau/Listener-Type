@@ -2784,6 +2784,23 @@ fn early_tsf_session_listening(inner: &Arc<Inner>, session_id: SessionId) -> boo
 }
 
 #[cfg(target_os = "windows")]
+fn guarded_focused_editor_document(target_window: Option<usize>) -> Option<String> {
+    if !delivery_target_is_current(target_window) { return None; }
+    let (reader, focus) = crate::selection::PasteReader::capture_with_focus();
+    if focus != crate::selection::FocusedInputState::Editable { return None; }
+    let reader = reader?;
+    let document = reader.document().ok()?;
+    let value = reader.paste_value().ok()?;
+    if !document.strip_prefix(&value).is_some_and(|suffix|
+        suffix.chars().all(|c| matches!(c, '\r' | '\n')))
+        || !reader.revisable_document_agrees(&document).ok()? { return None; }
+    if !reader.current_observation().ok()? || !delivery_target_is_current(target_window) {
+        return None;
+    }
+    Some(value)
+}
+
+#[cfg(target_os = "windows")]
 fn early_tsf_stop_signal_for_session(inner: &Arc<Inner>, session_id: SessionId)
     -> Result<Arc<crate::windows_ime_ipc::EarlyTsfStopSignal>, EarlyTsfOutcome> {
     // Lock ordering is state -> stop signal, identical to STOP/CANCEL. Once
@@ -2817,17 +2834,12 @@ async fn try_early_tsf_append(inner: &Arc<Inner>, session_id: SessionId,
     let Some(prepared) = prepared.filter(|value| value.is_ready_for_tsf_submit()) else {
         return EarlyTsfOutcome::Unavailable;
     };
-    // The exact focused control must positively describe an editable input;
-    // unknown capability must keep the already-supported clipboard route.
-    let focus = {
-        let (reader, focus) = crate::selection::PasteReader::capture_with_focus();
-        drop(reader);
-        focus
-    };
-    if focus != crate::selection::FocusedInputState::Editable
-        || !delivery_target_is_current(target_window) {
+    // A TSF context can belong to another control in the same window. A
+    // trustworthy focused-editor value is required for a lock-time match;
+    // matching content is still not a unique control identity.
+    let Some(expected_document) = guarded_focused_editor_document(target_window) else {
         return EarlyTsfOutcome::Unavailable;
-    }
+    };
     let Some(target) = capture_ime_submit_target_for_window(target_window) else {
         return EarlyTsfOutcome::Unavailable;
     };
@@ -2840,10 +2852,12 @@ async fn try_early_tsf_append(inner: &Arc<Inner>, session_id: SessionId,
     let stop_signal = match early_tsf_stop_signal_for_session(inner, session_id) {
         Ok(signal) => signal, Err(outcome) => return outcome,
     };
-    let result = inner.windows_ime.submit_prepared_exact(&prepared, request, foreground, stop_signal.id(), move || {
+    let document_before_send = expected_document.clone();
+    let result = inner.windows_ime.submit_prepared_exact(&prepared, request, expected_document, foreground, stop_signal.id(), move || {
         let current_session = early_tsf_session_listening(&guard_inner, session_id);
         current_session && delivery_target_is_current(target_window)
             && capture_ime_submit_target_for_window(target_window) == Some(target)
+            && guarded_focused_editor_document(target_window).as_deref() == Some(document_before_send.as_str())
     }).await;
     drop(stop_signal);
     match result {
@@ -2878,15 +2892,9 @@ async fn try_guarded_tsf_terminal(inner: &Arc<Inner>, session_id: SessionId,
     let Some(prepared) = prepared.filter(|value| value.is_ready_for_tsf_submit()) else {
         return EarlyTsfOutcome::Unavailable;
     };
-    let focus = {
-        let (reader, focus) = crate::selection::PasteReader::capture_with_focus();
-        drop(reader);
-        focus
-    };
-    if focus != crate::selection::FocusedInputState::Editable
-        || !delivery_target_is_current(target_window) {
+    let Some(expected_document) = guarded_focused_editor_document(target_window) else {
         return EarlyTsfOutcome::Unavailable;
-    }
+    };
     let Some(target) = capture_ime_submit_target_for_window(target_window) else {
         return EarlyTsfOutcome::Unavailable;
     };
@@ -2902,10 +2910,12 @@ async fn try_guarded_tsf_terminal(inner: &Arc<Inner>, session_id: SessionId,
         }
     };
     let stop_id = stop_signal.as_ref().map(|signal| signal.id());
-    let result = inner.windows_ime.submit_terminal_prepared_exact(&prepared, request, expected.to_owned(), foreground, stop_id, move || {
+    let document_before_send = expected_document.clone();
+    let result = inner.windows_ime.submit_terminal_prepared_exact(&prepared, request, expected.to_owned(), expected_document, foreground, stop_id, move || {
         guarded_terminal_session_current(&guard_inner, session_id, finalizing)
             && delivery_target_is_current(target_window)
             && capture_ime_submit_target_for_window(target_window) == Some(target)
+            && guarded_focused_editor_document(target_window).as_deref() == Some(document_before_send.as_str())
     }).await;
     drop(stop_signal);
     match result {
