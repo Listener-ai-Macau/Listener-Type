@@ -40,6 +40,8 @@ pub(crate) enum PasteReceiptProof {
     WholePayloadDocument,
     /// No shortcut was sent: the current owned session range was read back.
     OwnedSessionRange,
+    /// A same-control ValuePattern change proves consumption, not range ownership.
+    ValueReadback,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -430,6 +432,7 @@ struct PasteReceipt {
     payload: String,
     reader: Option<crate::selection::PasteReader>,
     before: Option<(String, String)>,
+    value_before: Option<String>,
     dispatched_at: Instant,
     observation: PasteObservation,
     completion: Option<Sender<PasteReceiptCompletion>>,
@@ -509,6 +512,12 @@ impl PasteReceipt {
         }
         log::warn!("[insertion] paste receipt unconfirmed ticket={} observations={} read_failed={} shape={:?} payload_chars={}",
             self.ticket, self.observation.attempts, self.observation.read_failed, self.observation.last_shape, self.payload.chars().count());
+        if let Some(before) = self.value_before.as_ref() {
+            let after = self.reader.as_ref().and_then(|reader| reader.paste_value().ok());
+            log::info!("[insertion] paste value receipt unavailable before_chars={} after_chars={:?} unchanged={:?}",
+                before.chars().count(), after.as_ref().map(|value| value.chars().count()),
+                after.as_ref().map(|value| value == before));
+        }
         self.complete(observed_at, PasteReceiptOutcome::TimedOut);
         self.reader = None;
         self.before = None;
@@ -539,6 +548,21 @@ impl PasteReceipt {
             Ok(after) => {
                 let first_changed_read = self.observation.last_shape.is_none_or(|shape| shape.3) && before != &after;
                 self.observation.observe(before, selected, &self.payload, &after);
+                // TextPattern can remain unchanged while the same focused
+                // control's ValuePattern updates. A complete exact value edit
+                // may release the clipboard, but cannot grant range ownership.
+                let mut value_receipt = false;
+                if !self.strict_session_edit && !self.observation.consumed && selected.is_empty() {
+                    if let Some(value_before) = self.value_before.as_deref() {
+                        if let Ok(value_after) = self.reader.as_ref().expect("reader checked").paste_value() {
+                            if value_readback_proves_paste(value_before, selected, &self.payload, &value_after) {
+                                self.observation.consumed = true;
+                                self.observation.proof = Some(PasteReceiptProof::ValueReadback);
+                                value_receipt = true;
+                            }
+                        }
+                    }
+                }
                 // Final replacement must preserve the entire observed user
                 // prefix. A generic whole-payload receipt alone cannot prove
                 // that an editor honored the exact selected session range.
@@ -552,7 +576,10 @@ impl PasteReceipt {
                     log::info!("[insertion] paste readback changed without receipt ticket={} shape={:?} before_lines={} after_lines={} payload_chars={}",
                         self.ticket, self.observation.last_shape, before.matches('\n').count(), after.matches('\n').count(), self.payload.chars().count());
                 }
-                if self.observation.consumed {
+                if value_receipt {
+                    self.session_body = None;
+                    self.observed_document = None;
+                } else if self.observation.consumed {
                     let caret = self.reader.as_ref().and_then(|r| r.caret_at_end().ok());
                     self.observe_session_document(&after, caret);
                 }
@@ -701,6 +728,9 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                         log::info!("[insertion] recovered fresh paste readback from same-session native editor after lookup failure");
                     }
                 }
+                let mut value_before = if !revisable && before.as_ref().is_some_and(|(_, selected)| selected.is_empty()) {
+                    reader.as_ref().and_then(|reader| reader.paste_value().ok())
+                } else { None };
                 let staged = revisable && scope.as_ref().zip(paste_receipt.as_ref()).is_some_and(|(scope, prior)| {
                     prior.staged_selection && prior.observation.consumed
                         && prior.session_body.as_ref().is_some_and(|(id, body)| *id == scope.session_id && body == &scope.previous_body)
@@ -861,6 +891,11 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                             SessionRangePermission::Revoked } else { range_permission } });
                     continue;
                 }
+                // A value changed while preparing this paste is not its baseline.
+                if value_before.as_ref().is_some_and(|baseline|
+                    reader.as_ref().and_then(|r| r.paste_value().ok()).as_ref() != Some(baseline)) {
+                    value_before = None;
+                }
                 *owner = owner.wrapping_add(1);
                 let current_ticket = *owner;
                 #[cfg(not(target_os = "macos"))]
@@ -902,6 +937,7 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                     payload: text,
                     reader,
                     before,
+                    value_before,
                     dispatched_at,
                     observation: PasteObservation::default(),
                     completion,
@@ -1214,6 +1250,10 @@ fn paste_consumption_proof(
     None
 }
 
+fn value_readback_proves_paste(before: &str, selected: &str, payload: &str, after: &str) -> bool {
+    selected.is_empty() && paste_consumption_proof(before, "", payload, after).is_some()
+}
+
 #[cfg(test)]
 fn paste_was_consumed(before: &str, selected: &str, payload: &str, after: &str) -> bool {
     paste_consumption_proof(before, selected, payload, after).is_some()
@@ -1375,6 +1415,7 @@ mod tests {
                 payload: format!("payload-{id}"),
                 reader: None,
                 before: None,
+                value_before: None,
                 dispatched_at,
                 observation: PasteObservation::default(),
                 completion: Some(completion), session_body: None, observed_document: None, expected_session_document: None, strict_session_edit: false, staged_selection: false, dispatch_session: None,
@@ -1609,6 +1650,7 @@ mod tests {
                 payload: worker_payload,
                 reader: None,
                 before: None,
+                value_before: None,
                 dispatched_at: Instant::now(),
                 observation: PasteObservation::default(),
                 completion: None, session_body: None, observed_document: None, expected_session_document: None, strict_session_edit: false, staged_selection: false, dispatch_session: None,
@@ -1737,6 +1779,16 @@ mod tests {
         assert!(!paste_was_consumed("原文。", "", "。", "修改原文。"));
         assert!(!paste_was_consumed("原文。", "", "。", "原文。"));
         assert!(!paste_was_consumed("abc", "", "x", "abcc"));
+    }
+
+    #[test]
+    fn independent_value_receipt_requires_a_complete_new_unselected_edit() {
+        assert!(value_readback_proves_paste("已写", "", "新增。", "已写新增。"));
+        assert!(value_readback_proves_paste("", "", "完整一句", "完整一句"));
+        assert!(!value_readback_proves_paste("已写", "", "新增。", "已写"));
+        assert!(!value_readback_proves_paste("已写新增。", "", "新增。", "已写新增。"));
+        assert!(!value_readback_proves_paste("已写", "", "新增。", "已写新增。别的编辑"));
+        assert!(!value_readback_proves_paste("旧文本", "旧", "新增。", "新增。文本"));
     }
 
     #[test]

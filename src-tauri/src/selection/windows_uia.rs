@@ -296,6 +296,18 @@ impl WindowsSelectionReader {
         Ok(value)
     }
 
+    /// Independent same-control value readback for paste receipt only. It does
+    /// not grant permission to select or replace a session's editor range.
+    pub(crate) fn paste_value(&self) -> Result<String, String> {
+        if !self.current_observation()? { return Err("paste editor is no longer current".into()); }
+        let value: IUIAutomationValuePattern = unsafe { self.focused.GetCurrentPatternAs(UIA_ValuePatternId) }
+            .map_err(|error| error.to_string())?;
+        let text = unsafe { value.CurrentValue() }.map_err(|error| error.to_string())?.to_string();
+        if text.chars().count() > 8_192 { return Err("paste value exceeds readback limit".into()); }
+        if !self.current_observation()? { return Err("paste editor changed during value read".into()); }
+        Ok(text)
+    }
+
     pub(crate) fn revisable_document_agrees(&self, document: &str) -> Result<bool, String> {
         if self.paste_observation_only { return Ok(false); }
         let value: IUIAutomationValuePattern = unsafe { self.focused.GetCurrentPatternAs(UIA_ValuePatternId) }

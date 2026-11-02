@@ -364,6 +364,13 @@ impl PasteReader {
         { Err("paste readback unavailable".into()) }
     }
 
+    pub(crate) fn paste_value(&self) -> Result<String, String> {
+        #[cfg(target_os = "windows")]
+        { self.reader.paste_value() }
+        #[cfg(not(target_os = "windows"))]
+        { Err("independent paste value unavailable".into()) }
+    }
+
     pub(crate) fn expected_document_after_paste(&self, before: &(String, String), payload: &str) -> Result<String, String> {
         #[cfg(target_os = "windows")]
         { self.reader.expected_document_after_paste(before, payload) }

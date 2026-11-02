@@ -15548,6 +15548,18 @@ fn clipboard_retention_takes_precedence_over_restore() {
     assert!(should_restore_clipboard_after_dictation(&prefs, false));
 }
 
+#[test]
+fn clipboard_failure_notice_does_not_claim_pending_or_superseded_copy_failed() {
+    use super::clipboard_failure_completion_notice as notice;
+    assert!(notice(None, true, "unconfirmed", true).unwrap().contains("历史记录"));
+    assert!(notice(None, true, "failed", false).unwrap().contains("保存也失败"));
+    assert_eq!(notice(None, true, "pending", true), None);
+    assert_eq!(notice(None, true, "superseded", true), None);
+    assert_eq!(notice(None, false, "failed", true), None);
+    assert!(notice(Some("上屏可能不完整".into()), true, "unconfirmed", true)
+        .unwrap().contains("上屏可能不完整；剪贴板"));
+}
+
 #[tokio::test]
 async fn final_clipboard_retention_cannot_hold_capsule_completion_for_seconds() {
     assert!(

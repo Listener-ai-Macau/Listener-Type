@@ -4997,6 +4997,8 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         )
     };
 
+    let done_message = clipboard_failure_completion_notice(done_message, retain_plain_dictation,
+        clipboard_result, delivery_fact.persistence == DeliveryPersistenceOutcome::Saved);
     let done_message = completion_message_with_translation_failure(
         done_message,
         translation_active && polish_error.is_some(),
@@ -5010,6 +5012,22 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     );
 
     Ok(())
+}
+
+fn clipboard_failure_completion_notice(message: Option<String>, enabled: bool,
+    result: &str, history_saved: bool) -> Option<String> {
+    if !enabled || !matches!(result, "unconfirmed" | "unavailable" | "failed") {
+        return message;
+    }
+    let notice = if history_saved {
+        "剪贴板未能更新，完整文字可在历史记录复制"
+    } else {
+        "剪贴板未能更新，历史记录保存也失败，请检查文字"
+    };
+    Some(match message {
+        Some(message) if !message.is_empty() => format!("{message}；{notice}"),
+        _ => notice.to_string(),
+    })
 }
 
 fn translation_completion_error_code(
