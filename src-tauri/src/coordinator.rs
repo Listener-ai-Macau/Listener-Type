@@ -3207,6 +3207,10 @@ async fn insert_with_windows_ime_first(
             }
             return fallback();
         }
+        Err(crate::windows_ime_session::WindowsImeSessionError::Unconfirmed(error)) => {
+            log::warn!("[windows-ime] TSF result unconfirmed; refusing a second insertion: {error}");
+            InsertStatus::SubmittedUnconfirmed
+        }
         Err(error) => {
             log::warn!("[windows-ime] TSF submit failed: {error}");
             InsertStatus::Failed
@@ -3219,6 +3223,16 @@ async fn insert_with_windows_ime_first(
             receipt: None,
             status: ime_status,
             target_confirmed: true,
+            route: DeliveryRoute::Tsf,
+            submitted_text: Some(polished.to_string()),
+        }
+    } else if ime_status == InsertStatus::SubmittedUnconfirmed {
+        // The IME may finish after its response was lost or timed out. Keep
+        // the text for History/clipboard recovery; never paste it a second time.
+        WindowsInsertionResult {
+            receipt: None,
+            status: InsertStatus::SubmittedUnconfirmed,
+            target_confirmed: false,
             route: DeliveryRoute::Tsf,
             submitted_text: Some(polished.to_string()),
         }
@@ -3241,7 +3255,7 @@ fn should_try_non_tsf_insertion_fallback(
     allow_non_tsf_insertion_fallback: bool,
     ime_status: InsertStatus,
 ) -> bool {
-    allow_non_tsf_insertion_fallback && ime_status != InsertStatus::Inserted
+    allow_non_tsf_insertion_fallback && matches!(ime_status, InsertStatus::Failed | InsertStatus::CopiedFallback)
 }
 
 #[cfg(target_os = "windows")]

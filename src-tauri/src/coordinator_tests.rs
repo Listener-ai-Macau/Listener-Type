@@ -5513,6 +5513,10 @@ fn stale_prepared_windows_ime_restore_discards_old_snapshot_without_restoring() 
 #[test]
 #[cfg(target_os = "windows")]
 fn non_tsf_insertion_fallback_gate_blocks_only_when_disabled() {
+    assert!(!should_try_non_tsf_insertion_fallback(
+        true,
+        InsertStatus::SubmittedUnconfirmed
+    ));
     assert!(should_try_non_tsf_insertion_fallback(
         true,
         InsertStatus::CopiedFallback

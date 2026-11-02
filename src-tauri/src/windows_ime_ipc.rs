@@ -29,12 +29,15 @@ pub enum WindowsImeIpcError {
     Timeout,
     Protocol(String),
     Io(String),
+    /// A request may have reached the target; failure is not proof that it
+    /// did not execute, so callers must not send a second insertion.
+    AfterDispatch(String),
 }
 
 impl std::fmt::Display for WindowsImeIpcError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unavailable(message) | Self::Protocol(message) | Self::Io(message) => {
+            Self::Unavailable(message) | Self::Protocol(message) | Self::Io(message) | Self::AfterDispatch(message) => {
                 write!(f, "{message}")
             }
             Self::NoReadyClient => write!(f, "no Listener Type IME client is ready"),
@@ -329,10 +332,11 @@ mod windows_pipe {
             Ok(response)
         })
         .await
-        .map_err(|_| WindowsImeIpcError::Timeout)??;
+        .map_err(|_| WindowsImeIpcError::AfterDispatch("IME result timed out after dispatch".into()))?
+        .map_err(|error| WindowsImeIpcError::AfterDispatch(error.to_string()))?;
 
         match decode_message(response.trim_end())
-            .map_err(|error| WindowsImeIpcError::Protocol(error.to_string()))?
+            .map_err(|error| WindowsImeIpcError::AfterDispatch(error.to_string()))?
         {
             ImePipeMessage::SubmitResult {
                 protocol_version,
@@ -346,13 +350,14 @@ mod windows_pipe {
                     );
                 }
                 pending.accept_result(&session_id, status)
+                    .map_err(|error| WindowsImeIpcError::AfterDispatch(error.to_string()))
             }
             ImePipeMessage::SubmitResult {
                 protocol_version, ..
-            } => Err(WindowsImeIpcError::Protocol(format!(
+            } => Err(WindowsImeIpcError::AfterDispatch(format!(
                 "unsupported IME protocol version {protocol_version}"
             ))),
-            _ => Err(WindowsImeIpcError::Protocol(
+            _ => Err(WindowsImeIpcError::AfterDispatch(
                 "message is not a submit result".to_string(),
             )),
         }
@@ -514,5 +519,33 @@ mod tests {
         assert!(is_retryable_pipe_error(Some(231)));
         assert!(!is_retryable_pipe_error(Some(5)));
         assert!(!is_retryable_pipe_error(None));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[tokio::test]
+    async fn lost_result_after_target_received_request_is_unconfirmed() {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+        use tokio::net::windows::named_pipe::ServerOptions;
+        let process_id = std::process::id();
+        let thread_id = 4_000_000_001;
+        let name = crate::windows_ime_protocol::ime_pipe_name_for_target(process_id, thread_id);
+        let server = ServerOptions::new().first_pipe_instance(true).create(&name).unwrap();
+        let received = tokio::spawn(async move {
+            server.connect().await.unwrap();
+            let mut reader = BufReader::new(server);
+            let mut line = String::new();
+            reader.read_line(&mut line).await.unwrap();
+            let request = crate::windows_ime_protocol::decode_message(line.trim()).unwrap();
+            assert!(matches!(request, crate::windows_ime_protocol::ImePipeMessage::SubmitText { ref text, .. } if text == "synthetic"));
+            // A target may already have accepted the text even though its
+            // result is lost. Closing this private test pipe models that case.
+        });
+        let result = super::windows_pipe::submit_text_over_pipe(ImeSubmitRequest {
+            session_id: "synthetic-session".into(), text: "synthetic".into(),
+            created_at: "test".into(),
+            target: Some(ImeSubmitTarget { process_id, thread_id }),
+        }).await;
+        received.await.unwrap();
+        assert!(matches!(result, Err(WindowsImeIpcError::AfterDispatch(_))));
     }
 }

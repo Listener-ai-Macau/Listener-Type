@@ -1,5 +1,5 @@
 use crate::types::InsertStatus;
-use crate::windows_ime_ipc::{ImeStreamOp, ImeSubmitRequest, WindowsImeIpcServer};
+use crate::windows_ime_ipc::{ImeStreamOp, ImeSubmitRequest, WindowsImeIpcError, WindowsImeIpcServer};
 use crate::windows_ime_profile::{
     restore_decision, ImeProfileSnapshot, ProfileRestoreDecision, WindowsImeProfileManager,
 };
@@ -9,12 +9,13 @@ use crate::windows_ime_protocol::ImeSubmitStatus;
 pub enum WindowsImeSessionError {
     Profile(String),
     Ipc(String),
+    Unconfirmed(String),
 }
 
 impl std::fmt::Display for WindowsImeSessionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Profile(message) | Self::Ipc(message) => write!(f, "{message}"),
+            Self::Profile(message) | Self::Ipc(message) | Self::Unconfirmed(message) => write!(f, "{message}"),
         }
     }
 }
@@ -38,12 +39,20 @@ impl WindowsImeSessionError {
 pub fn map_ime_status_to_insert_status(status: ImeSubmitStatus) -> InsertStatus {
     match status {
         ImeSubmitStatus::Committed => InsertStatus::Inserted,
-        ImeSubmitStatus::Rejected | ImeSubmitStatus::Failed => InsertStatus::CopiedFallback,
+        ImeSubmitStatus::Rejected => InsertStatus::SubmittedUnconfirmed,
+        ImeSubmitStatus::Failed => InsertStatus::CopiedFallback,
     }
 }
 
 pub fn should_fallback_after_ime_result(status: ImeSubmitStatus) -> bool {
-    !matches!(status, ImeSubmitStatus::Committed)
+    matches!(status, ImeSubmitStatus::Failed)
+}
+
+fn session_ipc_error(error: WindowsImeIpcError) -> WindowsImeSessionError {
+    match error {
+        WindowsImeIpcError::AfterDispatch(message) => WindowsImeSessionError::Unconfirmed(message),
+        other => WindowsImeSessionError::Ipc(other.to_string()),
+    }
 }
 
 /// Clone 仅供组字流式驱动持有"激活成功"事实的副本(2026-09-22 切片3);
@@ -201,7 +210,7 @@ impl WindowsImeSessionController {
             .ipc
             .submit_stream_op(op, request)
             .await
-            .map_err(|error| WindowsImeSessionError::Ipc(error.to_string()))?;
+            .map_err(session_ipc_error)?;
         if should_fallback_after_ime_result(status) {
             log::warn!(
                 "[windows-ime] TSF stream op {op:?} returned {status:?}; caller should degrade"
@@ -225,7 +234,7 @@ impl WindowsImeSessionController {
             .ipc
             .submit_text(request)
             .await
-            .map_err(|error| WindowsImeSessionError::Ipc(error.to_string()))?;
+            .map_err(session_ipc_error)?;
         if should_fallback_after_ime_result(status) {
             log::warn!(
                 "[windows-ime] TSF submit returned {status:?}; falling back to non-TSF insertion"
@@ -303,12 +312,22 @@ mod tests {
     }
 
     #[test]
-    fn rejected_ime_result_requests_fallback() {
-        assert!(should_fallback_after_ime_result(ImeSubmitStatus::Rejected));
+    fn rejected_ime_result_is_unconfirmed_and_never_requests_fallback() {
+        assert!(!should_fallback_after_ime_result(ImeSubmitStatus::Rejected));
+        assert_eq!(map_ime_status_to_insert_status(ImeSubmitStatus::Rejected),
+            InsertStatus::SubmittedUnconfirmed);
         assert!(should_fallback_after_ime_result(ImeSubmitStatus::Failed));
         assert!(!should_fallback_after_ime_result(
             ImeSubmitStatus::Committed
         ));
+    }
+
+    #[test]
+    fn post_dispatch_failure_remains_distinct_from_a_missing_client() {
+        assert!(matches!(session_ipc_error(WindowsImeIpcError::AfterDispatch("timeout".into())),
+            WindowsImeSessionError::Unconfirmed(_)));
+        assert!(matches!(session_ipc_error(WindowsImeIpcError::NoReadyClient),
+            WindowsImeSessionError::Ipc(_)));
     }
 
     #[tokio::test]

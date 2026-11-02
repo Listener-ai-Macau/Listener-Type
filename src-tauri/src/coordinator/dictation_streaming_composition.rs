@@ -101,6 +101,8 @@ fn streaming_state_fail(
     reason: &'static str,
     contaminated: bool,
 ) {
+    let contaminated = contaminated || matches!(state.phase,
+        StreamingCompositionPhase::Failed { contaminated: true, .. });
     state.phase = StreamingCompositionPhase::Failed { reason, contaminated };
     state.command_tx = None;
     log::warn!(
@@ -274,8 +276,16 @@ async fn streaming_composition_commit_stable(
         pause_early_delivery_rollback(inner, session_id);
         return false;
     }
-    let ok =
-        matches!(tokio::time::timeout(STREAMING_COMPOSITION_COMMIT_REPLY_TIMEOUT, &mut rx).await, Ok(Ok(true)));
+    let ok = match tokio::time::timeout(STREAMING_COMPOSITION_COMMIT_REPLY_TIMEOUT, &mut rx).await {
+        Ok(Ok(ok)) => ok,
+        _ => {
+            // The driver can still finish after this wait. Do not resend the
+            // same text or assume a failed reply means no edit happened.
+            streaming_state_apply(inner, session_id, |state|
+                streaming_state_fail(state, "stream_commit_reply_unconfirmed", true));
+            false
+        }
+    };
     if !ok {
         pause_early_delivery_rollback(inner, session_id);
         return false;
@@ -314,10 +324,14 @@ async fn streaming_composition_finalize(
     ) {
         return false;
     }
-    matches!(
-        tokio::time::timeout(STREAMING_COMPOSITION_FINALIZE_REPLY_TIMEOUT, &mut rx).await,
-        Ok(Ok(true))
-    )
+    match tokio::time::timeout(STREAMING_COMPOSITION_FINALIZE_REPLY_TIMEOUT, &mut rx).await {
+        Ok(Ok(ok)) => ok,
+        _ => {
+            streaming_state_apply(inner, session_id, |state|
+                streaming_state_fail(state, "stream_finalize_reply_unconfirmed", true));
+            false
+        }
+    }
 }
 
 /// 终稿改写无恢复:整段清组字(文档保留已 commit 前缀,今日"早期文本保留,
@@ -331,10 +345,14 @@ async fn streaming_composition_finalize_cancel(inner: &Arc<Inner>, session_id: S
     ) {
         return false;
     }
-    matches!(
-        tokio::time::timeout(STREAMING_COMPOSITION_FINALIZE_REPLY_TIMEOUT, &mut rx).await,
-        Ok(Ok(true))
-    )
+    match tokio::time::timeout(STREAMING_COMPOSITION_FINALIZE_REPLY_TIMEOUT, &mut rx).await {
+        Ok(Ok(ok)) => ok,
+        _ => {
+            streaming_state_apply(inner, session_id, |state|
+                streaming_state_fail(state, "stream_cancel_reply_unconfirmed", true));
+            false
+        }
+    }
 }
 
 /// 会话收尾。cancel_composition=true 时先清组字再退出(丢弃路径);终稿路径
@@ -358,7 +376,7 @@ async fn streaming_run_op(
     op: crate::windows_ime_ipc::ImeStreamOp,
     text: &str,
     target: Option<&crate::windows_ime_ipc::ImeSubmitTarget>,
-) -> bool {
+) -> StreamingOpOutcome {
     let request = crate::windows_ime_ipc::ImeSubmitRequest {
         session_id: session_id.to_string(),
         text: text.to_string(),
@@ -366,8 +384,13 @@ async fn streaming_run_op(
         target: target.cloned(),
     };
     let outcome = inner.windows_ime.stream_prepared(prepared, op, request).await;
-    let ok = matches!(outcome, Ok(InsertStatus::Inserted));
-    if !ok {
+    let status = match &outcome {
+        Ok(InsertStatus::Inserted) => StreamingOpOutcome::Committed,
+        Ok(InsertStatus::SubmittedUnconfirmed)
+        | Err(crate::windows_ime_session::WindowsImeSessionError::Unconfirmed(_)) => StreamingOpOutcome::Unconfirmed,
+        _ => StreamingOpOutcome::NotCommitted,
+    };
+    if status != StreamingOpOutcome::Committed {
         let detail = outcome
             .as_ref()
             .err()
@@ -377,8 +400,12 @@ async fn streaming_run_op(
             "[streaming-composition] op {op:?} failed session_id={session_id}: {detail}"
         );
     }
-    ok
+    status
 }
+
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamingOpOutcome { Committed, NotCommitted, Unconfirmed }
 
 /// 串行驱动:所有组字管道操作在此任务按序执行(coordinator 侧只投递命令),
 /// 保证 update/commit/cancel 的到达顺序。失败即降级并尽力清场后退出。
@@ -397,7 +424,7 @@ async fn streaming_cancel_op(
         "",
         target,
     )
-    .await
+    .await == StreamingOpOutcome::Committed
 }
 
 /// 串行驱动:所有组字管道操作在此任务按序执行(coordinator 侧只投递命令),
@@ -467,7 +494,7 @@ async fn streaming_composition_driver(
         }
         match command {
             StreamingCompositionCommand::Update { text, key } => {
-                if streaming_run_op(
+                let outcome = streaming_run_op(
                     &inner,
                     session_id,
                     &prepared,
@@ -475,8 +502,8 @@ async fn streaming_composition_driver(
                     &text,
                     target.as_ref(),
                 )
-                .await
-                {
+                .await;
+                if outcome == StreamingOpOutcome::Committed {
                     residue_visible = true;
                     streaming_state_apply(&inner, session_id, |state| {
                         state.updates_sent = state.updates_sent.saturating_add(1);
@@ -484,6 +511,10 @@ async fn streaming_composition_driver(
                         state.last_sent_key = key;
                     });
                     consecutive_update_failures = 0;
+                } else if outcome == StreamingOpOutcome::Unconfirmed {
+                    streaming_state_apply(&inner, session_id, |state|
+                        streaming_state_fail(state, "stream_update_unconfirmed", true));
+                    return;
                 } else if residue_visible {
                     // 屏上有组字却失去管道控制:清场,清不掉=污染(宁少不双写)。
                     let cleared = cancel!();
@@ -512,7 +543,7 @@ async fn streaming_composition_driver(
                 }
             }
             StreamingCompositionCommand::Commit { text, reply } => {
-                let ok = streaming_run_op(
+                let outcome = streaming_run_op(
                     &inner,
                     session_id,
                     &prepared,
@@ -521,11 +552,15 @@ async fn streaming_composition_driver(
                     target.as_ref(),
                 )
                 .await;
+                let ok = outcome == StreamingOpOutcome::Committed;
                 if ok {
                     residue_visible = false;
                     streaming_state_apply(&inner, session_id, |state| {
                         state.commits = state.commits.saturating_add(1);
                     });
+                } else if outcome == StreamingOpOutcome::Unconfirmed {
+                    streaming_state_apply(&inner, session_id, |state|
+                        streaming_state_fail(state, "stream_commit_unconfirmed", true));
                 } else {
                     let cleared = cancel!();
                     streaming_state_apply(&inner, session_id, |state| {
@@ -611,5 +646,65 @@ mod streaming_composition_tests {
             state.phase = StreamingCompositionPhase::Ended;
         }
         assert_ne!(state.phase, StreamingCompositionPhase::Ended);
+        streaming_state_fail(&mut state, "late_driver_failure", false);
+        assert!(matches!(state.phase, StreamingCompositionPhase::Failed { contaminated: true, .. }),
+            "a late driver result cannot erase an earlier unconfirmed edit");
+    }
+
+    #[tokio::test]
+    async fn late_final_commit_cannot_authorize_a_second_insertion() {
+        let coordinator = crate::coordinator::Coordinator::new();
+        let inner = Arc::clone(&coordinator.inner);
+        let session = crate::coordinator_state::new_session_id();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(2);
+        {
+            let mut state = inner.streaming_composition.lock();
+            state.session_id = Some(session);
+            state.phase = StreamingCompositionPhase::Active;
+            state.command_tx = Some(tx);
+        }
+        let call_inner = Arc::clone(&inner);
+        let call = tokio::spawn(async move { streaming_composition_finalize(&call_inner, session, "tail").await });
+        let Some(StreamingCompositionCommand::Commit { reply: Some(reply), .. }) = rx.recv().await else {
+            panic!("final commit must be dispatched");
+        };
+        assert!(!call.await.unwrap(), "the foreground wait must remain bounded");
+        assert!(streaming_composition_contaminated(&inner, session),
+            "an unresolved edit must suppress ordinary paste fallback");
+        assert!(reply.send(true).is_err(), "a late success cannot be mistaken for an immediate failure");
+        assert!(streaming_composition_contaminated(&inner, session));
+    }
+
+    #[tokio::test]
+    async fn late_stable_commit_blocks_next_streamed_paste() {
+        let coordinator = crate::coordinator::Coordinator::new();
+        let inner = Arc::clone(&coordinator.inner);
+        let session = crate::coordinator_state::new_session_id();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(2);
+        {
+            let mut state = inner.streaming_composition.lock();
+            state.session_id = Some(session);
+            state.phase = StreamingCompositionPhase::Active;
+            state.command_tx = Some(tx);
+        }
+        let consumed = crate::asr::volcengine::LiveBodyConsumption {
+            raw_prefix: "hello".into(), body_start: 0, rendered_key: "hello".into(),
+            source: crate::asr::volcengine::LiveDeliverySource {
+                capture_stream_id: 1, capture_generation: 1,
+                decoder_stream_id: 1, owner_generation: 1,
+            }, boundary: None,
+        };
+        let call_inner = Arc::clone(&inner);
+        let clock = Arc::new(Mutex::new(SettledTargetEndpointClock::default()));
+        let call = tokio::spawn(async move {
+            streaming_composition_commit_stable(&call_inner, session, "hello", "", "hello", "hello", consumed, &clock).await
+        });
+        let Some(StreamingCompositionCommand::Commit { reply: Some(reply), .. }) = rx.recv().await else {
+            panic!("stable commit must be dispatched");
+        };
+        assert!(!call.await.unwrap());
+        assert!(streaming_composition_contaminated(&inner, session));
+        assert!(reply.send(true).is_err());
+        assert!(!streaming_composition_active(&inner, session));
     }
 }
