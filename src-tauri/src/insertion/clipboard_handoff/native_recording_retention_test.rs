@@ -1,5 +1,48 @@
 use super::*;
 
+/// A controlled counterexample: the product worker's actual queue and the
+/// station's real clipboard, with paste dispatch replaced by a fake target
+/// that intentionally has not read yet. Never sends keys or accesses the
+/// interactive desktop. This remains ignored outside a private window station.
+#[test]
+#[ignore = "requires an isolated clipboard window station"]
+fn delayed_previous_paste_does_not_read_the_next_fragment() {
+    use std::ffi::c_void;
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetProcessWindowStation() -> *mut c_void;
+        fn GetUserObjectInformationW(handle: *mut c_void, index: i32,
+            info: *mut c_void, length: u32, needed: *mut u32) -> i32;
+    }
+    let mut name = [0u16; 128];
+    let mut needed = 0;
+    assert_ne!(unsafe { GetUserObjectInformationW(GetProcessWindowStation(), 2,
+        name.as_mut_ptr().cast(), (name.len() * 2) as u32, &mut needed) }, 0);
+    let end = name.iter().position(|c| *c == 0).unwrap_or(name.len());
+    assert!(String::from_utf16_lossy(&name[..end]).starts_with("ListenerClipboardCase_"));
+
+    fn no_editor() -> (Option<crate::selection::PasteReader>, crate::selection::FocusedInputState) {
+        (None, crate::selection::FocusedInputState::Unknown)
+    }
+    fn fake_dispatch(text: &str, _restore: bool, _shortcut: PasteShortcut) -> InsertStatus {
+        arboard::Clipboard::new().unwrap().set_text(text).unwrap();
+        InsertStatus::PasteSent
+    }
+    let (send, receive) = mpsc::channel();
+    let worker = std::thread::spawn(move || run_with_capture_and_dispatch(receive, None, no_editor, fake_dispatch));
+    let submit = |text: &str| {
+        let (reply, result) = mpsc::channel();
+        send.send(Command::Paste(text.into(), false, PasteShortcut::CtrlV, None, None, reply)).unwrap();
+        result.recv_timeout(Duration::from_secs(3)).unwrap().status
+    };
+    assert_eq!(submit("first fragment"), InsertStatus::PasteSent);
+    assert_eq!(submit("second fragment"), InsertStatus::PasteSent);
+    let delayed_read = arboard::Clipboard::new().unwrap().get_text().unwrap();
+    drop(send);
+    worker.join().unwrap();
+    assert_eq!(delayed_read, "first fragment", "the first target had not read when the second dispatch replaced its payload");
+}
+
 #[test]
 #[ignore = "requires an isolated clipboard window station"]
 fn explicit_history_copy_does_not_wait_for_focus_or_publish_expired_work() {

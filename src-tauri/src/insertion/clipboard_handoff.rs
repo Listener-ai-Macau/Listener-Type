@@ -651,6 +651,13 @@ fn run(receiver: Receiver<Command>, initial_receipt: Option<PasteReceipt>) {
 
 fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteReceipt>,
     capture: fn() -> (Option<crate::selection::PasteReader>, crate::selection::FocusedInputState)) {
+    run_with_capture_and_dispatch(receiver, initial_receipt, capture,
+        #[cfg(not(target_os = "macos"))] super::insert_with_clipboard_restore_now);
+}
+
+fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: Option<PasteReceipt>,
+    capture: fn() -> (Option<crate::selection::PasteReader>, crate::selection::FocusedInputState),
+    #[cfg(not(target_os = "macos"))] dispatch: fn(&str, bool, PasteShortcut) -> InsertStatus) {
     // Native UIA/AX objects are constructed, used and dropped on this worker.
     // In particular, no COM pointer or apartment guard crosses threads.
     let mut paste_receipt = initial_receipt;
@@ -922,7 +929,7 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                 let result = if let Some(guard) = explicit_target.as_ref() {
                     super::insert_explicit_target_now(&text, shortcut, || guard.dispatch_current()
                         && reader.as_ref().and_then(|reader| reader.current_observation().ok()) == Some(true))
-                } else { super::insert_with_clipboard_restore_now(&text, restore, shortcut) };
+                } else { dispatch(&text, restore, shortcut) };
                 #[cfg(target_os = "macos")]
                 let result = {
                     let _ = (restore, shortcut);
