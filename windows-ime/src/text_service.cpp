@@ -4,6 +4,7 @@
 #include <new>
 
 #include "edit_session.h"
+#include "pending_request_registry.h"
 
 extern LONG g_object_count;
 extern HINSTANCE g_module;
@@ -15,13 +16,15 @@ constexpr UINT kSubmitTextMessage = WM_APP + 1;
 constexpr UINT kSubmitTextTimeoutMs = 3000;
 
 struct SubmitTextRequest {
-  const std::wstring* session_id = nullptr;
-  const std::wstring* text = nullptr;
+  std::wstring session_id;
+  std::wstring text;
   ListenerTypeCompositionOp op = ListenerTypeCompositionOp::kInsertOnce;
   std::shared_ptr<ListenerTypeAsyncEditState> async_completion;
   bool wait_for_async_completion = false;
   HRESULT result = E_UNEXPECTED;
 };
+
+PendingRequestRegistry<SubmitTextRequest> g_submit_requests;
 
 HRESULT WaitForAsyncEditCompletion(
     const std::shared_ptr<ListenerTypeAsyncEditState>& completion) {
@@ -159,25 +162,29 @@ HRESULT ListenerTypeTextService::SubmitEditOnOwnerThread(
     return E_UNEXPECTED;
   }
 
-  SubmitTextRequest request;
-  request.session_id = &session_id;
-  request.text = &text;
-  request.op = op;
+  auto request = std::make_shared<SubmitTextRequest>();
+  request->session_id = session_id;
+  request->text = text;
+  request->op = op;
+  const auto token = g_submit_requests.Register(request);
   DWORD_PTR message_result = 0;
   const LRESULT sent = SendMessageTimeoutW(
-      message_window_, kSubmitTextMessage, 0,
-      reinterpret_cast<LPARAM>(&request), SMTO_ABORTIFHUNG,
+      message_window_, kSubmitTextMessage, static_cast<WPARAM>(token),
+      0, SMTO_ABORTIFHUNG,
       kSubmitTextTimeoutMs, &message_result);
+  const DWORD send_error = sent == 0 ? GetLastError() : ERROR_SUCCESS;
+  // If undelivered, cancel the registry entry. A handler which already took
+  // the request retains its own shared reference until it actually returns.
+  g_submit_requests.Cancel(token);
   if (sent == 0) {
-    const DWORD error = GetLastError();
-    return HRESULT_FROM_WIN32(error != ERROR_SUCCESS ? error : ERROR_TIMEOUT);
+    return HRESULT_FROM_WIN32(send_error != ERROR_SUCCESS ? send_error : ERROR_TIMEOUT);
   }
 
-  if (request.wait_for_async_completion) {
-    return WaitForAsyncEditCompletion(request.async_completion);
+  if (request->wait_for_async_completion) {
+    return WaitForAsyncEditCompletion(request->async_completion);
   }
 
-  return request.result;
+  return request->result;
 }
 
 void ListenerTypeTextService::DropActiveComposition() {
@@ -336,8 +343,6 @@ LRESULT CALLBACK ListenerTypeTextService::MessageWindowProc(HWND window,
                                                         UINT message,
                                                         WPARAM wparam,
                                                         LPARAM lparam) {
-  UNREFERENCED_PARAMETER(wparam);
-
   if (message == WM_NCCREATE) {
     const auto* create = reinterpret_cast<CREATESTRUCTW*>(lparam);
     SetWindowLongPtrW(window, GWLP_USERDATA,
@@ -348,14 +353,13 @@ LRESULT CALLBACK ListenerTypeTextService::MessageWindowProc(HWND window,
   auto* service = reinterpret_cast<ListenerTypeTextService*>(
       GetWindowLongPtrW(window, GWLP_USERDATA));
   if (message == kSubmitTextMessage && service != nullptr) {
-    auto* request = reinterpret_cast<SubmitTextRequest*>(lparam);
-    if (request == nullptr || request->session_id == nullptr ||
-        request->text == nullptr) {
+    auto request = g_submit_requests.Take(static_cast<std::uintptr_t>(wparam));
+    if (!request) {
       return 0;
     }
 
     request->result = service->CommitTextOnOwnerThread(
-        *request->session_id, *request->text, request->op,
+        request->session_id, request->text, request->op,
         &request->async_completion, &request->wait_for_async_completion);
     return 1;
   }
