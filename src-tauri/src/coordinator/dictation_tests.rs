@@ -15612,7 +15612,8 @@ async fn final_history_retention_cannot_adopt_copy_made_after_recording_started(
         "refusing to use the interactive clipboard");
     let coordinator = Coordinator::new();
     let mut history = clipboard_recovery_history_record();
-    let session = new_session_id();
+    let session = crate::coordinator_state::begin_session_state(
+        &mut coordinator.inner.state.lock(), None, None).unwrap();
     history.id = session.to_string();
     let mut board = arboard::Clipboard::new().unwrap();
     board.set_text("clipboard present before this recording").unwrap();
@@ -15632,7 +15633,11 @@ async fn final_history_retention_cannot_adopt_copy_made_after_recording_started(
 
     // A new recording with no new copy can publish its complete History body;
     // protection must not disable no-editor recovery or retain dispatch text.
-    let next = new_session_id();
+    let next = {
+        let mut state = coordinator.inner.state.lock();
+        state.phase = SessionPhase::Idle;
+        crate::coordinator_state::begin_session_state(&mut state, None, None).unwrap()
+    };
     begin_embedded_audio_preview_session(&coordinator.inner, next);
     let old = history.clone();
     history.id = next.to_string();
