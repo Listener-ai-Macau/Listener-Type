@@ -464,10 +464,21 @@ void ListenerTypePipeServer::HandleSubmitLine(HANDLE pipe, const std::string& li
     return;
   }
 
+  if (message.type == L"bindDirect") {
+    if (!message.text.empty()) { WriteResult(pipe, message.session_id, L"failed", L"protocolError"); return; }
+    bool not_dispatched = true;
+    const HRESULT hr = service_->BindDirectTargetFromPipe(message.session_id, &not_dispatched);
+    if (SUCCEEDED(hr)) WriteResult(pipe, message.session_id, L"committed", nullptr);
+    else WriteResult(pipe, message.session_id, L"failed", L"bindingUnavailable");
+    return;
+  }
+
   // 组字流式(2026-09-22):streamUpdate=原地替换组字内容;streamCommit=终稿
   // 落定;streamCancel=清空。submitText=既有一次性插入,行为不变。
   ListenerTypeCompositionOp op;
-  if (message.type == L"submitText") {
+  if (message.type == L"submitGuarded") {
+    op = ListenerTypeCompositionOp::kInsertGuarded;
+  } else if (message.type == L"submitText") {
     op = ListenerTypeCompositionOp::kInsertOnce;
   } else if (message.type == L"streamUpdate") {
     op = ListenerTypeCompositionOp::kStreamUpdate;
@@ -481,7 +492,10 @@ void ListenerTypePipeServer::HandleSubmitLine(HANDLE pipe, const std::string& li
   }
 
   bool definitely_not_dispatched = true;
-  const HRESULT hr = op == ListenerTypeCompositionOp::kInsertOnce
+  const HRESULT hr = op == ListenerTypeCompositionOp::kInsertGuarded
+                         ? service_->SubmitGuardedFromPipe(message.session_id, message.text,
+                                                          &definitely_not_dispatched)
+                     : op == ListenerTypeCompositionOp::kInsertOnce
                          ? service_->SubmitTextFromPipe(message.session_id,
                                                         message.text,
                                                         &definitely_not_dispatched)
@@ -491,6 +505,11 @@ void ListenerTypePipeServer::HandleSubmitLine(HANDLE pipe, const std::string& li
   if (SUCCEEDED(hr)) {
     WriteResult(pipe, message.session_id, L"committed", nullptr);
   } else {
+    if (op == ListenerTypeCompositionOp::kInsertGuarded && definitely_not_dispatched &&
+        hr == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
+      WriteResult(pipe, message.session_id, L"failed", L"guardMismatch");
+      return;
+    }
     const std::wstring error_code = HResultErrorCode(hr);
     const std::wstring uncertain_code = L"uncertain:" + error_code;
     WriteResult(pipe, message.session_id,

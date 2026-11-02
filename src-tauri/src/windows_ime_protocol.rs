@@ -56,6 +56,19 @@ pub enum ImePipeMessage {
         text: String,
         created_at: String,
     },
+    /// Bind a fresh token to the currently focused TSF context; never carries text.
+    BindDirect {
+        protocol_version: u32,
+        session_id: String,
+        text: String,
+    },
+    /// Insert only into the context bound to this one-use token.
+    SubmitGuarded {
+        protocol_version: u32,
+        session_id: String,
+        text: String,
+        created_at: String,
+    },
     /// 组字流式(2026-09-22 讯飞式):原地替换目标窗口里的下划线组字内容。
     StreamUpdate {
         protocol_version: u32,

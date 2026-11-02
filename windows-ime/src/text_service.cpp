@@ -5,6 +5,7 @@
 #include <new>
 
 #include "edit_session.h"
+#include "focus_context_guard.h"
 #include "pending_request_registry.h"
 
 extern LONG g_object_count;
@@ -128,6 +129,11 @@ STDMETHODIMP ListenerTypeTextService::Deactivate() {
   StopIpcServer();
   DestroyMessageWindow();
   DropActiveComposition();
+  if (bound_direct_context_ != nullptr) {
+    bound_direct_context_->Release();
+    bound_direct_context_ = nullptr;
+  }
+  bound_direct_token_.clear();
 
   if (thread_mgr_ != nullptr) {
     thread_mgr_->Release();
@@ -145,6 +151,18 @@ HRESULT ListenerTypeTextService::SubmitTextFromPipe(
     bool* definitely_not_dispatched) {
   return SubmitEditOnOwnerThread(session_id, text,
                                  ListenerTypeCompositionOp::kInsertOnce,
+                                 definitely_not_dispatched);
+}
+
+HRESULT ListenerTypeTextService::BindDirectTargetFromPipe(
+    const std::wstring& token, bool* definitely_not_dispatched) {
+  return SubmitEditOnOwnerThread(token, L"", ListenerTypeCompositionOp::kBindDirectTarget,
+                                 definitely_not_dispatched);
+}
+
+HRESULT ListenerTypeTextService::SubmitGuardedFromPipe(
+    const std::wstring& token, const std::wstring& text, bool* definitely_not_dispatched) {
+  return SubmitEditOnOwnerThread(token, text, ListenerTypeCompositionOp::kInsertGuarded,
                                  definitely_not_dispatched);
 }
 
@@ -269,8 +287,6 @@ HRESULT ListenerTypeTextService::CommitTextOnOwnerThread(
     std::shared_ptr<ListenerTypeAsyncEditState>* async_completion,
     bool* wait_for_async_completion,
     bool* edit_requested) {
-  UNREFERENCED_PARAMETER(session_id);
-
   if (thread_mgr_ == nullptr || client_id_ == TF_CLIENTID_NULL) {
     return E_UNEXPECTED;
   }
@@ -278,10 +294,12 @@ HRESULT ListenerTypeTextService::CommitTextOnOwnerThread(
   ITfDocumentMgr* document_mgr = nullptr;
   HRESULT hr = thread_mgr_->GetFocus(&document_mgr);
   if (FAILED(hr)) {
-    return hr;
+    return op == ListenerTypeCompositionOp::kInsertGuarded
+               ? HRESULT_FROM_WIN32(ERROR_CANCELLED) : hr;
   }
   if (document_mgr == nullptr) {
-    return E_FAIL;
+    return op == ListenerTypeCompositionOp::kInsertGuarded
+               ? HRESULT_FROM_WIN32(ERROR_CANCELLED) : E_FAIL;
   }
 
   ITfContext* context = nullptr;
@@ -289,17 +307,38 @@ HRESULT ListenerTypeTextService::CommitTextOnOwnerThread(
   document_mgr->Release();
   document_mgr = nullptr;
   if (FAILED(hr)) {
-    return hr;
+    return op == ListenerTypeCompositionOp::kInsertGuarded
+               ? HRESULT_FROM_WIN32(ERROR_CANCELLED) : hr;
   }
   if (context == nullptr) {
-    return E_FAIL;
+    return op == ListenerTypeCompositionOp::kInsertGuarded
+               ? HRESULT_FROM_WIN32(ERROR_CANCELLED) : E_FAIL;
+  }
+
+  if (op == ListenerTypeCompositionOp::kBindDirectTarget) {
+    if (session_id.empty()) { context->Release(); return E_INVALIDARG; }
+    if (bound_direct_context_ != nullptr) bound_direct_context_->Release();
+    bound_direct_context_ = context;  // Retain GetTop's reference on this thread.
+    bound_direct_token_ = session_id;
+    return S_OK;
+  }
+
+  if (op == ListenerTypeCompositionOp::kInsertGuarded) {
+    const bool matches = !session_id.empty() && session_id == bound_direct_token_ &&
+                         ListenerSameComIdentity(context, bound_direct_context_);
+    if (bound_direct_context_ != nullptr) bound_direct_context_->Release();
+    bound_direct_context_ = nullptr;
+    bound_direct_token_.clear();
+    if (!matches) { context->Release(); return HRESULT_FROM_WIN32(ERROR_CANCELLED); }
   }
 
   // 组字操作与组字指针只对非一次性路径生效;一次性插入保持原行为。
   ITfComposition** composition_slot =
-      op == ListenerTypeCompositionOp::kInsertOnce ? nullptr : &active_composition_;
+      (op == ListenerTypeCompositionOp::kInsertOnce || op == ListenerTypeCompositionOp::kInsertGuarded)
+          ? nullptr : &active_composition_;
   auto* session = new (std::nothrow) ListenerTypeEditSession(
-      context, text, op, composition_slot);
+      context, text, op, composition_slot, nullptr,
+      op == ListenerTypeCompositionOp::kInsertGuarded ? thread_mgr_ : nullptr);
   if (session == nullptr) {
     context->Release();
     return E_OUTOFMEMORY;
@@ -339,7 +378,8 @@ HRESULT ListenerTypeTextService::CommitTextOnOwnerThread(
   }
 
   auto* async_session = new (std::nothrow) ListenerTypeEditSession(
-      context, text, op, composition_slot, completion);
+      context, text, op, composition_slot, completion,
+      op == ListenerTypeCompositionOp::kInsertGuarded ? thread_mgr_ : nullptr);
   if (async_session == nullptr) {
     context->Release();
     return E_OUTOFMEMORY;

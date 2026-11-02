@@ -280,40 +280,27 @@ mod windows_pipe {
         request: ImeSubmitRequest,
         before_write: impl FnOnce() -> bool + Send,
     ) -> WindowsImeIpcResult<crate::windows_ime_protocol::ImeSubmitStatus> {
-        let ImeSubmitRequest { session_id, text, created_at, target } = request;
+        let ImeSubmitRequest { session_id: _, text, created_at, target } = request;
         let target = target.ok_or(WindowsImeIpcError::NoReadyClient)?;
-        probe_exact_direct_capability(target).await?;
-        let message = ImePipeMessage::SubmitText {
+        // A unique token prevents a delayed or concurrent bind from ever
+        // authorizing another request to a different context.
+        let token = format!("direct-{}", uuid::Uuid::new_v4());
+        let binding = ImePipeMessage::BindDirect {
             protocol_version: LISTENER_TYPE_IME_PROTOCOL_VERSION,
-            session_id, text, created_at,
+            session_id: token.clone(), text: String::new(),
+        };
+        // A timeout here carries no text. A late binding can only invalidate
+        // another unique token, never authorize it.
+        match tokio::time::timeout(Duration::from_millis(250),
+            submit_message_over_pipe(binding, Some(target), true, || true)).await {
+            Ok(Ok(crate::windows_ime_protocol::ImeSubmitStatus::Committed)) => {},
+            _ => return Err(WindowsImeIpcError::NoReadyClient),
+        }
+        let message = ImePipeMessage::SubmitGuarded {
+            protocol_version: LISTENER_TYPE_IME_PROTOCOL_VERSION,
+            session_id: token, text, created_at,
         };
         submit_message_over_pipe(message, Some(target), true, before_write).await
-    }
-
-    async fn probe_exact_direct_capability(target: super::ImeSubmitTarget) -> WindowsImeIpcResult<()> {
-        let (_, pipe) = open_pipe_with_retry(target, true).await?;
-        let (read_half, mut write_half) = tokio::io::split(pipe);
-        let mut reader = BufReader::new(read_half);
-        // A probe has no transcript and never invokes an edit session. Older
-        // services return protocolError and are deliberately not used here.
-        let probe = b"{\"type\":\"probeDirect\",\"protocolVersion\":1,\"sessionId\":\"direct-capability\",\"text\":\"\"}\n";
-        let response = tokio::time::timeout(Duration::from_millis(150), async {
-            write_half.write_all(probe).await?;
-            write_half.flush().await?;
-            let mut response = String::new();
-            if reader.read_line(&mut response).await? == 0 {
-                return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "capability reply missing"));
-            }
-            Ok::<_, std::io::Error>(response)
-        }).await.ok().and_then(Result::ok).ok_or(WindowsImeIpcError::NoReadyClient)?;
-        match decode_message(response.trim_end()) {
-            Ok(ImePipeMessage::SubmitResult { protocol_version, session_id, status, error_code })
-                if protocol_version == LISTENER_TYPE_IME_PROTOCOL_VERSION
-                    && session_id == "direct-capability"
-                    && status == crate::windows_ime_protocol::ImeSubmitStatus::Failed
-                    && error_code.as_deref() == Some("safeDirectVersion1") => Ok(()),
-            _ => Err(WindowsImeIpcError::NoReadyClient),
-        }
     }
 
     pub async fn submit_stream_op_over_pipe(
@@ -358,6 +345,8 @@ mod windows_pipe {
     ) -> WindowsImeIpcResult<crate::windows_ime_protocol::ImeSubmitStatus> {
         let request_session_id = match &message {
             ImePipeMessage::SubmitText { session_id, .. }
+            | ImePipeMessage::BindDirect { session_id, .. }
+            | ImePipeMessage::SubmitGuarded { session_id, .. }
             | ImePipeMessage::StreamUpdate { session_id, .. }
             | ImePipeMessage::StreamCommit { session_id, .. }
             | ImePipeMessage::StreamCancel { session_id, .. } => session_id.clone(),
@@ -417,8 +406,13 @@ mod windows_pipe {
                     );
                 }
                 let status = classify_native_result(status, error_code.as_deref());
-                pending.accept_result(&session_id, status)
-                    .map_err(|error| WindowsImeIpcError::AfterDispatch(error.to_string()))
+                let accepted = pending.accept_result(&session_id, status)
+                    .map_err(|error| WindowsImeIpcError::AfterDispatch(error.to_string()))?;
+                if exact_only && accepted == crate::windows_ime_protocol::ImeSubmitStatus::Failed
+                    && error_code.as_deref() == Some("guardMismatch") {
+                    return Err(WindowsImeIpcError::NotDispatched);
+                }
+                Ok(accepted)
             }
             ImePipeMessage::SubmitResult {
                 protocol_version, ..
@@ -531,6 +525,8 @@ mod windows_pipe {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "windows")]
+    use crate::windows_ime_protocol::ImePipeMessage;
 
     #[test]
     fn pending_submit_accepts_only_matching_session() {
@@ -654,8 +650,13 @@ mod tests {
             server.connect().await.unwrap();
             let mut probe = String::new();
             BufReader::new(&mut server).read_line(&mut probe).await.unwrap();
-            assert!(probe.contains("probeDirect") && !probe.contains("synthetic"));
-            server.write_all(b"{\"type\":\"submitResult\",\"protocolVersion\":1,\"sessionId\":\"direct-capability\",\"status\":\"failed\",\"errorCode\":\"safeDirectVersion1\"}\n").await.unwrap();
+            let token = match crate::windows_ime_protocol::decode_message(probe.trim()).unwrap() {
+                ImePipeMessage::BindDirect { session_id, text, .. } => { assert!(text.is_empty()); session_id },
+                _ => panic!("expected a text-free binding"),
+            };
+            assert!(!probe.contains("synthetic"));
+            let reply = format!("{{\"type\":\"submitResult\",\"protocolVersion\":1,\"sessionId\":\"{token}\",\"status\":\"committed\"}}\n");
+            server.write_all(reply.as_bytes()).await.unwrap();
             server.flush().await.unwrap();
             let mut ignored = Vec::new();
             let _ = server.read_to_end(&mut ignored).await;
@@ -686,7 +687,12 @@ mod tests {
             server.connect().await.unwrap();
             let mut probe = String::new();
             BufReader::new(&mut server).read_line(&mut probe).await.unwrap();
-            server.write_all(b"{\"type\":\"submitResult\",\"protocolVersion\":1,\"sessionId\":\"direct-capability\",\"status\":\"failed\",\"errorCode\":\"protocolError\"}\n").await.unwrap();
+            let token = match crate::windows_ime_protocol::decode_message(probe.trim()).unwrap() {
+                ImePipeMessage::BindDirect { session_id, text, .. } => { assert!(text.is_empty()); session_id },
+                _ => panic!("expected a text-free binding"),
+            };
+            let reply = format!("{{\"type\":\"submitResult\",\"protocolVersion\":1,\"sessionId\":\"{token}\",\"status\":\"failed\",\"errorCode\":\"protocolError\"}}\n");
+            server.write_all(reply.as_bytes()).await.unwrap();
             server.flush().await.unwrap();
             probe
         });
@@ -696,7 +702,53 @@ mod tests {
         }, || panic!("legacy client must not receive user text")).await;
         assert!(matches!(result, Err(WindowsImeIpcError::NoReadyClient)));
         let probe = received.await.unwrap();
-        assert!(probe.contains("probeDirect") && !probe.contains("sensitive-synthetic"));
+        assert!(probe.contains("bindDirect") && !probe.contains("sensitive-synthetic"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[tokio::test]
+    async fn native_focus_mismatch_cancels_without_fallback() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        use tokio::net::windows::named_pipe::ServerOptions;
+        let process_id = std::process::id();
+        let thread_id = 4_000_000_006;
+        let name = crate::windows_ime_protocol::ime_pipe_name_for_target(process_id, thread_id);
+        let mut server = ServerOptions::new().first_pipe_instance(true).create(&name).unwrap();
+        let received = tokio::spawn(async move {
+            server.connect().await.unwrap();
+            let mut line = String::new();
+            BufReader::new(&mut server).read_line(&mut line).await.unwrap();
+            let token = match crate::windows_ime_protocol::decode_message(line.trim()).unwrap() {
+                ImePipeMessage::BindDirect { session_id, text, .. } => { assert!(text.is_empty()); session_id },
+                _ => panic!("expected binding"),
+            };
+            // Keep a distinct second instance listening before responding.
+            // Reconnecting one test instance can race its disconnect with the
+            // client's next connection and silently consume the next request.
+            let mut second_server = ServerOptions::new().create(&name).unwrap();
+            let reply = format!("{{\"type\":\"submitResult\",\"protocolVersion\":1,\"sessionId\":\"{token}\",\"status\":\"committed\"}}\n");
+            server.write_all(reply.as_bytes()).await.unwrap();
+            server.flush().await.unwrap();
+            second_server.connect().await.unwrap();
+            let mut next = String::new();
+            BufReader::new(&mut second_server).read_line(&mut next).await.unwrap();
+            match crate::windows_ime_protocol::decode_message(next.trim()).unwrap() {
+                ImePipeMessage::SubmitGuarded { session_id, text, .. } => {
+                    assert_eq!(session_id, token);
+                    assert_eq!(text, "synthetic");
+                },
+                _ => panic!("expected guarded submit"),
+            }
+            let reply = format!("{{\"type\":\"submitResult\",\"protocolVersion\":1,\"sessionId\":\"{token}\",\"status\":\"failed\",\"errorCode\":\"guardMismatch\"}}\n");
+            second_server.write_all(reply.as_bytes()).await.unwrap();
+            second_server.flush().await.unwrap();
+        });
+        let result = super::windows_pipe::submit_text_exact_over_pipe(ImeSubmitRequest {
+            session_id: "test".into(), text: "synthetic".into(), created_at: "test".into(),
+            target: Some(ImeSubmitTarget { process_id, thread_id }),
+        }, || true).await;
+        assert!(matches!(result, Err(WindowsImeIpcError::NotDispatched)));
+        received.await.unwrap();
     }
 
     #[cfg(target_os = "windows")]
@@ -748,6 +800,42 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[tokio::test]
+    #[ignore = "requires an isolated station and a two-context synthetic TSF host"]
+    async fn exact_streaming_rejects_private_tsf_context_switch() {
+        use std::ffi::c_void;
+        #[link(name = "user32")]
+        extern "system" {
+            fn GetProcessWindowStation() -> *mut c_void;
+            fn GetUserObjectInformationW(handle: *mut c_void, index: i32,
+                info: *mut c_void, length: u32, needed: *mut u32) -> i32;
+        }
+        let mut name = [0u16; 128];
+        let mut needed = 0;
+        assert_ne!(unsafe { GetUserObjectInformationW(GetProcessWindowStation(), 2,
+            name.as_mut_ptr().cast(), (name.len() * 2) as u32, &mut needed) }, 0);
+        let end = name.iter().position(|c| *c == 0).unwrap_or(name.len());
+        assert!(String::from_utf16_lossy(&name[..end]).starts_with("ListenerNativeReplay_"));
+        let process_id = std::env::var("LISTENER_PRIVATE_TSF_PID").unwrap().parse().unwrap();
+        let thread_id = std::env::var("LISTENER_PRIVATE_TSF_TID").unwrap().parse().unwrap();
+        let switch_file = std::env::var("LISTENER_PRIVATE_TSF_SWITCH_FILE").unwrap();
+        let switch_ack = std::env::var("LISTENER_PRIVATE_TSF_SWITCH_ACK").unwrap();
+        let result = WindowsImeIpcServer::new().submit_text_exact(ImeSubmitRequest {
+            session_id: "private-focus-switch".into(), text: "synthetic".into(), created_at: "test".into(),
+            target: Some(ImeSubmitTarget { process_id, thread_id }),
+        }, move || {
+            std::fs::write(&switch_file, "switch").unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(3);
+            while !std::path::Path::new(&switch_ack).exists() && std::time::Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert!(std::path::Path::new(&switch_ack).exists());
+            true // Model an unchanged root HWND and GUI thread.
+        }).await;
+        assert!(matches!(result, Err(WindowsImeIpcError::NotDispatched)), "{result:?}");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[tokio::test]
     #[ignore = "requires an isolated station and a synthetic TSF host without focus"]
     async fn exact_streaming_no_native_document_is_safe_to_fallback() {
         use std::ffi::c_void;
@@ -768,8 +856,7 @@ mod tests {
         let result = WindowsImeIpcServer::new().submit_text_exact(ImeSubmitRequest {
             session_id: "private-no-focus".into(), text: "synthetic".into(), created_at: "test".into(),
             target: Some(ImeSubmitTarget { process_id, thread_id }),
-        }, || true).await.unwrap();
-        assert_eq!(result, ImeSubmitStatus::Failed);
-        assert!(crate::windows_ime_session::should_fallback_after_ime_result(result));
+        }, || true).await;
+        assert!(matches!(result, Err(WindowsImeIpcError::NoReadyClient)));
     }
 }

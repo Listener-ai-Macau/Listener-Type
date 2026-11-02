@@ -26,6 +26,8 @@ struct ListenerTypeAsyncEditState {
 //   kStreamCancel  组字清空 → EndComposition(文档不留字);无组字则无操作。
 enum class ListenerTypeCompositionOp {
   kInsertOnce,
+  kBindDirectTarget,
+  kInsertGuarded,
   kStreamUpdate,
   kStreamCommit,
   kStreamCancel,
@@ -38,7 +40,8 @@ class ListenerTypeEditSession final : public ITfEditSession {
       std::wstring text,
       ListenerTypeCompositionOp op = ListenerTypeCompositionOp::kInsertOnce,
       ITfComposition** composition_slot = nullptr,
-      std::shared_ptr<ListenerTypeAsyncEditState> async_state = nullptr);
+      std::shared_ptr<ListenerTypeAsyncEditState> async_state = nullptr,
+      ITfThreadMgr* focus_guard = nullptr);
   ListenerTypeEditSession(const ListenerTypeEditSession&) = delete;
   ListenerTypeEditSession& operator=(const ListenerTypeEditSession&) = delete;
   ~ListenerTypeEditSession();
@@ -60,4 +63,5 @@ class ListenerTypeEditSession final : public ITfEditSession {
   // 清空释放。仅在 owner 线程的 edit session 里访问,无需加锁。
   ITfComposition** composition_slot_ = nullptr;
   std::shared_ptr<ListenerTypeAsyncEditState> async_state_;
+  ITfThreadMgr* focus_guard_ = nullptr;
 };

@@ -1,4 +1,5 @@
 #include "edit_session.h"
+#include "focus_context_guard.h"
 
 #include <utility>
 
@@ -27,21 +28,25 @@ ListenerTypeEditSession::ListenerTypeEditSession(
     std::wstring text,
     ListenerTypeCompositionOp op,
     ITfComposition** composition_slot,
-    std::shared_ptr<ListenerTypeAsyncEditState> async_state)
+    std::shared_ptr<ListenerTypeAsyncEditState> async_state,
+    ITfThreadMgr* focus_guard)
     : context_(context),
       text_(std::move(text)),
       op_(op),
       composition_slot_(composition_slot),
-      async_state_(std::move(async_state)) {
+      async_state_(std::move(async_state)),
+      focus_guard_(focus_guard) {
   // TSF may hold an asynchronous edit after the text service deactivates.
   // Keep DllCanUnloadNow false until the edit session's last reference ends.
   InterlockedIncrement(&g_object_count);
   if (context_ != nullptr) {
     context_->AddRef();
   }
+  if (focus_guard_ != nullptr) focus_guard_->AddRef();
 }
 
 ListenerTypeEditSession::~ListenerTypeEditSession() {
+  if (focus_guard_ != nullptr) focus_guard_->Release();
   if (context_ != nullptr) {
     context_->Release();
     context_ = nullptr;
@@ -81,6 +86,11 @@ STDMETHODIMP ListenerTypeEditSession::DoEditSession(TfEditCookie edit_cookie) {
   switch (op_) {
     case ListenerTypeCompositionOp::kInsertOnce:
       hr = InsertText(edit_cookie);
+      break;
+    case ListenerTypeCompositionOp::kInsertGuarded:
+      // Async edit callbacks may run after the user has changed controls.
+      hr = ListenerFocusedContextIs(focus_guard_, context_)
+               ? InsertText(edit_cookie) : HRESULT_FROM_WIN32(ERROR_CANCELLED);
       break;
     case ListenerTypeCompositionOp::kStreamUpdate:
     case ListenerTypeCompositionOp::kStreamCommit:
@@ -136,10 +146,20 @@ HRESULT ListenerTypeEditSession::InsertText(TfEditCookie edit_cookie) {
           selection.range = committed_range;
           selection.style.ase = TF_AE_END;
           selection.style.fInterimChar = FALSE;
-          (void)context_->SetSelection(edit_cookie, 1, &selection);
+          const HRESULT selection_hr = context_->SetSelection(edit_cookie, 1, &selection);
+          // The text may already be present. Report an uncertain outcome for
+          // guarded streaming rather than claim success and risk writing the
+          // next segment at a stale or selected position.
+          if (op_ == ListenerTypeCompositionOp::kInsertGuarded && FAILED(selection_hr)) {
+            hr = selection_hr;
+          }
+        } else if (op_ == ListenerTypeCompositionOp::kInsertGuarded) {
+          hr = collapse_hr;
         }
       }
       committed_range->Release();
+    } else if (SUCCEEDED(hr) && op_ == ListenerTypeCompositionOp::kInsertGuarded) {
+      hr = E_UNEXPECTED;  // Insert may have happened, but its caret is unknown.
     }
   }
 
