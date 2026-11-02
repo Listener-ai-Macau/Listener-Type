@@ -1,6 +1,10 @@
 #include "text_service.h"
 
 #include <atomic>
+#include <cerrno>
+#include <cstdint>
+#include <cwchar>
+#include <limits>
 #include <memory>
 #include <new>
 
@@ -30,6 +34,25 @@ struct SubmitTextRequest {
 };
 
 PendingRequestRegistry<SubmitTextRequest> g_submit_requests;
+
+// New guarded sessions encode the original foreground HWND in a unique token.
+// Older experimental tokens intentionally keep their old behavior for private
+// regression fixtures; production requires a version capability probe first.
+bool ParseForegroundToken(const std::wstring& token, HWND* expected) {
+  *expected = nullptr;
+  if (token.rfind(L"fg:", 0) != 0) return true;
+  const size_t end = token.find(L':', 3);
+  if (end == std::wstring::npos || end == 3 || end + 1 >= token.size()) return false;
+  const std::wstring value = token.substr(3, end - 3);
+  if (value.find_first_not_of(L"0123456789abcdefABCDEF") != std::wstring::npos) return false;
+  wchar_t* tail = nullptr;
+  errno = 0;
+  const unsigned long long parsed = std::wcstoull(value.c_str(), &tail, 16);
+  if (errno == ERANGE || tail == value.c_str() || *tail != L'\0' || parsed == 0 ||
+      parsed > static_cast<unsigned long long>((std::numeric_limits<std::uintptr_t>::max)())) return false;
+  *expected = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(parsed));
+  return true;
+}
 
 HRESULT WaitForAsyncEditCompletion(
     const std::shared_ptr<ListenerTypeAsyncEditState>& completion) {
@@ -302,6 +325,16 @@ HRESULT ListenerTypeTextService::CommitTextOnOwnerThread(
     return E_UNEXPECTED;
   }
 
+  HWND expected_foreground = nullptr;
+  if (op == ListenerTypeCompositionOp::kBindDirectTarget ||
+      op == ListenerTypeCompositionOp::kInsertGuarded ||
+      op == ListenerTypeCompositionOp::kInsertGuardedTerminal) {
+    if (!ParseForegroundToken(session_id, &expected_foreground)) return E_INVALIDARG;
+    if (expected_foreground != nullptr && GetForegroundWindow() != expected_foreground) {
+      return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+    }
+  }
+
   ITfDocumentMgr* document_mgr = nullptr;
   HRESULT hr = thread_mgr_->GetFocus(&document_mgr);
   if (FAILED(hr)) {
@@ -351,7 +384,7 @@ HRESULT ListenerTypeTextService::CommitTextOnOwnerThread(
   auto* session = new (std::nothrow) ListenerTypeEditSession(
       context, text, op, composition_slot, nullptr,
       (op == ListenerTypeCompositionOp::kInsertGuarded || op == ListenerTypeCompositionOp::kInsertGuardedTerminal)
-          ? thread_mgr_ : nullptr, expected_body);
+          ? thread_mgr_ : nullptr, expected_body, expected_foreground);
   if (session == nullptr) {
     context->Release();
     return E_OUTOFMEMORY;
@@ -393,7 +426,7 @@ HRESULT ListenerTypeTextService::CommitTextOnOwnerThread(
   auto* async_session = new (std::nothrow) ListenerTypeEditSession(
       context, text, op, composition_slot, completion,
       (op == ListenerTypeCompositionOp::kInsertGuarded || op == ListenerTypeCompositionOp::kInsertGuardedTerminal)
-          ? thread_mgr_ : nullptr, expected_body);
+          ? thread_mgr_ : nullptr, expected_body, expected_foreground);
   if (async_session == nullptr) {
     context->Release();
     return E_OUTOFMEMORY;

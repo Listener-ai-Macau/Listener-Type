@@ -2799,7 +2799,8 @@ async fn try_early_tsf_append(inner: &Arc<Inner>, session_id: SessionId,
         session_id: session_id.to_string(), text: text.to_owned(),
         created_at: chrono::Utc::now().to_rfc3339(), target: Some(target),
     };
-    let result = inner.windows_ime.submit_prepared_exact(&prepared, request, move || {
+    let Some(foreground) = target_window else { return EarlyTsfOutcome::Unavailable; };
+    let result = inner.windows_ime.submit_prepared_exact(&prepared, request, foreground, move || {
         let current_session = early_tsf_session_listening(&guard_inner, session_id);
         current_session && delivery_target_is_current(target_window)
             && capture_ime_submit_target_for_window(target_window) == Some(target)
@@ -2853,7 +2854,8 @@ async fn try_guarded_tsf_terminal(inner: &Arc<Inner>, session_id: SessionId,
         session_id: session_id.to_string(), text: suffix.to_owned(),
         created_at: chrono::Utc::now().to_rfc3339(), target: Some(target),
     };
-    let result = inner.windows_ime.submit_terminal_prepared_exact(&prepared, request, expected.to_owned(), move || {
+    let Some(foreground) = target_window else { return EarlyTsfOutcome::Unavailable; };
+    let result = inner.windows_ime.submit_terminal_prepared_exact(&prepared, request, expected.to_owned(), foreground, move || {
         guarded_terminal_session_current(&guard_inner, session_id, finalizing)
             && delivery_target_is_current(target_window)
             && capture_ime_submit_target_for_window(target_window) == Some(target)

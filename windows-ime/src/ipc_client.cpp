@@ -485,11 +485,19 @@ void ListenerTypePipeServer::HandleSubmitLine(HANDLE pipe, const std::string& li
     return;
   }
 
+  if (message.type == L"probeForegroundGuard") {
+    if (!message.text.empty()) { WriteResult(pipe, message.session_id, L"failed", L"protocolError"); return; }
+    WriteResult(pipe, message.session_id, L"failed", L"foregroundGuardVersion1");
+    return;
+  }
+
   if (message.type == L"bindDirect") {
     if (!message.text.empty()) { WriteResult(pipe, message.session_id, L"failed", L"protocolError"); return; }
     bool not_dispatched = true;
     const HRESULT hr = service_->BindDirectTargetFromPipe(message.session_id, &not_dispatched);
     if (SUCCEEDED(hr)) WriteResult(pipe, message.session_id, L"committed", nullptr);
+    else if (not_dispatched && hr == HRESULT_FROM_WIN32(ERROR_CANCELLED))
+      WriteResult(pipe, message.session_id, L"failed", L"guardMismatch");
     else WriteResult(pipe, message.session_id, L"failed", L"bindingUnavailable");
     return;
   }

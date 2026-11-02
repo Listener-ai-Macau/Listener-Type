@@ -31,14 +31,16 @@ ListenerTypeEditSession::ListenerTypeEditSession(
     ITfComposition** composition_slot,
     std::shared_ptr<ListenerTypeAsyncEditState> async_state,
     ITfThreadMgr* focus_guard,
-    std::wstring expected_body)
+    std::wstring expected_body,
+    HWND expected_foreground)
     : context_(context),
       text_(std::move(text)),
       op_(op),
       composition_slot_(composition_slot),
       async_state_(std::move(async_state)),
       focus_guard_(focus_guard),
-      expected_body_(std::move(expected_body)) {
+      expected_body_(std::move(expected_body)),
+      expected_foreground_(expected_foreground) {
   // TSF may hold an asynchronous edit after the text service deactivates.
   // Keep DllCanUnloadNow false until the edit session's last reference ends.
   InterlockedIncrement(&g_object_count);
@@ -92,11 +94,13 @@ STDMETHODIMP ListenerTypeEditSession::DoEditSession(TfEditCookie edit_cookie) {
       break;
     case ListenerTypeCompositionOp::kInsertGuarded:
       // Async edit callbacks may run after the user has changed controls.
-      hr = ListenerFocusedContextIs(focus_guard_, context_)
+      hr = (expected_foreground_ == nullptr || GetForegroundWindow() == expected_foreground_) &&
+                   ListenerFocusedContextIs(focus_guard_, context_)
                ? InsertText(edit_cookie) : HRESULT_FROM_WIN32(ERROR_CANCELLED);
       break;
     case ListenerTypeCompositionOp::kInsertGuardedTerminal: {
-      if (!ListenerFocusedContextIs(focus_guard_, context_)) {
+      if ((expected_foreground_ != nullptr && GetForegroundWindow() != expected_foreground_) ||
+          !ListenerFocusedContextIs(focus_guard_, context_)) {
         hr = HRESULT_FROM_WIN32(ERROR_CANCELLED);
         break;
       }
@@ -104,7 +108,9 @@ STDMETHODIMP ListenerTypeEditSession::DoEditSession(TfEditCookie edit_cookie) {
       if (already == ListenerTerminalTail::kMatches) { hr = S_FALSE; break; }
       if (already == ListenerTerminalTail::kUnavailable) { hr = E_FAIL; break; }
       const auto before = ListenerInspectTerminalTail(context_, edit_cookie, expected_body_);
-      hr = before == ListenerTerminalTail::kMatches && ListenerFocusedContextIs(focus_guard_, context_)
+      hr = before == ListenerTerminalTail::kMatches &&
+                   (expected_foreground_ == nullptr || GetForegroundWindow() == expected_foreground_) &&
+                   ListenerFocusedContextIs(focus_guard_, context_)
                ? InsertText(edit_cookie) : HRESULT_FROM_WIN32(ERROR_CANCELLED);
       break;
     }

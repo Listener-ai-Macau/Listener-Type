@@ -198,12 +198,13 @@ impl WindowsImeSessionController {
         &self,
         prepared: &PreparedWindowsImeSession,
         request: ImeSubmitRequest,
+        foreground: usize,
         before_write: impl FnOnce() -> bool + Send,
     ) -> Result<InsertStatus, WindowsImeSessionError> {
         if !prepared.is_ready_for_tsf_submit() {
             return Err(WindowsImeSessionError::NotDispatched);
         }
-        let status = self.ipc.submit_text_exact(request, before_write).await
+        let status = self.ipc.submit_foreground_exact(request, None, foreground, before_write).await
             .map_err(session_ipc_error)?;
         Ok(map_ime_status_to_insert_status(status))
     }
@@ -214,12 +215,13 @@ impl WindowsImeSessionController {
         prepared: &PreparedWindowsImeSession,
         request: ImeSubmitRequest,
         expected_body: String,
+        foreground: usize,
         before_write: impl FnOnce() -> bool + Send,
     ) -> Result<InsertStatus, WindowsImeSessionError> {
         if !prepared.is_ready_for_tsf_submit() {
             return Err(WindowsImeSessionError::NotDispatched);
         }
-        let status = self.ipc.submit_terminal_exact(request, expected_body, before_write).await
+        let status = self.ipc.submit_foreground_exact(request, Some(expected_body), foreground, before_write).await
             .map_err(session_ipc_error)?;
         Ok(map_ime_status_to_insert_status(status))
     }

@@ -43,7 +43,8 @@ class ListenerTypeEditSession final : public ITfEditSession {
       ITfComposition** composition_slot = nullptr,
       std::shared_ptr<ListenerTypeAsyncEditState> async_state = nullptr,
       ITfThreadMgr* focus_guard = nullptr,
-      std::wstring expected_body = {});
+      std::wstring expected_body = {},
+      HWND expected_foreground = nullptr);
   ListenerTypeEditSession(const ListenerTypeEditSession&) = delete;
   ListenerTypeEditSession& operator=(const ListenerTypeEditSession&) = delete;
   ~ListenerTypeEditSession();
@@ -67,4 +68,5 @@ class ListenerTypeEditSession final : public ITfEditSession {
   std::shared_ptr<ListenerTypeAsyncEditState> async_state_;
   ITfThreadMgr* focus_guard_ = nullptr;
   std::wstring expected_body_;
+  HWND expected_foreground_ = nullptr;
 };
