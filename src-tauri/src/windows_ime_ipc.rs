@@ -71,6 +71,15 @@ fn is_retryable_pipe_error(error_code: Option<u32>) -> bool {
     )
 }
 
+fn classify_native_result(status: ImeSubmitStatus, error_code: Option<&str>) -> ImeSubmitStatus {
+    if status == ImeSubmitStatus::Rejected && error_code.is_some_and(|code|
+        code.starts_with("uncertain:") || code.eq_ignore_ascii_case("hresult:0x800705B4")) {
+        ImeSubmitStatus::Unconfirmed
+    } else {
+        status
+    }
+}
+
 #[derive(Debug)]
 pub struct PendingImeSubmit {
     session_id: String,
@@ -237,7 +246,7 @@ mod windows_pipe {
     use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
 
     use super::{
-        ImeSubmitRequest, PendingImeSubmit, WindowsImeIpcError, WindowsImeIpcResult,
+        classify_native_result, ImeSubmitRequest, PendingImeSubmit, WindowsImeIpcError, WindowsImeIpcResult,
         IME_CLIENT_WAIT_TIMEOUT, IME_PIPE_RETRY_INTERVAL, IME_SUBMIT_TIMEOUT,
     };
     use crate::windows_ime_protocol::{
@@ -407,6 +416,7 @@ mod windows_pipe {
                         "[windows-ime] submit result status={status:?} error_code={error_code:?}"
                     );
                 }
+                let status = classify_native_result(status, error_code.as_deref());
                 pending.accept_result(&session_id, status)
                     .map_err(|error| WindowsImeIpcError::AfterDispatch(error.to_string()))
             }
@@ -579,6 +589,14 @@ mod tests {
         assert!(is_retryable_pipe_error(Some(231)));
         assert!(!is_retryable_pipe_error(Some(5)));
         assert!(!is_retryable_pipe_error(None));
+    }
+
+    #[test]
+    fn rejected_results_distinguish_legacy_safe_fallback_from_possible_late_commit() {
+        assert_eq!(classify_native_result(ImeSubmitStatus::Rejected, Some("hresult:0x80004005")), ImeSubmitStatus::Rejected);
+        assert_eq!(classify_native_result(ImeSubmitStatus::Rejected, Some("hresult:0x800705B4")), ImeSubmitStatus::Unconfirmed);
+        assert_eq!(classify_native_result(ImeSubmitStatus::Rejected, Some("uncertain:hresult:0x80004005")), ImeSubmitStatus::Unconfirmed);
+        assert_eq!(classify_native_result(ImeSubmitStatus::Failed, Some("protocolError")), ImeSubmitStatus::Failed);
     }
 
     #[cfg(target_os = "windows")]

@@ -98,6 +98,8 @@ pub enum ImeSubmitStatus {
     Committed,
     Rejected,
     Failed,
+    /// Host-side classification for a request that may still commit.
+    Unconfirmed,
 }
 
 pub fn encode_message(message: &ImePipeMessage) -> Result<String, serde_json::Error> {

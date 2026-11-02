@@ -492,9 +492,10 @@ void ListenerTypePipeServer::HandleSubmitLine(HANDLE pipe, const std::string& li
     WriteResult(pipe, message.session_id, L"committed", nullptr);
   } else {
     const std::wstring error_code = HResultErrorCode(hr);
+    const std::wstring uncertain_code = L"uncertain:" + error_code;
     WriteResult(pipe, message.session_id,
                 definitely_not_dispatched ? L"failed" : L"rejected",
-                error_code.c_str());
+                definitely_not_dispatched ? error_code.c_str() : uncertain_code.c_str());
   }
 }
 

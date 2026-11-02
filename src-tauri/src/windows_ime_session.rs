@@ -41,13 +41,13 @@ impl WindowsImeSessionError {
 pub fn map_ime_status_to_insert_status(status: ImeSubmitStatus) -> InsertStatus {
     match status {
         ImeSubmitStatus::Committed => InsertStatus::Inserted,
-        ImeSubmitStatus::Rejected => InsertStatus::SubmittedUnconfirmed,
-        ImeSubmitStatus::Failed => InsertStatus::CopiedFallback,
+        ImeSubmitStatus::Unconfirmed => InsertStatus::SubmittedUnconfirmed,
+        ImeSubmitStatus::Rejected | ImeSubmitStatus::Failed => InsertStatus::CopiedFallback,
     }
 }
 
 pub fn should_fallback_after_ime_result(status: ImeSubmitStatus) -> bool {
-    matches!(status, ImeSubmitStatus::Failed)
+    matches!(status, ImeSubmitStatus::Rejected | ImeSubmitStatus::Failed)
 }
 
 fn session_ipc_error(error: WindowsImeIpcError) -> WindowsImeSessionError {
@@ -330,10 +330,11 @@ mod tests {
     }
 
     #[test]
-    fn rejected_ime_result_is_unconfirmed_and_never_requests_fallback() {
-        assert!(!should_fallback_after_ime_result(ImeSubmitStatus::Rejected));
-        assert_eq!(map_ime_status_to_insert_status(ImeSubmitStatus::Rejected),
+    fn unconfirmed_ime_result_never_requests_fallback() {
+        assert!(!should_fallback_after_ime_result(ImeSubmitStatus::Unconfirmed));
+        assert_eq!(map_ime_status_to_insert_status(ImeSubmitStatus::Unconfirmed),
             InsertStatus::SubmittedUnconfirmed);
+        assert!(should_fallback_after_ime_result(ImeSubmitStatus::Rejected));
         assert!(should_fallback_after_ime_result(ImeSubmitStatus::Failed));
         assert!(!should_fallback_after_ime_result(
             ImeSubmitStatus::Committed
