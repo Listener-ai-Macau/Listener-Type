@@ -80,7 +80,7 @@ fn recording_retention_uses_only_its_own_paste_lease() {
         // actual COM reader types intentionally cannot be sent across threads.
         let receipt = PasteReceipt {
             ticket: dispatch_ticket.id, revision: dispatch_ticket.revision,
-            payload: transport.into(), reader: None, before: None, value_before: None,
+            payload: transport.into(), reader: None, before: None, value_before: None, last_value_probe: None,
             dispatched_at: Instant::now(),
             observation: PasteObservation { consumed,
                 proof: consumed.then_some(PasteReceiptProof::ExactEdit),

@@ -433,6 +433,7 @@ struct PasteReceipt {
     reader: Option<crate::selection::PasteReader>,
     before: Option<(String, String)>,
     value_before: Option<String>,
+    last_value_probe: Option<Instant>,
     dispatched_at: Instant,
     observation: PasteObservation,
     completion: Option<Sender<PasteReceiptCompletion>>,
@@ -552,8 +553,10 @@ impl PasteReceipt {
                 // control's ValuePattern updates. A complete exact value edit
                 // may release the clipboard, but cannot grant range ownership.
                 let mut value_receipt = false;
-                if !self.strict_session_edit && !self.observation.consumed && selected.is_empty() {
+                let value_probe_due = self.last_value_probe.is_none_or(|last| last.elapsed() >= Duration::from_millis(250));
+                if !self.strict_session_edit && !self.observation.consumed && selected.is_empty() && value_probe_due {
                     if let Some(value_before) = self.value_before.as_deref() {
+                        self.last_value_probe = Some(Instant::now());
                         if let Ok(value_after) = self.reader.as_ref().expect("reader checked").paste_value() {
                             if value_readback_proves_paste(value_before, selected, &self.payload, &value_after) {
                                 self.observation.consumed = true;
@@ -938,6 +941,7 @@ fn run_with_capture(receiver: Receiver<Command>, initial_receipt: Option<PasteRe
                     reader,
                     before,
                     value_before,
+                    last_value_probe: None,
                     dispatched_at,
                     observation: PasteObservation::default(),
                     completion,
@@ -1416,6 +1420,7 @@ mod tests {
                 reader: None,
                 before: None,
                 value_before: None,
+                last_value_probe: None,
                 dispatched_at,
                 observation: PasteObservation::default(),
                 completion: Some(completion), session_body: None, observed_document: None, expected_session_document: None, strict_session_edit: false, staged_selection: false, dispatch_session: None,
@@ -1651,6 +1656,7 @@ mod tests {
                 reader: None,
                 before: None,
                 value_before: None,
+                last_value_probe: None,
                 dispatched_at: Instant::now(),
                 observation: PasteObservation::default(),
                 completion: None, session_body: None, observed_document: None, expected_session_document: None, strict_session_edit: false, staged_selection: false, dispatch_session: None,
