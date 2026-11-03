@@ -4885,7 +4885,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         status,
         !polished.trim().is_empty(),
         focus_ready_for_paste,
-        clipboard_retention_satisfied,
+        clipboard_retention_satisfied && clipboard_result != "stored_without_paste_confirmation",
         translation_active,
     ) {
         tokio::time::sleep(POST_DICTATION_KEY_DELAY).await;
@@ -5068,6 +5068,13 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
 
 fn clipboard_failure_completion_notice(message: Option<String>, enabled: bool,
     result: &str, history_saved: bool) -> Option<String> {
+    if enabled && result == "stored_without_paste_confirmation" {
+        let notice = "完整文字已复制，请核对上屏内容";
+        return Some(match message.filter(|value| !value.is_empty()) {
+            Some(message) => format!("{message}；{notice}"),
+            None => notice.to_string(),
+        });
+    }
     if !enabled || !matches!(result, "unconfirmed" | "unavailable" | "failed") {
         return message;
     }

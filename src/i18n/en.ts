@@ -987,6 +987,8 @@ export const en: typeof zhCN = {
       removeFillerWordsLabel: 'Remove filler words',
       removeFillerWordsDesc: 'Remove standalone hesitation sounds from previews and final transcripts.',
       copyDictationToClipboardLabel: 'Keep transcript in clipboard',
+      copyFinalImmediatelyLabel: 'Copy the full transcript immediately when finished',
+      copyFinalImmediatelyDesc: 'Prioritize the complete transcript in the clipboard. A slow app may paste it twice. Automatic sending is skipped while insertion remains unconfirmed.',
       copyDictationToClipboardDesc: 'Keep each completed dictation ready to paste. This takes priority over clipboard restoration.',
       sendKeyAfterDictationLabel: 'Send after dictation',
       sendKeyAfterDictationDesc: 'Send a submit key after the transcript is inserted successfully.',

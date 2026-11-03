@@ -447,6 +447,7 @@ export interface UserPreferences {
   restoreClipboardAfterPaste: boolean;
   /** 普通听写结束后将最终文本保留在剪贴板。默认开启。 */
   copyDictationToClipboard: boolean;
+  copyFinalTextWithoutPasteConfirmation: boolean;
   /** 从预览和最终文本中移除独立的犹豫语气词。默认关闭。 */
   removeFillerWords: boolean;
   /** 已应用一次性的默认关闭迁移。 */

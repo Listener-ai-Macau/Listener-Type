@@ -23,6 +23,9 @@ mod native_recording_retention_test;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RetentionResult {
     Stored,
+    /// Full text was published by the explicit completion-first policy, while
+    /// the target's outstanding paste was still unconfirmed.
+    StoredWithoutPasteConfirmation,
     Superseded,
     Unavailable,
     Failed,
@@ -142,6 +145,7 @@ enum Command {
     CopyBefore(String, Option<u64>, Instant, Sender<bool>),
     Retain(ClipboardTicket, String, bool, Sender<RetentionResult>),
     RetainRecording(ClipboardTicket, uuid::Uuid, String, bool, Sender<RetentionResult>),
+    PublishRecording(ClipboardTicket, uuid::Uuid, String, bool, Sender<RetentionResult>),
     Revisable(String, PasteShortcut, SessionPasteScope, Sender<PasteResult>),
 }
 
@@ -426,6 +430,18 @@ pub(crate) fn retain_recording(origin: ClipboardTicket, session: uuid::Uuid,
     receiver.recv().unwrap_or(RetentionResult::Failed)
 }
 
+/// Explicitly prioritize the completed transcript over an unconfirmed paste
+/// lease. This is an opt-in policy: a delayed target can read the final body
+/// instead of its pending fragment. Clipboard ownership checks still apply.
+pub(crate) fn publish_recording(origin: ClipboardTicket, session: uuid::Uuid,
+    text: &str, needs_receipt: bool) -> RetentionResult {
+    let (sender, receiver) = mpsc::channel();
+    if WORKER.send(Command::PublishRecording(origin, session, text.into(), needs_receipt, sender)).is_err() {
+        return RetentionResult::Failed;
+    }
+    receiver.recv().unwrap_or(RetentionResult::Failed)
+}
+
 struct PasteReceipt {
     ticket: u64,
     revision: Option<u64>,
@@ -700,6 +716,25 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
             command => (command, false),
         };
         match command {
+            Some(Command::PublishRecording(origin, session, text, needs_receipt, reply)) => {
+                let receipt = paste_receipt.as_ref().filter(|r| r.dispatch_session == Some(session));
+                let ticket = receipt.map(PasteReceipt::ticket).unwrap_or(origin);
+                let paste_unconfirmed = receipt.map_or(needs_receipt, |r|
+                    !r.observation.consumed && r.payload != text);
+                let mut owner = OWNER.lock();
+                if !still_owns_transport(ticket.id, *owner, ticket.revision, clipboard_revision()) {
+                    let _ = reply.send(RetentionResult::Superseded);
+                    continue;
+                }
+                finish(&mut pending, RetentionResult::Superseded);
+                *owner = owner.wrapping_add(1);
+                let result = publish_retained_if_current(&text, ticket.revision);
+                let result = if result == RetentionResult::Stored && paste_unconfirmed {
+                    RetentionResult::StoredWithoutPasteConfirmation
+                } else { result };
+                paste_receipt = None;
+                let _ = reply.send(result);
+            }
             Some(Command::Paste(text, restore, shortcut, expected, scope, reply)) => {
                 let rejected = || PasteResult { status: InsertStatus::DeferredNoTarget,
                     terminal_decision: None, receipt: None, range_permission: SessionRangePermission::NotRequested };

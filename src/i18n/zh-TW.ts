@@ -992,6 +992,8 @@ export const zhTW: typeof zhCN = {
       removeFillerWordsLabel: '自動移除語氣詞',
       removeFillerWordsDesc: '從預覽和最終文字中移除獨立的「嗯、呃、額、唔」等猶豫詞。',
       copyDictationToClipboardLabel: '轉寫保留到剪貼板',
+      copyFinalImmediatelyLabel: '結束後立即複製完整文字',
+      copyFinalImmediatelyDesc: '優先把本次完整文字放入剪貼板。目標軟體讀取較慢時可能重複上屏；上屏未確認時不會自動傳送。',
       copyDictationToClipboardDesc: '每次普通聽寫完成後保留最終文字，開啟時優先於恢復原剪貼板。',
       sendKeyAfterDictationLabel: '聽寫後自動傳送',
       sendKeyAfterDictationDesc: '文字成功插入後自動傳送提交按鍵。',

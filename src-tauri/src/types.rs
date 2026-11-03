@@ -1282,6 +1282,10 @@ pub struct UserPreferences {
     pub restore_clipboard_after_paste: bool,
     /// 普通听写结束后把最终文本保留在剪贴板。默认开启；开启时覆盖剪贴板恢复设置。
     pub copy_dictation_to_clipboard: bool,
+    /// Opt in to final clipboard publication without a target paste receipt.
+    /// A slow target may paste the whole final text instead of its last fragment.
+    #[serde(default)]
+    pub copy_final_text_without_paste_confirmation: bool,
     /// 从听写预览和最终文本中移除独立的中文犹豫语气词。默认关闭，
     /// 避免 Raw/自动唤醒首句在用户未主动选择时被改写。
     #[serde(default)]
@@ -1609,6 +1613,8 @@ struct UserPreferencesWire {
     #[serde(default)]
     copy_dictation_to_clipboard: Option<bool>,
     #[serde(default)]
+    copy_final_text_without_paste_confirmation: bool,
+    #[serde(default)]
     remove_filler_words: bool,
     #[serde(default)]
     remove_filler_words_default_migrated: bool,
@@ -1744,6 +1750,7 @@ impl Default for UserPreferencesWire {
             llm_thinking_enabled: prefs.llm_thinking_enabled,
             restore_clipboard_after_paste: prefs.restore_clipboard_after_paste,
             copy_dictation_to_clipboard: Some(prefs.copy_dictation_to_clipboard),
+            copy_final_text_without_paste_confirmation: prefs.copy_final_text_without_paste_confirmation,
             remove_filler_words: prefs.remove_filler_words,
             remove_filler_words_default_migrated: prefs.remove_filler_words_default_migrated,
             send_key_after_dictation: prefs.send_key_after_dictation,
@@ -1944,6 +1951,7 @@ impl<'de> Deserialize<'de> for UserPreferences {
             copy_dictation_to_clipboard: wire
                 .copy_dictation_to_clipboard
                 .unwrap_or(wire.streaming_insert_save_clipboard),
+            copy_final_text_without_paste_confirmation: wire.copy_final_text_without_paste_confirmation,
             remove_filler_words,
             remove_filler_words_default_migrated: true,
             send_key_after_dictation: wire.send_key_after_dictation,
@@ -2399,6 +2407,7 @@ impl Default for UserPreferences {
             llm_thinking_enabled: false,
             restore_clipboard_after_paste: true,
             copy_dictation_to_clipboard: true,
+            copy_final_text_without_paste_confirmation: false,
             remove_filler_words: false,
             remove_filler_words_default_migrated: true,
             send_key_after_dictation: false,

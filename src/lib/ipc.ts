@@ -220,6 +220,7 @@ let mockSettings: UserPreferences = {
   llmThinkingEnabled: false,
   restoreClipboardAfterPaste: true,
   copyDictationToClipboard: true,
+  copyFinalTextWithoutPasteConfirmation: false,
   removeFillerWords: false,
   removeFillerWordsDefaultMigrated: true,
   sendKeyAfterDictation: false,

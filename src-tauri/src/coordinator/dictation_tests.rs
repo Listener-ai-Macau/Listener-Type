@@ -15561,6 +15561,33 @@ fn clipboard_failure_notice_does_not_claim_pending_or_superseded_copy_failed() {
 }
 
 #[test]
+fn immediate_final_copy_is_explicit_and_survives_settings_roundtrip() {
+    let mut saved = serde_json::to_value(UserPreferences::default()).unwrap();
+    saved.as_object_mut().unwrap().remove("copyFinalTextWithoutPasteConfirmation");
+    let existing: UserPreferences = serde_json::from_value(saved.clone()).unwrap();
+    assert!(!existing.copy_final_text_without_paste_confirmation,
+        "an upgrade cannot silently replace an unconfirmed paste lease");
+    saved["copyFinalTextWithoutPasteConfirmation"] = serde_json::json!(true);
+    let enabled: UserPreferences = serde_json::from_value(saved).unwrap();
+    assert!(enabled.copy_final_text_without_paste_confirmation);
+    let restored: UserPreferences = serde_json::from_value(serde_json::to_value(enabled).unwrap()).unwrap();
+    assert!(restored.copy_final_text_without_paste_confirmation);
+}
+
+#[tokio::test]
+async fn immediate_final_copy_reports_storage_without_claiming_paste_confirmation() {
+    let history = clipboard_recovery_history_record();
+    let result = super::retain_history_clipboard_with_foreground_budget(&history, |_| {
+        crate::insertion::RetentionResult::StoredWithoutPasteConfirmation
+    }).await;
+    assert_eq!(result, (true, "stored_without_paste_confirmation"));
+    let notice = super::clipboard_failure_completion_notice(None, true, result.1, true).unwrap();
+    assert!(notice.contains("已复制"));
+    assert!(notice.contains("核对上屏"));
+    assert!(!notice.contains("未能更新"));
+}
+
+#[test]
 #[cfg(target_os = "windows")]
 fn unconfirmed_native_edit_keeps_clipboard_available_but_prior_paste_stays_guarded() {
     let (status, route) = super::unconfirmed_streaming_delivery_route(false);

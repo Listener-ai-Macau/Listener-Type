@@ -894,6 +894,18 @@ function DeviceFirmwareSettingsCard({onSelectedChange,onRead}:{onSelectedChange:
                   savePrefs(current => ({ ...current, copyDictationToClipboard }))}
               />
             </SettingRow>
+            {detectOS() === 'win' && prefs.copyDictationToClipboard && (
+              <SettingRow
+                label={t('settings.recording.copyFinalImmediatelyLabel')}
+                desc={t('settings.recording.copyFinalImmediatelyDesc')}
+              >
+                <Toggle
+                  on={prefs.copyFinalTextWithoutPasteConfirmation}
+                  onToggle={copyFinalTextWithoutPasteConfirmation =>
+                    savePrefs(current => ({ ...current, copyFinalTextWithoutPasteConfirmation }))}
+                />
+              </SettingRow>
+            )}
             <SettingRow
               label={t('settings.recording.sendKeyAfterDictationLabel')}
               desc={t('settings.recording.sendKeyAfterDictationDesc')}

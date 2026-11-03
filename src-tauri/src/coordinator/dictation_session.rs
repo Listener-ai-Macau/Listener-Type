@@ -47,10 +47,18 @@ async fn retain_final_clipboard_with_foreground_budget(
     };
     #[cfg(not(target_os = "windows"))]
     let ticket = inner.inserter.clipboard_retention_ticket();
+    #[cfg(target_os = "windows")]
+    let completion_first = inner.prefs.get().copy_final_text_without_paste_confirmation;
     let inner = Arc::clone(inner);
     retain_history_clipboard_with_foreground_budget(history, move |text| {
         #[cfg(target_os = "windows")]
-        { inner.inserter.retain_recording_clipboard(origin.1, origin.0, text, unconfirmed_paste_uses_clipboard) }
+        {
+            if completion_first {
+                inner.inserter.publish_recording_clipboard(origin.1, origin.0, text, unconfirmed_paste_uses_clipboard)
+            } else {
+                inner.inserter.retain_recording_clipboard(origin.1, origin.0, text, unconfirmed_paste_uses_clipboard)
+            }
+        }
         #[cfg(not(target_os = "windows"))]
         inner.inserter.retain_session_clipboard(ticket, text, unconfirmed_paste_uses_clipboard)
     }).await
@@ -96,6 +104,7 @@ async fn retain_history_clipboard_with_foreground_budget(
 
     match tokio::time::timeout(FINAL_CLIPBOARD_RETENTION_FOREGROUND_BUDGET, copy_task).await {
         Ok(Ok(crate::insertion::RetentionResult::Stored)) => (true, "stored"),
+        Ok(Ok(crate::insertion::RetentionResult::StoredWithoutPasteConfirmation)) => (true, "stored_without_paste_confirmation"),
         Ok(Ok(crate::insertion::RetentionResult::Superseded)) => (false, "superseded"),
         Ok(Ok(crate::insertion::RetentionResult::Unavailable)) => (false, "unconfirmed"),
         Ok(Ok(crate::insertion::RetentionResult::Failed)) => (false, "failed"),
