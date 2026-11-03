@@ -1791,6 +1791,7 @@ fn take_latest_embedded_audio_final_result(
 }
 
 include!("dictation_capture_control_trace.rs");
+include!("dictation_input_health.rs");
 include!("dictation_wake_capture_startup.rs");
 
 struct EmbeddedAudioDictationSession {
@@ -1816,6 +1817,7 @@ struct EmbeddedAudioDictationSession {
     streaming_pcm_buffer: Vec<u8>,
     streaming_pcm_sources: VecDeque<EmbeddedStreamingPcmSourceRun>,
     streaming_agc: EmbeddedStreamingAgcState,
+    input_health: InputHealthClock,
     local_speech_activity: LocalSpeechActivity,
     local_speaker_tracker: Option<LocalSessionSpeakerTracker>,
     retained_wake_verification_source: Option<SessionWakeVerificationSource>,
@@ -2024,6 +2026,7 @@ async fn begin_embedded_audio_dictation_session_for_action(
         streaming_pcm_buffer: Vec::new(),
         streaming_pcm_sources: VecDeque::new(),
         streaming_agc: EmbeddedStreamingAgcState::default(),
+        input_health: InputHealthClock::default(),
         local_speech_activity,
         local_speaker_tracker: None,
         retained_wake_verification_source: None,

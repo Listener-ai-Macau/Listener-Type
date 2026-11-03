@@ -1320,6 +1320,25 @@ impl EmbeddedAudioDictationSession {
             asr.note_local_speech_activity(local_speech_evidence);
             asr.submit_personal_vad(pcm, audio_end_samples);
         }
+        if self.input_health.should_emit(audio_end_ms) {
+            // Gain statistics already exist for this block. Retain only
+            // levels and model progress; never retain PCM or recognized text.
+            let personal = self.volcengine_asr.as_ref().and_then(|asr| asr.personal_vad_snapshot());
+            log::info!(
+                "[asr] input health audio_ms={audio_end_ms} block_ms={chunk_ms} rms_before_milli={} rms_after_milli={} peak_before={} peak_after={} energy_present={has_speech_energy} vad_state={:?} vad_analyzed_ms={} vad_speech_end_ms={:?} vad_epoch={} personal_state={:?} personal_analyzed_ms={:?} personal_positive_ms={:?}",
+                (gain_stats.rms_before * 1_000.0).round() as u64,
+                (gain_stats.rms_after * 1_000.0).round() as u64,
+                gain_stats.peak_before,
+                gain_stats.peak_after,
+                local_speech_evidence.state,
+                local_speech_evidence.analyzed_through_ms,
+                local_speech_evidence.last_detected_speech_end_ms,
+                local_speech_evidence.activity_epoch,
+                personal.map(|observation| observation.state),
+                personal.map(|observation| observation.analyzed_end_ms),
+                personal.and_then(|observation| observation.last_positive_end_ms),
+            );
+        }
         let stable_target_end_ms = self
             .volcengine_asr
             .as_ref()

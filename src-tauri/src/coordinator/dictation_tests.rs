@@ -3152,6 +3152,7 @@ fn embedded_audio_test_session(
         streaming_pcm_buffer: Vec::new(),
         streaming_pcm_sources: std::collections::VecDeque::new(),
         streaming_agc: EmbeddedStreamingAgcState::default(),
+        input_health: super::InputHealthClock::default(),
         local_speech_activity: LocalSpeechActivity::disabled(),
         local_speaker_tracker: None,
         retained_wake_verification_source: None,
