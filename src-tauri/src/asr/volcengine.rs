@@ -6140,12 +6140,19 @@ fn provider_response_metadata(
     authoritative_two_pass: bool,
 ) -> Value {
     let mut sources = Vec::new();
+    let mut definite_utterances = 0;
+    let mut provisional_utterances = 0;
     let utterance_count =
         result
             .get("utterances")
             .and_then(Value::as_array)
             .map_or(0, |utterances| {
                 for utterance in utterances {
+                    match utterance.get("definite").and_then(Value::as_bool) {
+                        Some(true) => definite_utterances += 1,
+                        Some(false) => provisional_utterances += 1,
+                        None => {}
+                    }
                     let Some(source) = utterance
                         .get("additions")
                         .and_then(|additions| additions.get("source"))
@@ -6187,6 +6194,8 @@ fn provider_response_metadata(
         "audio_duration_ms": server_audio_duration_ms(json),
         "sources": sources,
         "utterance_count": utterance_count,
+        "definite_utterance_count": definite_utterances,
+        "provisional_utterance_count": provisional_utterances,
         "has_final_frame": has_final_frame,
         "authoritative_two_pass": authoritative_two_pass,
         "two_pass_empty": result_marks_two_pass_empty(result),
@@ -17633,6 +17642,8 @@ mod tests {
         assert_eq!(metadata["audio_duration_ms"], 1_600);
         assert_eq!(metadata["sources"], json!(["two_pass"]));
         assert_eq!(metadata["utterance_count"], 1);
+        assert_eq!(metadata["definite_utterance_count"], 1);
+        assert_eq!(metadata["provisional_utterance_count"], 0);
         assert_eq!(metadata["has_final_frame"], false);
         assert_eq!(metadata["authoritative_two_pass"], true);
         assert_eq!(metadata["provider_result_chars"], 18);

@@ -369,6 +369,7 @@ const AUTOMATIC_STOP_VAD_STALLED_ANALYSIS_ESCAPE_MS: u64 = 3_000;
 // separately observed, continuously quiet microphone may initiate the normal
 // drain-and-finalize path; elapsed text age is not silence.
 const PENDING_BODY_QUIET_FINALIZE_MS: u64 = 8_000;
+const RECOGNITION_TAIL_QUIET_FINALIZE_MS: u64 = 3_000;
 const TENTATIVE_OWNER_CONTINUATION_MAX_WAIT_MS: u64 = 1_500;
 const MANUAL_TERMINAL_BRIDGE_MAX_MS: u64 = 3_000;
 const MANUAL_TERMINAL_BRIDGE_MIN_VISIBLE_CHARS: usize = 20;
@@ -569,14 +570,33 @@ impl SettledTargetEndpointClock {
         {
             return false;
         }
-        let timeout_ms = timeout_ms.max(PENDING_BODY_QUIET_FINALIZE_MS);
+        let Some(silence) = self.local_vad_stop_observation.as_ref()
+            .and_then(LocalVadStopObservation::confirmed_silence) else { return false; };
+        // A completed visible clause can remain provisional until the provider
+        // receives end-of-input. Do not make it wait eight seconds for the
+        // very confirmation that normal drain/finalization must request.
+        // PendingBodyDelivery already has owner permission. This only closes
+        // capture; it never certifies or consumes the unconfirmed words.
+        let recognition_tail_ready = self.pending_owner_delivery.as_ref()
+            .is_some_and(|pending| pending.recognition_pending)
+            && self.latest_visible_body_ends_terminal == Some(true)
+            && self.last_body_delivery_at.is_some()
+            && self.latest_local_vad_evidence
+                .and_then(|evidence| evidence.last_detected_speech_end_ms)
+                .zip(self.latest_update.as_ref().and_then(|update| update.provider_audio_duration_ms))
+                .is_some_and(|(speech_end, provider_end)| {
+                    provider_end.saturating_add(ENDPOINT_PROVIDER_CATCH_UP_GRACE_MS) >= speech_end
+                });
+        let timeout_ms = timeout_ms.max(if recognition_tail_ready {
+            RECOGNITION_TAIL_QUIET_FINALIZE_MS
+        } else {
+            PENDING_BODY_QUIET_FINALIZE_MS
+        });
         if self.last_body_delivery_at.is_some_and(|at| {
             now.saturating_duration_since(at) < Duration::from_millis(timeout_ms)
         }) {
             return false;
         }
-        let Some(silence) = self.local_vad_stop_observation.as_ref()
-            .and_then(LocalVadStopObservation::confirmed_silence) else { return false; };
         // Personal activity is optional across machines. In its absence, the
         // independent VAD still has to prove a fresh full quiet interval.
         // No recognized body is discarded or marked delivered here.
@@ -3817,4 +3837,6 @@ mod endpoint_clock_submission_tests {
         assert!(LocalVadEpochSourceFence::ObservedThrough(108_160).is_unobserved(108_159));
         assert!(!LocalVadEpochSourceFence::ObservedThrough(108_160).is_unobserved(108_160));
     }
+
+    include!("dictation_pending_tail_tests.rs");
 }
