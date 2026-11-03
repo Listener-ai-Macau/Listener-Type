@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-29T19:14:09.282521+08:00",
+  "updated_at": "2026-11-03T15:03:50+08:00",
   "purpose": "Historical index of exact critical-feature commits, evidence scope and focused failure checks. It is not a mandatory blanket checklist; use only checks relevant to the current failure and reuse still-valid results.",
   "repositories": {
     "type": {
@@ -10333,6 +10333,38 @@
         "installed": true,
         "publicPrepared": true
       }
+    },
+    {
+      "id": "type_background_wake_recovery_keeps_live_ingress",
+      "repo": "type",
+      "commit": "c2d29592eaee36933f52c0a1cd3447cbea1848cf",
+      "subject": "Keep live wake ingress running through separated phrase verification",
+      "state": "production_component_regressions_passed_field_pending",
+      "protects": [
+        "The live PCM actor polls the entire separation, phrase and owner recovery instead of awaiting verification after separation finishes.",
+        "Retiring or changing a candidate cancels the remaining background recovery; already running native inference may finish without starting a later helper.",
+        "Terminal separation keeps its original phase-only budget; phrase and speaker admission remain unchanged. Component checks do not certify every acoustic miss or real-device latency."
+      ],
+      "guards": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib wake_recovery -- --test-threads=1",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib wake_ -- --test-threads=1"
+      ]
+    },
+    {
+      "id": "type_completed_recognition_tail_quiet_finalization",
+      "repo": "type",
+      "commit": "dff69814c5e818431793df2da5dacfce5b955ccf",
+      "subject": "Finalize completed recognition tails after verified quiet",
+      "state": "production_component_regressions_passed_field_pending",
+      "protects": [
+        "An owner-approved recognition-only tail after previously submitted body may close capture at the normal quiet deadline (at least three seconds) when the preview completes a clause and provider progress covers the last local speech.",
+        "VAD silence must be fresh and cover the latest captured source. New speech, outstanding editor dispatch, open or unknown clauses and lagging provider progress preserve their existing holds.",
+        "Closing capture preserves pending words for authoritative finalization; it never marks provisional text delivered. Installed field behavior remains a separate check."
+      ],
+      "guards": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib endpoint_clock_submission_tests -- --test-threads=1",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib recognition_boundary_tests -- --test-threads=1"
+      ]
     }
   ],
   "feature_routes_updated_at": "2026-10-29T19:14:09.282521+08:00",
@@ -10345,7 +10377,8 @@
         "type_wake_tail_and_cross_restart_diagnostic_retention",
         "type_recording_latency_and_ble_audio_control",
         "firmware_audio_real_block_media_credit",
-        "firmware_brownout_rom_wait_recovery_scope"
+        "firmware_brownout_rom_wait_recovery_scope",
+        "type_background_wake_recovery_keeps_live_ingress"
       ],
       "paths": {
         "type": [
@@ -10477,7 +10510,8 @@
         "type79_recorded_audio_to_original_popup",
         "type92_recorded_audio_to_original_popup",
         "type139_microphone_error_preserves_newer_recording",
-        "type140_original_popup_auto_and_manual_end_exact_history_clipboard"
+        "type140_original_popup_auto_and_manual_end_exact_history_clipboard",
+        "type_completed_recognition_tail_quiet_finalization"
       ],
       "paths": {
         "type": [
