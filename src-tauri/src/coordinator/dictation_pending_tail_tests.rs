@@ -66,3 +66,92 @@ fn pending_recognition_tail_rechecks_vad_and_editor_dispatch_before_stop() {
     assert!(dispatching.begin_text_submission(now, "正在上屏的正文").is_some());
     assert!(!dispatching.is_due(now, 3_000), "an actual in-flight paste still owns its hold");
 }
+
+/// Repeat the actual endpoint reducer with reproducible callback delays and
+/// order changes. This owns no microphone, GUI, clipboard or physical STOP.
+#[test]
+fn intermittent_tail_fault_matrix_rejects_resumed_and_out_of_order_speech() {
+    use crate::asr::volcengine::{LocalSpeechActivityState, LocalSpeechEvidence};
+    let base = Instant::now();
+    for seed in 1_u64..=128 {
+        let mut random = seed;
+        let mut next = || {
+            random ^= random << 13;
+            random ^= random >> 7;
+            random ^= random << 17;
+            random
+        };
+        let initial = base + Duration::from_millis(seed * 10_000);
+        let mut clock = complete_pending_tail_clock(initial, 3_000);
+        assert!(clock.is_due(initial, 3_000), "seed={seed}: valid quiet must stay usable");
+        let source = 23_672 + 1 + next() % 200;
+        let receipt = initial + Duration::from_millis(next() % 700);
+        let onset = LocalSpeechEvidence {
+            revision: 2, activity_epoch: 1, analyzed_through_ms: source,
+            pending_speech_start_ms: Some(source - 1),
+            state: LocalSpeechActivityState::PendingSpeech, ..Default::default()
+        };
+        clock.note_local_vad_evidence_at(onset, receipt);
+        assert!(!clock.pending_body_quiet_stop_due(source, receipt, 3_000),
+            "seed={seed}: a queued stop must be revoked by even an unconfirmed short onset");
+        // A delayed quiet callback from before that onset must not revive STOP.
+        clock.note_local_vad_evidence_at(LocalSpeechEvidence {
+            revision: 1, analyzed_through_ms: 23_672,
+            last_detected_speech_end_ms: Some(20_672),
+            state: LocalSpeechActivityState::NonSpeech, ..Default::default()
+        }, receipt + Duration::from_millis(next() % 100));
+        assert!(!clock.pending_body_quiet_stop_due(source, receipt, 3_000),
+            "seed={seed}: an out-of-order callback cannot restore old silence");
+        let short_quiet = next() % 2_999;
+        let fresh = receipt + Duration::from_millis(short_quiet);
+        clock.latest_update.as_mut().unwrap().audio_duration_ms = Some(source + short_quiet);
+        clock.latest_update.as_mut().unwrap().provider_audio_duration_ms = Some(source);
+        clock.note_local_vad_evidence_at(LocalSpeechEvidence {
+            revision: 3, activity_epoch: 1, analyzed_through_ms: source + short_quiet,
+            last_detected_speech_end_ms: Some(source),
+            state: LocalSpeechActivityState::NonSpeech, ..Default::default()
+        }, fresh);
+        assert!(!clock.pending_body_quiet_stop_due(source + short_quiet, fresh, 3_000),
+            "seed={seed}: a short new utterance needs its own full quiet interval");
+    }
+}
+
+#[test]
+fn intermittent_tail_fault_matrix_holds_continuous_speech_then_releases_real_quiet() {
+    use crate::asr::volcengine::{LocalSpeechActivityState, LocalSpeechEvidence};
+    let base = Instant::now();
+    for seed in 1_u64..=32 {
+        let mut clock = complete_pending_tail_clock(base, 3_000);
+        let mut source = 23_672;
+        let mut elapsed = 0;
+        // Exercise a long dictation without wall-clock sleeps or model calls.
+        for revision in 2..=150_u64 {
+            let step = 40 + (seed * revision * 17) % 240;
+            source += step;
+            elapsed += step;
+            let now = base + Duration::from_millis(elapsed);
+            clock.latest_update.as_mut().unwrap().audio_duration_ms = Some(source);
+            // Delayed provider confirmation must not turn captured speech into silence.
+            clock.latest_update.as_mut().unwrap().provider_audio_duration_ms = Some(source.saturating_sub((revision % 7) * 400));
+            clock.note_local_vad_evidence_at(LocalSpeechEvidence {
+                revision, activity_epoch: 1, analyzed_through_ms: source,
+                last_detected_speech_end_ms: Some(source),
+                state: LocalSpeechActivityState::Speech, ..Default::default()
+            }, now);
+            assert!(!clock.pending_body_quiet_stop_due(source, now, 3_000),
+                "seed={seed} revision={revision}: continuous detected speech cannot authorize STOP");
+        }
+        let quiet_at = base + Duration::from_millis(elapsed + 3_000);
+        clock.latest_update.as_mut().unwrap().audio_duration_ms = Some(source + 3_000);
+        clock.latest_update.as_mut().unwrap().provider_audio_duration_ms = Some(source);
+        clock.note_local_vad_evidence_at(LocalSpeechEvidence {
+            revision: 151, activity_epoch: 1, analyzed_through_ms: source + 3_000,
+            last_detected_speech_end_ms: Some(source),
+            state: LocalSpeechActivityState::NonSpeech, ..Default::default()
+        }, quiet_at);
+        assert!(clock.pending_body_quiet_stop_due(source + 3_000, quiet_at, 3_000),
+            "seed={seed}: protecting speech must not disable normal finalization");
+        assert!(clock.pending_owner_delivery.as_ref().unwrap().recognition_pending,
+            "seed={seed}: deciding to end capture must not consume unconfirmed words");
+    }
+}
