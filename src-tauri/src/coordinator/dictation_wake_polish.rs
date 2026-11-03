@@ -2302,11 +2302,7 @@ struct BufferedSpeakerCandidate {
     /// established raw path; it may release only after the extracted output
     /// independently passes both phrase and voiceprint verification.
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
-    target_wake_extraction_task: Option<
-        tauri::async_runtime::JoinHandle<
-            Result<crate::asr::target_speaker_extraction::ExtractedWakeCandidate, String>,
-        >,
-    >,
+    target_wake_extraction_task: Option<WakeRecoveryTask<EvaluatedTargetWakeExtraction>>,
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     target_wake_extraction_attempted: bool,
     #[cfg(target_os = "windows")]
@@ -2805,6 +2801,10 @@ impl BufferedSpeakerCandidate {
         self.primary_owner_input = None;
         self.owner_ambiguous_confirmations = 0;
         self.owner_best_ambiguous_score = 0.0;
+        #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))] {
+            self.target_wake_extraction_task = None;
+            self.target_wake_extraction_attempted = false;
+        }
         #[cfg(target_os = "windows")] {
             self.primary_keyword_check = None;
             self.local_confirmation_task = None;
@@ -3076,6 +3076,12 @@ struct ExtractedOwnerWakeEvidence {
     owner_score: f32,
     owner_verified_by_extraction: bool,
     residual_ratio: f64,
+}
+
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+struct EvaluatedTargetWakeExtraction {
+    evidence: ExtractedOwnerWakeEvidence,
+    phrase_matched: bool,
 }
 
 #[cfg(target_os = "windows")]

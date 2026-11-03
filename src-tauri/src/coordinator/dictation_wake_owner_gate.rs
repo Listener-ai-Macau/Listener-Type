@@ -544,6 +544,7 @@ async fn terminal_owner_verification_for_recall(
 
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 fn maybe_start_target_wake_extraction(
+    inner: &Arc<Inner>,
     candidate: &mut BufferedSpeakerCandidate,
     phrase: &str,
     embedded_session_id: u32,
@@ -571,11 +572,12 @@ fn maybe_start_target_wake_extraction(
     {
         return;
     }
-    start_target_wake_extraction(candidate, phrase, embedded_session_id, "weak_phrase_hint");
+    start_target_wake_extraction(inner, candidate, phrase, embedded_session_id, "weak_phrase_hint");
 }
 
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 fn maybe_start_phrase_owner_recovery(
+    inner: &Arc<Inner>,
     candidate: &mut BufferedSpeakerCandidate,
     phrase: &str,
     embedded_session_id: u32,
@@ -590,6 +592,7 @@ fn maybe_start_phrase_owner_recovery(
     }
     if candidate.target_wake_extraction_task.is_none() {
         start_target_wake_extraction(
+            inner,
             candidate,
             phrase,
             embedded_session_id,
@@ -600,6 +603,7 @@ fn maybe_start_phrase_owner_recovery(
 
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 fn start_target_wake_extraction(
+    inner: &Arc<Inner>,
     candidate: &mut BufferedSpeakerCandidate,
     phrase: &str,
     embedded_session_id: u32,
@@ -622,11 +626,18 @@ fn start_target_wake_extraction(
         }
     };
     let pcm = candidate.pcm.clone();
-    candidate.target_wake_extraction_task = Some(tauri::async_runtime::spawn_blocking(move || {
-        crate::asr::target_speaker_extraction::extract_enrolled_owner_wake_candidate(
+    let recovery_inner = Arc::clone(inner);
+    let recovery_phrase = phrase.to_string();
+    candidate.target_wake_extraction_task = Some(WakeRecoveryTask::spawn(
+        move || crate::asr::target_speaker_extraction::extract_enrolled_owner_wake_candidate(
             &pcm, embedding,
-        )
-    }));
+        ),
+        move |extracted| async move {
+            evaluate_target_wake_extraction(
+                &recovery_inner, extracted, &recovery_phrase, embedded_session_id,
+            ).await
+        },
+    ));
     log::info!(
         "[target-speaker] owner wake extraction started embedded_session_id={} source_pcm_ms={} reason={}",
         embedded_session_id,
@@ -637,6 +648,7 @@ fn start_target_wake_extraction(
 
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 fn maybe_start_terminal_owner_compatible_wake_extraction(
+    inner: &Arc<Inner>,
     candidate: &mut BufferedSpeakerCandidate,
     phrase: &str,
     embedded_session_id: u32,
@@ -659,6 +671,7 @@ fn maybe_start_terminal_owner_compatible_wake_extraction(
     );
     if decision == crate::speech_decision_kernel::WakeRecoveryDecision::AwaitSeparatedOwner {
         start_target_wake_extraction(
+            inner,
             candidate,
             phrase,
             embedded_session_id,
@@ -720,8 +733,7 @@ async fn evaluate_target_wake_extraction(
     extracted: crate::asr::target_speaker_extraction::ExtractedWakeCandidate,
     phrase: &str,
     embedded_session_id: u32,
-    source_owner_compatible: bool,
-) -> Result<Option<ExtractedOwnerWakeEvidence>, String> {
+) -> Result<EvaluatedTargetWakeExtraction, String> {
     let confirmation_task = spawn_local_wake_confirmation(
         inner,
         LocalWakeConfirmationDiagnosticContext {
@@ -759,13 +771,6 @@ async fn evaluate_target_wake_extraction(
         extracted.residual_ratio
     );
     let separated_owner_match = verification.enrolled_owner_matched();
-    if !target_extracted_wake_can_activate(
-        phrase_matched,
-        source_owner_compatible,
-        separated_owner_match,
-    ) {
-        return Ok(None);
-    }
     let wake_match = crate::wake_phrase::Match {
         start_seconds: None,
         end_seconds: refined_wake_end_seconds(
@@ -777,14 +782,26 @@ async fn evaluate_target_wake_extraction(
         origin: crate::wake_phrase::KeywordEvidenceOrigin::PrimaryDetector,
         audio_end_seconds: None,
     };
-    Ok(Some(ExtractedOwnerWakeEvidence {
+    Ok(EvaluatedTargetWakeExtraction { phrase_matched, evidence: ExtractedOwnerWakeEvidence {
         wake_match,
         local_confirmation_ms: confirmation.inference_ms,
         extraction_ms: extracted.inference_ms,
         owner_score: verification.score,
         owner_verified_by_extraction: separated_owner_match,
         residual_ratio: extracted.residual_ratio,
-    }))
+    }})
+}
+
+#[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+fn qualify_target_wake_extraction(
+    evaluated: EvaluatedTargetWakeExtraction,
+    source_owner_compatible: bool,
+) -> Option<ExtractedOwnerWakeEvidence> {
+    target_extracted_wake_can_activate(
+        evaluated.phrase_matched,
+        source_owner_compatible,
+        evaluated.evidence.owner_verified_by_extraction,
+    ).then_some(evaluated.evidence)
 }
 
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
@@ -805,63 +822,28 @@ fn target_extracted_wake_can_activate(
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 async fn terminal_target_wake_evidence(
     candidate: &mut BufferedSpeakerCandidate,
-    inner: &Arc<Inner>,
-    phrase: &str,
+    _inner: &Arc<Inner>,
+    _phrase: &str,
     embedded_session_id: u32,
     lazy_terminal_start: bool,
     source_owner_compatible: bool,
 ) -> Option<ExtractedOwnerWakeEvidence> {
-    let mut task = candidate.target_wake_extraction_task.take()?;
-    let already_finished = task.inner().is_finished();
+    let task = candidate.target_wake_extraction_task.take()?;
     let wait_ms = target_wake_extraction_terminal_wait_ms(lazy_terminal_start);
-    let outcome = if already_finished {
-        Some(task.await)
-    } else {
-        match tokio::time::timeout(
-            Duration::from_millis(wait_ms),
-            &mut task,
-        )
-        .await
-        {
-            Ok(result) => Some(result),
-            Err(_) => {
-                task.abort();
-                log::info!(
-                    "[target-speaker] terminal owner wake extraction exceeded budget embedded_session_id={} budget_ms={}",
-                    embedded_session_id,
-                    wait_ms
-                );
-                None
-            }
-        }
-    };
-    match outcome {
-        Some(Ok(Ok(extracted))) => evaluate_target_wake_extraction(
-            inner,
-            extracted,
-            phrase,
-            embedded_session_id,
-            source_owner_compatible,
-        )
-        .await
-        .unwrap_or_else(|err| {
-            log::warn!(
-                "[target-speaker] terminal owner wake evidence failed embedded_session_id={embedded_session_id}: {err}"
+    match task.terminal_result(wait_ms).await {
+        Ok(evaluated) => qualify_target_wake_extraction(evaluated, source_owner_compatible),
+        Err(err) if err == "wake_extraction_budget_exceeded" => {
+            log::info!(
+                "[target-speaker] terminal owner wake extraction exceeded budget embedded_session_id={} budget_ms={}",
+                embedded_session_id, wait_ms
             );
             None
-        }),
-        Some(Ok(Err(err))) => {
+        }
+        Err(err) => {
             log::warn!(
                 "[target-speaker] terminal owner wake extraction failed embedded_session_id={embedded_session_id}: {err}"
             );
             None
         }
-        Some(Err(err)) => {
-            log::warn!(
-                "[target-speaker] terminal owner wake extraction task failed embedded_session_id={embedded_session_id}: {err}"
-            );
-            None
-        }
-        None => None,
     }
 }

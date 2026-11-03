@@ -17303,7 +17303,7 @@ fn every_automatic_wake_path_seeds_session_speaker_tracking() {
         include_str!("dictation_embedded_stream.rs")
     );
     assert_eq!(
-        body.matches("start_local_speaker_tracking(").count(),
+        body.matches("session.start_local_speaker_tracking").count(),
         3,
         "live, terminal-with-body, and terminal-continuation wake paths must bind endpointing to the wake speaker"
     );
@@ -17317,7 +17317,7 @@ fn every_automatic_wake_path_seeds_session_speaker_tracking() {
         .find("take_terminal_wake_continuation(inner, session.session_id)")
         .expect("terminal continuation must attach to the next coordinator session");
     let continuation_seed = body[continuation_take..]
-        .find("start_local_speaker_tracking(")
+        .find("session.start_local_speaker_tracking")
         .map(|offset| continuation_take + offset)
         .expect("terminal continuation must seed target-speaker tracking");
     let continuation_activate = body[continuation_seed..]
@@ -17330,10 +17330,10 @@ fn every_automatic_wake_path_seeds_session_speaker_tracking() {
         .find("live automatic session activated and released")
         .expect("live automatic wake path must remain present");
     let live_seed = body[..live_accept]
-        .rfind("start_local_speaker_tracking(")
+        .rfind("session.start_local_speaker_tracking")
         .expect("live automatic wake path must seed target-speaker tracking");
     let live_session = body[..live_accept]
-        .rfind("begin_embedded_audio_dictation_session(inner).await?")
+        .rfind("begin_embedded_audio_dictation_session_for_action(inner, candidate.voice_action).await")
         .expect("live automatic wake path must create a dictation session");
     assert!(live_session < live_seed && live_seed < live_accept);
 }

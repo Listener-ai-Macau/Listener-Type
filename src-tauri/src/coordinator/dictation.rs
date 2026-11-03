@@ -1855,6 +1855,7 @@ include!("dictation_wake_polish.rs");
 include!("dictation_wake_fusion.rs");
 include!("dictation_wake_prefix_retry.rs");
 include!("dictation_wake_owner_gate.rs");
+include!("dictation_wake_recovery_task.rs");
 include!("dictation_wake_verification_source.rs");
 #[cfg(target_os = "windows")]
 include!("dictation_wake_keyword_check.rs");

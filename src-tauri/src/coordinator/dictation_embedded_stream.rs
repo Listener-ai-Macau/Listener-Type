@@ -551,7 +551,7 @@ impl EmbeddedStreamingDictation {
                     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
                     if candidate.kind == BufferedSpeakerCandidateKind::Verification {
                         let phrase = inner.prefs.get().voice_wake_phrase;
-                        maybe_start_target_wake_extraction(candidate, &phrase, chunk_session_id);
+                        maybe_start_target_wake_extraction(inner, candidate, &phrase, chunk_session_id);
                     }
                     if self
                         .promote_hidden_candidate_if_requested(inner, chunk_session_id)
@@ -1826,6 +1826,7 @@ impl EmbeddedStreamingDictation {
                                         // the original phrase and owner verification.
                                         let extraction_was_pending = candidate.target_wake_extraction_task.is_some();
                                         maybe_start_terminal_owner_compatible_wake_extraction(
+                                            inner,
                                             &mut candidate,
                                             &phrase,
                                             embedded_session_id,
@@ -2220,6 +2221,7 @@ impl EmbeddedStreamingDictation {
                 let source_owner_compatible = terminal_wake_source_owner_compatible(&verification);
                 let extraction_was_prefetched = candidate.target_wake_extraction_task.is_some();
                 maybe_start_terminal_owner_compatible_wake_extraction(
+                    inner,
                     &mut candidate,
                     &phrase,
                     embedded_session_id,
@@ -3042,36 +3044,16 @@ impl EmbeddedStreamingDictation {
                 candidate
                     .target_wake_extraction_task
                     .as_ref()
-                    .is_some_and(|task| task.inner().is_finished())
+                    .is_some_and(|task| task.is_finished())
                     .then(|| candidate.target_wake_extraction_task.take())
                     .flatten()
             });
             if let Some(task) = completed_task {
-                let phrase = inner.prefs.get().voice_wake_phrase;
-                let evidence = match task.await {
-                    Ok(Ok(extracted)) => evaluate_target_wake_extraction(
-                        inner,
-                        extracted,
-                        &phrase,
-                        embedded_session_id,
-                        false,
-                    )
-                    .await
-                    .unwrap_or_else(|err| {
-                        log::warn!(
-                            "[target-speaker] live owner wake evidence failed embedded_session_id={embedded_session_id}: {err}"
-                        );
-                        None
-                    }),
-                    Ok(Err(err)) => {
-                        log::warn!(
-                            "[target-speaker] live owner wake extraction failed embedded_session_id={embedded_session_id}: {err}"
-                        );
-                        None
-                    }
+                let evidence = match task.result().await {
+                    Ok(evaluated) => qualify_target_wake_extraction(evaluated, false),
                     Err(err) => {
                         log::warn!(
-                            "[target-speaker] live owner wake extraction task failed embedded_session_id={embedded_session_id}: {err}"
+                            "[target-speaker] live owner wake extraction failed embedded_session_id={embedded_session_id}: {err}"
                         );
                         None
                     }
@@ -4081,6 +4063,7 @@ impl EmbeddedStreamingDictation {
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
             {
                 maybe_start_phrase_owner_recovery(
+                    inner,
                     candidate,
                     &phrase,
                     embedded_session_id,

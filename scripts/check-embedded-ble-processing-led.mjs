@@ -149,7 +149,8 @@ for (const token of [
   "fn schedule_device_ai_processing_max_visible_timeout",
   "dictation_processing_max_visible_timeout",
   "send_recording_processing_state(false, Duration::from_secs(2))",
-  "device AI processing LED max-visible timeout stopped",
+  "stop_device_ai_processing_for_ticket(&inner, start_ticket, reason);",
+  "device_ai_processing_ticket_current(&inner, start_ticket)",
   "cancel_max_visible_timeout",
 ]) {
   if (!dictationSource.includes(token)) {
