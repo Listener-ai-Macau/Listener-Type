@@ -33,12 +33,12 @@ def main():
         result = subprocess.run([str(binary), selection, '--test-threads=1'], capture_output=True, text=True)
         (output / (selection + '.log')).write_text(result.stdout + result.stderr, encoding='utf8')
         summary = next((line for line in result.stdout.splitlines() if line.startswith('test result:')), None)
-        success = result.returncode == 0 and summary and '0 passed;' not in summary
+        success = result.returncode == 0 and summary and not summary.startswith('test result: ok. 0 passed;')
         results.append({'selection': selection, 'exitCode': result.returncode, 'summary': summary})
         if not success:
             break
     unchanged = hashlib.sha256(binary.read_bytes()).hexdigest() == digest
-    complete = unchanged and len(results) == 3 and all(row['exitCode'] == 0 and row['summary'] and '0 passed;' not in row['summary'] for row in results)
+    complete = unchanged and len(results) == 3 and all(row['exitCode'] == 0 and row['summary'] and not row['summary'].startswith('test result: ok. 0 passed;') for row in results)
     report = {'complete': complete, 'testBinarySha256': digest, 'results': results,
               'scope': 'Offline reducer/task scheduling; no real audio, editor, clipboard, BLE or cloud',
               'fieldAcceptance': False}
