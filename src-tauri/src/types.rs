@@ -525,6 +525,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_copy_final_text_without_paste_confirmation() -> bool {
+    cfg!(target_os = "windows")
+}
+
 pub const DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT: u8 = 50;
 pub const DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT: u8 = 80;
 pub const DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT: u8 = 100;
@@ -1282,9 +1286,9 @@ pub struct UserPreferences {
     pub restore_clipboard_after_paste: bool,
     /// 普通听写结束后把最终文本保留在剪贴板。默认开启；开启时覆盖剪贴板恢复设置。
     pub copy_dictation_to_clipboard: bool,
-    /// Opt in to final clipboard publication without a target paste receipt.
+    /// Publish the final clipboard text without a target paste receipt.
     /// A slow target may paste the whole final text instead of its last fragment.
-    #[serde(default)]
+    #[serde(default = "default_copy_final_text_without_paste_confirmation")]
     pub copy_final_text_without_paste_confirmation: bool,
     /// 从听写预览和最终文本中移除独立的中文犹豫语气词。默认关闭，
     /// 避免 Raw/自动唤醒首句在用户未主动选择时被改写。
@@ -1612,7 +1616,7 @@ struct UserPreferencesWire {
     restore_clipboard_after_paste: bool,
     #[serde(default)]
     copy_dictation_to_clipboard: Option<bool>,
-    #[serde(default)]
+    #[serde(default = "default_copy_final_text_without_paste_confirmation")]
     copy_final_text_without_paste_confirmation: bool,
     #[serde(default)]
     remove_filler_words: bool,
@@ -2407,7 +2411,7 @@ impl Default for UserPreferences {
             llm_thinking_enabled: false,
             restore_clipboard_after_paste: true,
             copy_dictation_to_clipboard: true,
-            copy_final_text_without_paste_confirmation: false,
+            copy_final_text_without_paste_confirmation: default_copy_final_text_without_paste_confirmation(),
             remove_filler_words: false,
             remove_filler_words_default_migrated: true,
             send_key_after_dictation: false,

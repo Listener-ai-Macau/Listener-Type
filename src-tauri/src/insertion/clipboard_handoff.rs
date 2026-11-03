@@ -431,8 +431,8 @@ pub(crate) fn retain_recording(origin: ClipboardTicket, session: uuid::Uuid,
 }
 
 /// Explicitly prioritize the completed transcript over an unconfirmed paste
-/// lease. This is an opt-in policy: a delayed target can read the final body
-/// instead of its pending fragment. Clipboard ownership checks still apply.
+/// lease. A delayed target can read the final body instead of its pending
+/// fragment. Users can disable this policy; ownership checks still apply.
 pub(crate) fn publish_recording(origin: ClipboardTicket, session: uuid::Uuid,
     text: &str, needs_receipt: bool) -> RetentionResult {
     let (sender, receiver) = mpsc::channel();

@@ -5,6 +5,7 @@
 
 import { notifyCredentialsStatusChanged } from './credentialsStatusEvents';
 import { trackProviderWrite } from './providerWriteBarrier';
+import { currentPlatform } from './hotkey';
 import type { MainWindowDestination } from './mainWindowNavigation';
 
 import type {
@@ -220,7 +221,7 @@ let mockSettings: UserPreferences = {
   llmThinkingEnabled: false,
   restoreClipboardAfterPaste: true,
   copyDictationToClipboard: true,
-  copyFinalTextWithoutPasteConfirmation: false,
+  copyFinalTextWithoutPasteConfirmation: currentPlatform().isWindows,
   removeFillerWords: false,
   removeFillerWordsDefaultMigrated: true,
   sendKeyAfterDictation: false,

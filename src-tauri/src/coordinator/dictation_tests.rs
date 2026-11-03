@@ -15561,12 +15561,15 @@ fn clipboard_failure_notice_does_not_claim_pending_or_superseded_copy_failed() {
 }
 
 #[test]
-fn immediate_final_copy_is_explicit_and_survives_settings_roundtrip() {
+fn immediate_final_copy_defaults_on_windows_and_respects_explicit_choice() {
     let mut saved = serde_json::to_value(UserPreferences::default()).unwrap();
     saved.as_object_mut().unwrap().remove("copyFinalTextWithoutPasteConfirmation");
     let existing: UserPreferences = serde_json::from_value(saved.clone()).unwrap();
-    assert!(!existing.copy_final_text_without_paste_confirmation,
-        "an upgrade cannot silently replace an unconfirmed paste lease");
+    assert_eq!(existing.copy_final_text_without_paste_confirmation, cfg!(target_os = "windows"));
+    saved["copyFinalTextWithoutPasteConfirmation"] = serde_json::json!(false);
+    let disabled: UserPreferences = serde_json::from_value(saved.clone()).unwrap();
+    assert!(!disabled.copy_final_text_without_paste_confirmation,
+        "an explicit user choice must survive an upgrade");
     saved["copyFinalTextWithoutPasteConfirmation"] = serde_json::json!(true);
     let enabled: UserPreferences = serde_json::from_value(saved).unwrap();
     assert!(enabled.copy_final_text_without_paste_confirmation);
