@@ -15585,10 +15585,11 @@ async fn immediate_final_copy_reports_storage_without_claiming_paste_confirmatio
         crate::insertion::RetentionResult::StoredWithoutPasteConfirmation
     }).await;
     assert_eq!(result, (true, "stored_without_paste_confirmation"));
-    let notice = super::clipboard_failure_completion_notice(None, true, result.1, true).unwrap();
-    assert!(notice.contains("已复制"));
-    assert!(notice.contains("核对上屏"));
-    assert!(!notice.contains("未能更新"));
+    assert_eq!(super::clipboard_failure_completion_notice(None, true, result.1, true), None,
+        "a stored final copy should use the ordinary completion mark");
+    assert_eq!(super::clipboard_failure_completion_notice(
+        Some("上屏内容可能不完整".into()), true, result.1, true),
+        Some("上屏内容可能不完整".into()), "an independent delivery warning must survive");
 }
 
 #[test]
