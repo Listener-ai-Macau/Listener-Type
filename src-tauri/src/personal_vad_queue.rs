@@ -3,6 +3,7 @@
 //! overrun retires unfinished analysis, not the recording or the whole worker.
 
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 const MAX_QUEUED_PCM_BYTES: usize = 60 * 16_000 * 2;
 
@@ -98,9 +99,29 @@ impl PresenceInputQueue {
     }
 
     pub fn take_limit(&self, wait: bool, max_bytes: usize) -> Option<PresenceInputBatch> {
+        self.take_coalesced_limit(wait, max_bytes, 0, Duration::ZERO)
+    }
+
+    /// Coalesce a small live batch without moving or skipping any source byte.
+    /// The first pending byte starts a fixed deadline: later notifications can
+    /// fill the batch but cannot keep extending the last chunk's wait.
+    pub fn take_coalesced_limit(&self, wait: bool, max_bytes: usize,
+        min_bytes: usize, linger: Duration) -> Option<PresenceInputBatch> {
         let mut state = self.lock();
         while wait && state.pcm.is_empty() && !state.closed {
             state = self.ready.wait(state).unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+        if wait && !state.pcm.is_empty() && state.pcm.len() < min_bytes && !state.closed {
+            let deadline = Instant::now() + linger;
+            let generation = state.generation;
+            while !state.closed && state.generation == generation && state.pcm.len() < min_bytes {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() { break; }
+                let (next, timeout) = self.ready.wait_timeout(state, remaining)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                state = next;
+                if timeout.timed_out() { break; }
+            }
         }
         if state.closed || state.pcm.is_empty() { return None; }
         let bytes = state.pcm.len().min(max_bytes) / 2 * 2;
@@ -135,6 +156,51 @@ impl PresenceInputQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn coalescing_keeps_both_packets_and_their_exact_source_end() {
+        let queue=Arc::new(PresenceInputQueue::default());
+        queue.submit(&[1;32],16,|_|panic!()).unwrap();
+        let worker=Arc::clone(&queue);
+        let task=std::thread::spawn(move || worker.take_coalesced_limit(true,128,64,Duration::from_secs(1)).unwrap());
+        std::thread::sleep(Duration::from_millis(5));
+        queue.submit(&[2;32],32,|_|panic!()).unwrap();
+        let batch=task.join().unwrap();
+        assert_eq!(batch.pcm,[vec![1;32],vec![2;32]].concat());
+        assert_eq!(batch.end_samples,32);
+        assert_eq!(batch.generation,1);
+    }
+
+    #[test]
+    fn coalescing_drains_a_lone_tail_on_its_deadline_without_more_audio() {
+        let queue=PresenceInputQueue::default();
+        queue.submit(&[3;32],16,|_|panic!()).unwrap();
+        let started=Instant::now();
+        let batch=queue.take_coalesced_limit(true,128,64,Duration::from_millis(10)).unwrap();
+        assert_eq!(batch.pcm,[3;32]);
+        assert_eq!(batch.end_samples,16);
+        assert!(started.elapsed()>=Duration::from_millis(5));
+        assert!(started.elapsed()<Duration::from_secs(2));
+    }
+
+    #[test]
+    fn coalescing_rebase_and_close_do_not_wait_for_an_obsolete_batch() {
+        for close in [false,true] {
+            let queue=Arc::new(PresenceInputQueue::default());
+            queue.submit(&[1;32],16,|_|panic!()).unwrap();
+            let worker=Arc::clone(&queue);
+            let task=std::thread::spawn(move || worker.take_coalesced_limit(true,128,64,Duration::from_secs(2)));
+            std::thread::sleep(Duration::from_millis(5));
+            if close { queue.close(); assert!(task.join().unwrap().is_none()); }
+            else {
+                queue.submit(&[2;32],160,|_|{}).unwrap();
+                let batch=task.join().unwrap().unwrap();
+                assert_eq!(batch.pcm,[2;32]);
+                assert_eq!(batch.end_samples,160);
+                assert_eq!(batch.generation,2);
+            }
+        }
+    }
 
     #[test]
     #[ignore = "requires preserved real startup PCM; does not run a model"]

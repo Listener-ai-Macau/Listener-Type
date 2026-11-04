@@ -9,7 +9,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 const DETECTOR: &str = "nomo-pvad-2.4s-fp32.onnx";
@@ -18,6 +18,8 @@ const DETECTOR_SHA: &str = "ff39bd6dcff75264c70910713547708959da539c22a2f551fdb9
 pub(crate) const ENCODER_SHA: &str = "9ee27ce50a44ff2cb13bc4f22eac67114fa11ea4768a43a1e6fb2798172bce58";
 const CHUNK_BYTES: usize = 160 * 32;
 const WINDOW_BYTES: usize = 2_400 * 32;
+const LIVE_BATCH_MIN_BYTES: usize = CHUNK_BYTES * 2;
+const LIVE_BATCH_MAX_WAIT: Duration = Duration::from_millis(160);
 
 #[derive(Clone, Debug)]
 pub(crate) struct PersonalVadReference(Vec<f32>);
@@ -196,7 +198,11 @@ pub(crate) struct PersonalVadStream {
 impl PersonalVadStream {
     /// Only an independently verified wake/reference may be passed here.
     /// No dictation audio ever updates or persists this reference.
-    pub(crate) fn start(reference_pcm: Vec<u8>, enrolled_reference: Option<PersonalVadReference>, mut verifier: Option<PresenceVerifier>) -> Self {
+    pub(crate) fn start(reference_pcm: Vec<u8>, enrolled_reference: Option<PersonalVadReference>, verifier: Option<PresenceVerifier>) -> Self {
+        Self::start_with_coalescing(reference_pcm, enrolled_reference, verifier, true)
+    }
+
+    fn start_with_coalescing(reference_pcm: Vec<u8>, enrolled_reference: Option<PersonalVadReference>, mut verifier: Option<PresenceVerifier>, coalesce: bool) -> Self {
         let input = Arc::new(super::input_queue::PresenceInputQueue::default());
         let worker_input = Arc::clone(&input);
         let latest = Arc::new(Mutex::new(None::<PresenceObservation>));
@@ -235,8 +241,9 @@ impl PersonalVadStream {
                     // Take at most one model window, so backlog stays inside
                     // the byte-bounded mailbox rather than migrating unbounded
                     // into this worker's private pending buffer.
-                    if let Some(batch) = worker_input.take_limit(!audio.has_complete_chunk(),
-                        PresenceAudioBuffer::MAX_NEW_PCM_BYTES) {
+                    if let Some(batch) = worker_input.take_coalesced_limit(!audio.has_complete_chunk(),
+                        PresenceAudioBuffer::MAX_NEW_PCM_BYTES,
+                        if coalesce { LIVE_BATCH_MIN_BYTES } else { 0 }, LIVE_BATCH_MAX_WAIT) {
                         if generation != batch.generation {
                             audio = PresenceAudioBuffer::default();
                             positive_end = output.lock().as_ref().and_then(|frame| frame.last_positive_end_ms);
@@ -440,6 +447,62 @@ impl Drop for PersonalVadStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "explicit installed local models; eight-second synthetic CPU/source-frontier replay, no microphone/profile/cloud"]
+    fn coalesced_worker_resource_and_tail_probe() {
+        #[repr(C)] #[derive(Default)] struct Ft { low:u32, high:u32 }
+        #[link(name="kernel32")] unsafe extern "system" {
+            fn GetCurrentProcess() -> *mut std::ffi::c_void;
+            fn GetProcessTimes(h:*mut std::ffi::c_void,c:*mut Ft,e:*mut Ft,k:*mut Ft,u:*mut Ft)->i32;
+        }
+        fn cpu()->f64 {
+            let(mut c,mut e,mut k,mut u)=(Ft::default(),Ft::default(),Ft::default(),Ft::default());
+            assert_ne!(unsafe{GetProcessTimes(GetCurrentProcess(),&mut c,&mut e,&mut k,&mut u)},0);
+            let seconds=|v:Ft|(((v.high as u64)<<32)|v.low as u64) as f64/10_000_000.;
+            seconds(k)+seconds(u)
+        }
+        let coalesce=std::env::var("LISTENER_BATCH_RESOURCE_COALESCE").unwrap()=="1";
+        let reference=PersonalVadReference(vec![1.0/192f32.sqrt();192]);
+        let pcm:Vec<u8>=(0..16_000*8).flat_map(|i| {
+            let sample=((i as f32*std::f32::consts::TAU*210.0/16_000.0).sin()*4_000.) as i16;
+            sample.to_le_bytes()
+        }).collect();
+        let profile=crate::speaker_verification::SessionSpeakerProfile::synthetic_resource_probe();
+        let loaded=runtime().unwrap();
+        loaded.lock().probabilities(reference.values(),&pcm[..WINDOW_BYTES]).unwrap();
+        crate::speaker_verification::observe_session_speaker(&profile,&pcm[..WINDOW_BYTES]).unwrap();
+        let verifier:PresenceVerifier=Box::new(move |window| {
+            crate::speaker_verification::observe_session_speaker(&profile,window)?;
+            // Synthetic identity is deliberately unqualified, never Other.
+            Ok(super::super::PresenceIdentityObservation {
+                projection:PresenceState::Unknown, endpoint:PresenceState::Unknown,
+            })
+        });
+        let started=Instant::now();let cpu_before=cpu();
+        let stream=PersonalVadStream::start_with_coalescing(Vec::new(),Some(reference),Some(verifier),coalesce);
+        let mut consumed=0;
+        for packet in pcm.chunks(3_200) {
+            consumed+=packet.len();stream.submit(packet,(consumed/2) as u64);
+            let due=started+Duration::from_micros(consumed as u64*1_000_000/32_000);
+            std::thread::sleep(due.saturating_duration_since(Instant::now()));
+        }
+        let deadline=Instant::now()+Duration::from_secs(3);
+        let frame=loop {
+            assert!(!stream.analysis_unavailable_for_test());
+            if let Some(frame)=stream.snapshot() {
+                if frame.analyzed_end_ms==8_000 {break frame;}
+            }
+            assert!(Instant::now()<deadline,"final source chunk was not drained");
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert_ne!(frame.state,PresenceState::ConfirmedOther);
+        println!("RESOURCE_BATCH_REPORT:{}",serde_json::json!({
+            "coalesced":coalesce,"coreSeconds":cpu()-cpu_before,
+            "wallSeconds":started.elapsed().as_secs_f64(),"analyzedEndMs":frame.analyzed_end_ms,
+            "syntheticInput":true,"privateProfileRead":false,"cloudCalls":0,
+        }));
+    }
 
     #[test]
     #[ignore = "requires explicitly selected private history PCM and the existing protected profile; local models only"]

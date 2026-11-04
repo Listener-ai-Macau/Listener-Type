@@ -92,6 +92,11 @@ pub struct SessionSpeakerProfile {
 }
 
 impl SessionSpeakerProfile {
+    #[cfg(test)]
+    pub(crate) fn synthetic_resource_probe() -> Self {
+        Self { embeddings: Arc::new(vec![vec![1.0 / 192f32.sqrt(); 192]]), adaptive: false }
+    }
+
     pub fn is_adaptive(&self) -> bool {
         self.adaptive
     }
