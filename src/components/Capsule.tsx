@@ -11,7 +11,7 @@ import {
 } from '../lib/capsuleLayout';
 import { invokeOrMock, isTauri } from '../lib/ipc';
 import { capsuleCancelEnabled, capsuleConfirmEnabled } from '../lib/capsuleActionRules';
-import { getCapsuleDisplayMessage, isCapsuleQuotaErrorMessage, shouldRetainCapsulePreview, shouldShowCapsuleQuotaError } from '../lib/capsuleDisplayMessage';
+import { getCapsuleDisplayMessage, isCapsuleQuotaErrorMessage, shouldRetainCapsulePreview, shouldShowCapsuleQuotaError, shouldShowCapsuleNetworkStatus } from '../lib/capsuleDisplayMessage';
 import {
   buildPreviewRevealFrames,
   CAPSULE_APPEARANCE,
@@ -422,7 +422,7 @@ function Pill({
             // 网络掉级且暂无预览正文：中央直接显示"网络不佳/无网络"
             // （2026-09-23 用户拍板：胶囊里显示网络不佳就好）。有正文时
             // 保留正文，徽章在上方提示。
-            ? <CenterText os={os} kind="error" text={netBadge} color={netBadgeTone === 'bad' ? 'var(--ol-err)' : '#B25E09'} />
+            ? <CenterText os={os} kind={netBadgeTone === 'bad' ? 'error' : 'default'} text={netBadge} color={netBadgeTone === 'bad' ? 'var(--ol-err)' : 'var(--ol-ink-3)'} />
             : <AudioBars level={level} />;
       break;
     case 'transcribing':
@@ -986,7 +986,7 @@ export function Capsule() {
     >
       {/* 网络状态徽章：断网/识别不可达时挂在胶囊上方（"正在翻译"徽章
           再往上叠一层，两者同现不重叠）。居中定位与入场动画分层。 */}
-      {netBadge && !providerQuotaExceeded && (
+      {netBadge && !providerQuotaExceeded && shouldShowCapsuleNetworkStatus(renderedState) && (
         <div
           data-capsule-status="network"
           style={{
@@ -1011,11 +1011,11 @@ export function Capsule() {
             boxSizing: 'border-box',
             lineHeight: '13px',
             fontWeight: 500,
-            color: netBadgeTone === 'bad' ? 'var(--ol-err)' : 'var(--ol-warn, #B25E09)',
+            color: netBadgeTone === 'bad' ? 'var(--ol-err)' : 'var(--ol-ink-3)',
             background: 'var(--ol-glass-bg-strong)',
             backdropFilter: 'blur(16px)',
             WebkitBackdropFilter: 'blur(16px)',
-            border: `0.5px solid ${netBadgeTone === 'bad' ? 'rgba(189, 98, 89, 0.22)' : 'rgba(178, 94, 9, 0.22)'}`,
+            border: `0.5px solid ${netBadgeTone === 'bad' ? 'rgba(189, 98, 89, 0.22)' : 'rgba(0, 0, 0, 0.08)'}`,
             boxShadow: '0 2px 8px rgba(0, 0, 0, 0.10)',
             letterSpacing: 0,
             whiteSpace: 'nowrap',

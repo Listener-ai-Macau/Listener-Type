@@ -317,10 +317,6 @@ a { color: inherit; text-decoration: none; }
   overflow-wrap: anywhere;
 }
 
-.ol-voiceprint-status.is-warning {
-  color: var(--ol-warn, #8a6418);
-}
-
 .ol-voiceprint-status.is-error {
   color: var(--ol-err);
 }

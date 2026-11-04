@@ -34,6 +34,11 @@ export function shouldShowCapsuleQuotaError(state: CapsuleState, quotaExceeded: 
   return quotaExceeded && (state === 'recording' || state === 'transcribing' || state === 'polishing');
 }
 
+export function shouldShowCapsuleNetworkStatus(state: CapsuleState): boolean {
+  return state === 'recording' || state === 'transcribing'
+    || state === 'polishing' || state === 'reconnecting';
+}
+
 export function getCapsuleDisplayMessage(
   state: CapsuleState,
   message: string | null | undefined,

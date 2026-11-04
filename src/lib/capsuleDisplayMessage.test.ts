@@ -4,6 +4,7 @@ import {
   isCapsuleQuotaErrorMessage,
   shouldRetainCapsulePreview,
   shouldShowCapsuleQuotaError,
+  shouldShowCapsuleNetworkStatus,
 } from './capsuleDisplayMessage.ts';
 
 assert.equal(isCapsuleQuotaErrorMessage('当前识别资源额度不可用（错误码 45000292）；请核对资源 ID'), true);
@@ -12,6 +13,7 @@ assert.equal(isCapsuleQuotaErrorMessage('今天讨论识别额度不足的问题
 assert.equal(isCapsuleQuotaErrorMessage(undefined), false);
 
 for (const state of ['recording', 'transcribing', 'polishing'] as const) {
+  assert.equal(shouldShowCapsuleNetworkStatus(state), true);
   assert.equal(shouldShowCapsuleQuotaError(state, true), true,
     'a real quota failure takes display priority over a partial preview or finalization spinner');
   assert.equal(shouldShowCapsuleQuotaError(state, false), false,
@@ -21,6 +23,12 @@ for (const state of ['idle', 'done', 'cancelled', 'error', 'reconnecting'] as co
   assert.equal(shouldShowCapsuleQuotaError(state, true), false,
     'a retained provider warning cannot replace completion, cancellation or another specific error');
 }
+
+for (const state of ['idle', 'done', 'cancelled', 'error'] as const) {
+  assert.equal(shouldShowCapsuleNetworkStatus(state), false,
+    'a retained network advisory must not reappear above completion or another terminal state');
+}
+assert.equal(shouldShowCapsuleNetworkStatus('reconnecting'), true);
 
 assert.equal(
   getCapsuleDisplayMessage('recording', 'Listener 录音已启动，正在接收音频...'),

@@ -614,7 +614,7 @@ export function FirmwareOtaPanel({
           )}
 
           {dynamicWarnings.map(warning => (
-            <div key={warning} style={{ fontSize: 11.5, color: '#b45309', lineHeight: 1.5 }}>
+            <div key={warning} role="note" style={{ fontSize: 11.5, color: 'var(--ol-ink-3)', lineHeight: 1.5 }}>
               {formatFirmwareOtaWarning(warning, i18n.resolvedLanguage ?? i18n.language)}
             </div>
           ))}
