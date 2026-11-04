@@ -38,6 +38,9 @@ export function getCapsuleDisplayMessage(
   state: CapsuleState,
   message: string | null | undefined,
 ): string | undefined {
+  // Completion has one presentation for every producer and snapshot replay.
+  // Delivery details remain in History and diagnostics, outside the capsule.
+  if (state === 'done') return undefined;
   if (message == null) return undefined;
   const normalized = normalizeCapsuleStatusMessage(message);
   if (!normalized) return undefined;

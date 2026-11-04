@@ -5128,9 +5128,11 @@ fn completion_message_with_auth_notice(message: Option<String>, auth_notice: boo
     })
 }
 
-fn completion_notice_hide_delay(message: Option<&str>, auth_notice: bool) -> u64 {
-    if cfg!(target_os = "windows") && message.is_some_and(|value| !value.trim().is_empty()) {
-        CAPSULE_ACTIONABLE_ERROR_HIDE_DELAY_MS
+fn completion_notice_hide_delay(_message: Option<&str>, auth_notice: bool) -> u64 {
+    if cfg!(target_os = "windows") {
+        // Completion details no longer replace the capsule's completion mark.
+        // An unseen warning must not leave that mark on screen for six seconds.
+        CAPSULE_SUCCESS_HIDE_DELAY_MS
     } else if auth_notice {
         2_500
     } else {

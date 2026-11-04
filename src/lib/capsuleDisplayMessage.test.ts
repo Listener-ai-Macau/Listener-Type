@@ -53,10 +53,25 @@ assert.equal(
 );
 
 assert.equal(
-  getCapsuleDisplayMessage('done', '润色失败这几个字就是我说的原文'),
+  getCapsuleDisplayMessage('recording', '润色失败这几个字就是我说的原文'),
   '润色失败这几个字就是我说的原文',
-  'real final text should not be hidden just because it contains similar words',
+  'real recording text should not be hidden just because it contains similar words',
 );
+
+for (const message of [
+  '完整文字已复制，请核对上屏内容',
+  '上屏内容可能不完整，完整文字在剪贴板；请核对后替换',
+  '上屏内容可能不完整，完整文字已保存在历史记录',
+  '输入事件已发送，但 Listener 未收到目标确认；请检查光标位置',
+  '剪贴板未能更新，完整文字可在历史记录复制',
+  '未找到输入框，正文已保存在历史记录',
+  '任意未来的完成诊断',
+]) {
+  assert.equal(getCapsuleDisplayMessage('done', message), undefined,
+    'every completion uses the completion mark, including replayed and combined notices');
+  assert.equal(getCapsuleDisplayMessage('error', message), message,
+    'an actual error state must still show its error message');
+}
 
 assert.equal(
   getCapsuleDisplayMessage('reconnecting', '正在等待 Listener 音频...'),
