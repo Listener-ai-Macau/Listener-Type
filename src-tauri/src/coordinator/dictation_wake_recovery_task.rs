@@ -4,6 +4,7 @@
 struct WakeRecoveryTask<T> {
     extraction_ready: tokio::sync::oneshot::Receiver<()>,
     task: Option<tauri::async_runtime::JoinHandle<Result<T, String>>>,
+    cancelled: Arc<AtomicBool>,
 }
 
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
@@ -15,15 +16,32 @@ impl<T: Send + 'static> WakeRecoveryTask<T> {
         V: FnOnce(E) -> R + Send + 'static,
         R: std::future::Future<Output = Result<T, String>> + Send + 'static,
     {
+        Self::spawn_cancellable(move |_| extract(), evaluate)
+    }
+
+    fn spawn_cancellable<E, F, V, R>(extract: F, evaluate: V) -> Self
+    where
+        E: Send + 'static,
+        F: FnOnce(Arc<AtomicBool>) -> Result<E, String> + Send + 'static,
+        V: FnOnce(E) -> R + Send + 'static,
+        R: std::future::Future<Output = Result<T, String>> + Send + 'static,
+    {
         let (ready, extraction_ready) = tokio::sync::oneshot::channel();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let extraction_cancelled = Arc::clone(&cancelled);
         let task = tauri::async_runtime::spawn(async move {
-            let extracted = tauri::async_runtime::spawn_blocking(extract)
+            let extracted = tauri::async_runtime::spawn_blocking(move || {
+                if extraction_cancelled.load(Ordering::Acquire) {
+                    return Err("wake extraction retired".to_string());
+                }
+                extract(extraction_cancelled)
+            })
                 .await
                 .map_err(|error| format!("wake extraction task failed: {error}"));
             let _ = ready.send(());
             evaluate(extracted??).await
         });
-        Self { extraction_ready, task: Some(task) }
+        Self { extraction_ready, task: Some(task), cancelled }
     }
 
     fn is_finished(&self) -> bool {
@@ -52,6 +70,7 @@ impl<T: Send + 'static> WakeRecoveryTask<T> {
 #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
 impl<T> Drop for WakeRecoveryTask<T> {
     fn drop(&mut self) {
+        self.cancelled.store(true, Ordering::Release);
         // A native inference already running cannot be interrupted here. Its
         // abandoned result must not start another helper/voiceprint request.
         if let Some(task) = self.task.take() { task.abort(); }

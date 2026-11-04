@@ -628,9 +628,9 @@ fn start_target_wake_extraction(
     let pcm = candidate.pcm.clone();
     let recovery_inner = Arc::clone(inner);
     let recovery_phrase = phrase.to_string();
-    candidate.target_wake_extraction_task = Some(WakeRecoveryTask::spawn(
-        move || crate::asr::target_speaker_extraction::extract_enrolled_owner_wake_candidate(
-            &pcm, embedding,
+    candidate.target_wake_extraction_task = Some(WakeRecoveryTask::spawn_cancellable(
+        move |cancelled| crate::asr::target_speaker_extraction::extract_enrolled_owner_wake_candidate_cancellable(
+            &pcm, embedding, &cancelled,
         ),
         move |extracted| async move {
             evaluate_target_wake_extraction(

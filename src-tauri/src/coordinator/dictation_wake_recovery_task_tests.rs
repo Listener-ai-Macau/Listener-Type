@@ -1,6 +1,42 @@
 use super::*;
 
 #[test]
+fn retired_queued_wake_extraction_skips_native_work_after_its_queue_opens() {
+    tauri::async_runtime::block_on(async {
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let (finished, result) = tokio::sync::oneshot::channel();
+        let task = WakeRecoveryTask::spawn_cancellable(move |cancelled| {
+            let _ = entered.send(());
+            wait.recv_timeout(Duration::from_secs(2)).unwrap();
+            // Exercise the production entry point after the queue wait. It
+            // must return before opening models, even with invalid inputs.
+            let retired = crate::asr::target_speaker_extraction::extract_enrolled_owner_wake_candidate_cancellable(
+                &[], vec![], &cancelled,
+            ).err();
+            let _ = finished.send(retired);
+            Ok(())
+        }, |_| async { Ok(()) });
+        tokio::time::timeout(Duration::from_secs(2), started).await.unwrap().unwrap();
+        drop(task);
+        release.send(()).unwrap();
+        assert_eq!(tokio::time::timeout(Duration::from_secs(2), result).await.unwrap().unwrap().as_deref(),
+            Some("wake extraction retired"));
+    });
+}
+
+#[test]
+fn current_queued_wake_extraction_keeps_its_live_token_and_result() {
+    tauri::async_runtime::block_on(async {
+        let task = WakeRecoveryTask::spawn_cancellable(|cancelled| {
+            assert!(!cancelled.load(Ordering::Acquire));
+            Ok(41)
+        }, |value| async move { Ok(value + 1) });
+        assert_eq!(task.result().await.unwrap(), 42);
+    });
+}
+
+#[test]
 fn wake_recovery_keeps_ingress_available_until_phrase_and_owner_are_both_finished() {
     tauri::async_runtime::block_on(async {
         let (entered, started) = tokio::sync::oneshot::channel();

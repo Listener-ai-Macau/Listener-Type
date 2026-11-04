@@ -116,6 +116,10 @@ fn load_session(
             .map_err(|err| format!("configure target-speaker {label} threads failed: {err}"))?
             .with_inter_threads(1)
             .map_err(|err| format!("configure target-speaker {label} scheduler failed: {err}"))?
+            // Keep full parallelism inside Run, but park this pool between
+            // audio chunks and while the separate phrase/owner gates work.
+            .with_config_entry("session.force_spinning_stop", "1")
+            .map_err(|err| format!("configure target-speaker {label} idle threads failed: {err}"))?
             .commit_from_file(&model)
             .map_err(|err| {
                 format!(
@@ -407,6 +411,11 @@ impl TargetSpeakerExtractor {
     }
 
     pub(crate) fn extract_chunk_with_metrics(&self, pcm: &[u8]) -> Result<ExtractedChunk, String> {
+        self.extract_chunk_with_cancellation(pcm, None)
+    }
+
+    fn extract_chunk_with_cancellation(&self, pcm: &[u8], cancelled: Option<&AtomicBool>) -> Result<ExtractedChunk, String> {
+        ensure_wake_extraction_current(cancelled)?;
         if pcm.is_empty() || pcm.len() > CHUNK_BYTES || pcm.len() % 2 != 0 {
             return Err(format!(
                 "invalid target-speaker PCM chunk bytes={}",
@@ -432,6 +441,9 @@ impl TargetSpeakerExtractor {
         let started = Instant::now();
         let output = {
             let mut session = separator_session()?.lock();
+            // Retired candidates can be waiting behind another inference.
+            // Recheck under the model lock, before spending native CPU time.
+            ensure_wake_extraction_current(cancelled)?;
             let outputs = session
                 .run_with_options(
                     ort::inputs![
@@ -449,6 +461,7 @@ impl TargetSpeakerExtractor {
             }
             values.to_vec()
         };
+        ensure_wake_extraction_current(cancelled)?;
         let target_stft = model_output_to_stft(&output)?;
         let waveform = istft_compute(&IstftOptions::from(&stft_options()), &target_stft)
             .map_err(|err| format!("target-speaker ISTFT failed: {err}"))?;
@@ -519,6 +532,25 @@ pub(crate) fn extract_enrolled_owner_wake_candidate(
     pcm: &[u8],
     speaker_embedding: Vec<f32>,
 ) -> Result<ExtractedWakeCandidate, String> {
+    extract_owner_wake_candidate_inner(pcm, speaker_embedding, None)
+}
+
+pub(crate) fn extract_enrolled_owner_wake_candidate_cancellable(
+    pcm: &[u8], speaker_embedding: Vec<f32>, cancelled: &AtomicBool,
+) -> Result<ExtractedWakeCandidate, String> {
+    extract_owner_wake_candidate_inner(pcm, speaker_embedding, Some(cancelled))
+}
+
+fn ensure_wake_extraction_current(cancelled: Option<&AtomicBool>) -> Result<(), String> {
+    if cancelled.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+        Err("wake extraction retired".to_string())
+    } else { Ok(()) }
+}
+
+fn extract_owner_wake_candidate_inner(
+    pcm: &[u8], speaker_embedding: Vec<f32>, cancelled: Option<&AtomicBool>,
+) -> Result<ExtractedWakeCandidate, String> {
+    ensure_wake_extraction_current(cancelled)?;
     if pcm.is_empty() {
         return Err("target-speaker wake candidate is empty".to_string());
     }
@@ -526,7 +558,7 @@ pub(crate) fn extract_enrolled_owner_wake_candidate(
     let bounded = &pcm[..bounded_len];
     let extractor = TargetSpeakerExtractor::from_embedding(speaker_embedding)?;
     let started = Instant::now();
-    let extracted = extractor.extract_chunk_with_metrics(bounded)?;
+    let extracted = extractor.extract_chunk_with_cancellation(bounded, cancelled)?;
     let inference_ms = started.elapsed().as_millis() as u64;
     let residual_ratio = extracted.residual_energy / extracted.mixture_energy.max(1e-12);
     Ok(ExtractedWakeCandidate {

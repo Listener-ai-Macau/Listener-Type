@@ -163,6 +163,8 @@ impl EresRuntime {
             .map_err(|err| format!("configure ERes threads failed: {err}"))?
             .with_inter_threads(1)
             .map_err(|err| format!("configure ERes scheduler failed: {err}"))?
+            .with_config_entry("session.force_spinning_stop", "1")
+            .map_err(|err| format!("configure ERes idle threads failed: {err}"))?
             .commit_from_memory(&bytes)
             .map_err(|err| format!("load ERes model failed: {err}"))?;
         let mut options = RunOptions::new()

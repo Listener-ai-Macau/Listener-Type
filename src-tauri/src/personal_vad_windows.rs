@@ -75,6 +75,8 @@ fn load_session(path: &Path, expected_hash: &str) -> Result<Session, String> {
         .map_err(|e| e.to_string())?
         .with_inter_threads(1)
         .map_err(|e| e.to_string())?
+        .with_config_entry("session.force_spinning_stop", "1")
+        .map_err(|e| e.to_string())?
         .commit_from_memory(&bytes)
         .map_err(|e| format!("load personal VAD model: {e}"))
 }
