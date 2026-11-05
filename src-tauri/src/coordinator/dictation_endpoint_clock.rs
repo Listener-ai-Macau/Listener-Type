@@ -2531,6 +2531,23 @@ fn start_settled_target_endpoint_watchdog(
                     watchdog_started_at.elapsed().as_millis(),
                 );
             }
+            // Ready text gets the same ordinary delivery pass on every tick,
+            // including the tick whose audio evidence is due for STOP. Read
+            // endpoint evidence only afterwards: delivery can await a client
+            // and may establish a new body submission/continuation window.
+            if !stop_dispatched.load(Ordering::SeqCst) {
+                update_live_body_delivery(&inner, session_id, &asr, &endpoint_clock).await;
+            }
+            // A manual stop, cancellation or replacement can win during that
+            // await. Never reduce its old session into a second automatic STOP.
+            {
+                let state = inner.state.lock();
+                if state.session_id != session_id || state.cancelled
+                    || !matches!(state.phase, SessionPhase::Starting | SessionPhase::Listening)
+                {
+                    continue;
+                }
+            }
             let preview = current_embedded_audio_endpoint_preview(&inner);
             let raw_decision_snapshot = asr.endpoint_update_snapshot();
             let decision_audio_ms = raw_decision_snapshot
@@ -2740,18 +2757,10 @@ fn start_settled_target_endpoint_watchdog(
                     endpoint_policy,
                 );
             }
-            // 上行黑洞快速判死（16:08 直连实锤；09:23 二次实锤后不再要求
-            // body_started——黑洞会话永远等不来第一帧预览，正文闩锁不会翻，
-            // 恰好漏掉全聋形态）：先于云端 8s 超时掐线，立即触发保留音频重放。
+            // Preserve the uplink-recovery admission independently of text
+            // delivery: it still runs only while no STOP is pending.
             if !stop_update_present && !stop_dispatched.load(Ordering::SeqCst) {
                 asr.abort_if_uplink_stalled();
-                // 2026-09-22 跟手①：无 STOP 待决时的句末稳定评估。稳定前缀当场
-                // 上屏，终稿只插余量；任何失败静默回退现行为。
-                if endpoint_policy.body_started {
-                    // 跟手②组字流式:先喂增量(update),再评估停顿落定(commit),
-                    // 同一拍内顺序保证 commit 前组字内容最新。
-                    update_live_body_delivery(&inner, session_id, &asr, &endpoint_clock).await;
-                }
             }
         }
     });
@@ -2766,6 +2775,13 @@ async fn update_live_body_delivery(
     endpoint_clock: &Arc<Mutex<SettledTargetEndpointClock>>,
 ) {
     if !crate::coordinator_state::editor_delivery_allowed(&inner.state.lock(), session_id) {
+        return;
+    }
+    let preview = current_embedded_audio_endpoint_preview(inner);
+    let snapshot = asr.endpoint_update_snapshot();
+    if !resolve_target_speaker_endpoint_policy(inner, session_id, preview.as_deref(),
+        snapshot.audio_duration_ms.or(snapshot.provider_audio_duration_ms)).body_started
+    {
         return;
     }
     streaming_composition_update_tick(inner, session_id, asr).await;

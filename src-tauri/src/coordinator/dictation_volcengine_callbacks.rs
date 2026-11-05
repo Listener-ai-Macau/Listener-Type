@@ -196,9 +196,6 @@ fn set_volcengine_preview_callbacks(
     let inner_for_speaker = Arc::downgrade(inner);
     let clock_for_speaker = Arc::clone(&endpoint_clock);
     let asr_for_speaker = Arc::downgrade(asr);
-    let stop_dispatched_for_speaker = Arc::clone(&stop_dispatched);
-    let stop_completed_for_speaker = Arc::clone(&stop_completed);
-    let stop_state_for_speaker = Arc::clone(&stop_state);
     asr.set_target_speaker_update_callback(Some(Arc::new(move |update| {
         let (Some(inner_for_speaker), Some(asr_for_speaker)) =
             (inner_for_speaker.upgrade(), asr_for_speaker.upgrade()) else { return; };
@@ -252,38 +249,10 @@ fn set_volcengine_preview_callbacks(
             &decision_update,
             endpoint_policy.body_started,
         );
-        // Provider callbacks only publish observations. Reuse the same clock
-        // decision as the watchdog instead of running a second endpoint policy
-        // here; the previous split could commit Stopping in the clock and then
-        // discard it during a second callback-side evaluation.
-        let owner_analysis_pending = asr_for_speaker.owner_analysis_pending_for_endpoint();
-        let pending_owner_delivery =
-            pause_early_pending_body_delivery(&inner_for_speaker, session_id, &asr_for_speaker);
-        let committed_update = {
-            let now = Instant::now();
-            let mut clock = clock_for_speaker.lock();
-            clock.refresh_pending_body_delivery(pending_owner_delivery, now);
-            clock.reduce_session_policy_with_local_vad_revision(
-                now,
-                endpoint_policy,
-                &decision_update,
-                owner_analysis_pending,
-                local_vad_revision,
-            )
-        };
-        if let Some(committed_update) = committed_update {
-            handle_target_speaker_endpoint_stop(
-                &inner_for_speaker,
-                session_id,
-                &stop_dispatched_for_speaker,
-                &stop_completed_for_speaker,
-                &stop_state_for_speaker,
-                &clock_for_speaker,
-                &asr_for_speaker,
-                committed_update,
-                endpoint_policy,
-            );
-        }
+        // Publish observations only. The watchdog first offers ready body
+        // text to the ordinary streaming transport, then makes the one STOP
+        // decision from fresh observations. Dispatching here could preempt
+        // that final ordinary tick depending on provider callback order.
     })));
 }
 

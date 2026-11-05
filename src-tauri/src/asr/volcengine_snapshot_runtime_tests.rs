@@ -560,3 +560,156 @@ fn cropped_snapshot_planner_requires_exact_capture_context_and_transport_budget(
     assert!(snapshot_clip_bounds(72000*32,72000*32,70000,Some((70000,71000)),0).is_none(),"future boundary is not already submitted source");
 }
 
+#[cfg(target_os = "windows")]
+fn admitted_tail_snapshot_fixture() -> (VolcengineStreamingASR, LiveLedgerAnchor) {
+    use crate::transcript_boundary::{content_key, TimedTranscript, TimedTranscriptWord};
+    let asr = uplink_stall_test_asr().with_owner_activity_only(true);
+    let old = Instant::now() - Duration::from_secs(3);
+    let tokens = [("开始录音。", 100, 500), ("前段已经上屏。", 10_000, 11_000),
+        ("尾句继续写入。", 12_000, 14_500)];
+    let parent = TimedTranscript {
+        text: tokens.iter().map(|word| word.0).collect(),
+        words: tokens.iter().map(|&(text, start, end)| TimedTranscriptWord {
+            text: text.into(), start_ms: Some(start), end_ms: Some(end),
+        }).collect(),
+    };
+    {
+        let mut state = asr.state.lock();
+        state.is_connected = true;
+        state.best_transcript_text = parent.text.clone();
+        state.best_transcript_timing = Some(parent.clone());
+        state.provider_timed_transcript = Some(parent.clone());
+        state.best_transcript_committed_at = Some(old);
+        state.next_input_destination_offset = 20_000 * 32;
+        state.wake_speaker_phrase = Some("开始录音".into());
+        state.recognition_boundary.update(&json!({"utterances":tokens.iter().enumerate().map(|(i, word)|
+            json!({"text":word.0,"definite":i < 2,"words":[{"text":word.0,
+                "start_time":word.1,"end_time":word.2}]})).collect::<Vec<_>>()}));
+    }
+    *asr.retained_pcm.lock() = vec![0; 20_000 * 32];
+    let source = LiveDeliverySource { capture_stream_id: asr.asr_stream_id(),
+        capture_generation: asr.source_snapshot.lock().capture_generation,
+        decoder_stream_id: asr.asr_stream_id(), owner_generation: asr.state.lock().owner_delivery_generation };
+    let anchor = LiveLedgerAnchor { source, generation: 1, source_key: content_key("前段已经上屏。"),
+        source_text: "开始录音。前段已经上屏。".into(),
+        boundary: parent.delivery_boundary(&content_key("开始录音。前段已经上屏。")).unwrap() };
+    let child = TimedTranscript {
+        text: tokens[1..].iter().map(|word| word.0).collect(),
+        words: parent.words[1..].iter().cloned().map(|mut word| {
+            word.start_ms = word.start_ms.map(|at| at - 9_000);
+            word.end_ms = word.end_ms.map(|at| at - 9_000);
+            word
+        }).collect(),
+    };
+    {
+        let mut slot = asr.source_snapshot.lock();
+        slot.closed = false;
+        slot.parent_stream_id = Some(asr.asr_stream_id());
+        slot.result = Some(SourceSnapshotResult { anchor: Some(anchor.clone()),
+            parent_stream_id: asr.asr_stream_id(), parent_lifecycle_generation: slot.lifecycle_generation,
+            source_epoch: source.owner_generation, child_decoder_id: 99,
+            captured_origin_bytes: 9_000 * 32, captured_pcm_bytes: 11_000 * 32,
+            captured_through_ms: 20_000, confirmed: child, completed_at: Instant::now() });
+    }
+    (asr, anchor)
+}
+
+#[test]
+#[cfg(target_os = "windows")]
+fn admitted_pending_tail_uses_confirmed_increment_before_capture_stop() {
+    use crate::transcript_boundary::content_key;
+    let (asr, anchor) = admitted_tail_snapshot_fixture();
+    let pending = asr.pending_body_delivery_after(&anchor.source_key).unwrap();
+    assert!(pending.recognition_pending, "the primary still awaits its utterance finality");
+    let before = asr.state.lock().best_transcript_text.clone();
+    let continued = asr.pause_early_ledger_continuation_after(Duration::from_secs(1), &anchor)
+        .expect("a fresh child recognition certificate must not wait for whole-capture STOP or age again");
+    assert_eq!(continued.suffix.timing.text, "尾句继续写入。");
+    assert!(continued.owner_caught_up);
+    assert!(asr.ledger_continuation_is_current(&continued));
+    assert_eq!(continued.source_text(), before);
+    assert_eq!(asr.state.lock().best_transcript_text, before, "the child cannot overwrite final arbitration");
+    assert_eq!(asr.pending_body_delivery_after(&anchor.source_key).unwrap().key, pending.key,
+        "a recognition certificate is not itself an editor submission");
+    { let state = asr.state.lock(); assert!(state.is_connected && !state.finishing); }
+    assert!(asr.pending_body_delivery_after(&content_key(&continued.source_text())).is_none(),
+        "the ordinary submitted-source cursor must prevent another tail dispatch");
+}
+
+#[test]
+#[cfg(target_os = "windows")]
+fn admitted_tail_certificate_rejects_new_identity_capture_and_source_mismatches() {
+    for case in 0..9 {
+        let (asr, mut anchor) = admitted_tail_snapshot_fixture();
+        match case {
+            0 => asr.state.lock().local_speaker_tracking_enabled = true,
+            1 => asr.state.lock().owner_isolation_frozen = true,
+            2 => asr.state.lock().destination_ledger_incomplete = true,
+            3 => asr.state.lock().owner_delivery_generation += 1,
+            4 => anchor.generation += 1,
+            5 => asr.source_snapshot.lock().result.as_mut().unwrap().captured_origin_bytes += 32,
+            6 => asr.source_snapshot.lock().closed = true,
+            7 => asr.state.lock().finishing = true,
+            _ => { asr.retained_pcm.lock().pop(); },
+        }
+        assert!(asr.pause_early_ledger_continuation_after(Duration::ZERO, &anchor).is_none(), "case={case}");
+    }
+}
+
+#[test]
+#[cfg(target_os = "windows")]
+fn admitted_tail_revalidation_rejects_cancel_reopen_and_revised_occurrences() {
+    for case in 0..5 {
+        let (asr, anchor) = admitted_tail_snapshot_fixture();
+        let continued = asr.pause_early_ledger_continuation_after(Duration::ZERO, &anchor).unwrap();
+        match case {
+            0 => asr.seal_source_snapshot(),
+            1 => asr.reset_source_snapshot(),
+            2 => asr.state.lock().local_speaker_tracking_enabled = true,
+            3 => asr.state.lock().owner_delivery_generation += 1,
+            _ => {
+                let mut state = asr.state.lock();
+                state.best_transcript_text = "另一段完全不同的文字。".into();
+                state.best_transcript_timing.as_mut().unwrap().words.last_mut().unwrap().text = "不同尾句。".into();
+            },
+        }
+        assert!(!asr.ledger_continuation_is_current(&continued), "case={case}");
+    }
+}
+
+#[test]
+#[cfg(target_os = "windows")]
+fn admitted_tail_worker_claims_only_submitted_suffix_with_existing_replay_budget() {
+    // This current-thread future never yields. The real request planner is
+    // exercised, then its task is aborted before any child/socket is polled.
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    runtime.block_on(async {
+        let (asr, anchor) = admitted_tail_snapshot_fixture();
+        asr.state.lock().runtime = Some(Handle::current());
+        let candidate = asr.selected_live_owner_candidate().unwrap();
+        asr.maybe_start_source_snapshot_from(&candidate, None);
+        assert!(asr.source_snapshot.lock().flight.is_none(), "ordinary mode cannot replay the whole recording");
+        asr.maybe_start_source_snapshot_from(&candidate, Some(&anchor));
+        let request = {
+            let slot = asr.source_snapshot.lock();
+            let flight = slot.flight.as_ref().expect("a stalled ordinary tail must reach the real worker planner");
+            assert_eq!(flight.anchor_generation, Some(anchor.generation));
+            assert_eq!(slot.attempted_through_ms, 20_000);
+            assert_eq!(slot.replayed_pcm_bytes, 11_000 * 32, "only 9s..20s, not the 0s..20s prefix");
+            flight.request_id
+        };
+        asr.maybe_start_source_snapshot_from(&candidate, Some(&anchor));
+        assert_eq!(asr.source_snapshot.lock().flight.as_ref().unwrap().request_id, request,
+            "every watchdog poll must reuse the in-flight request");
+        asr.seal_source_snapshot();
+        assert!(asr.source_snapshot.lock().flight.is_none());
+
+        let (limited, anchor) = admitted_tail_snapshot_fixture();
+        limited.state.lock().runtime = Some(Handle::current());
+        limited.source_snapshot.lock().replayed_pcm_bytes = 2 * 20_000 * 32;
+        let candidate = limited.selected_live_owner_candidate().unwrap();
+        limited.maybe_start_source_snapshot_from(&candidate, Some(&anchor));
+        assert!(limited.source_snapshot.lock().flight.is_none(), "the existing total replay budget must remain binding");
+    });
+}
+

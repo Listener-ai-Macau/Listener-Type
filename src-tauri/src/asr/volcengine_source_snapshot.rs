@@ -129,8 +129,11 @@ impl VolcengineStreamingASR {
 
     fn maybe_start_source_snapshot_from(&self, candidate: &SelectedLiveOwnerCandidate, anchor: Option<&LiveLedgerAnchor>) {
         use crate::transcript_boundary::content_key;
-        if candidate.owner_permission != LiveOwnerPermission::SourceProjection
+        let admitted = self.owner_activity_only
+            && candidate.owner_permission == LiveOwnerPermission::Admitted;
+        if (!admitted && candidate.owner_permission != LiveOwnerPermission::SourceProjection)
             || candidate.stability_source.authority != "primary"
+            || (admitted && anchor.is_none())
             || !candidate.recognition_requires_confirmation
         { return; }
         let body_key = content_key(&candidate.text);
@@ -151,15 +154,28 @@ impl VolcengineStreamingASR {
                 || candidate.stability_source.generation != state.owner_delivery_generation
                 || state.destination_ledger_incomplete
             { return; }
-            let Some(projection) = &state.source_owner_projection_stability else { return; };
-            if projection.signature.key != body_key { return; }
-            let Some(owner_end_ms) = projection.signature.words.last().and_then(|word| word.2) else { return; };
+            let owner_end_ms = if admitted {
+                // Ordinary admitted capture needs lexical confirmation, not
+                // a new enrolled-speaker permission. Keep it tied to this
+                // decoder's actual timed source and an already submitted seam.
+                if state.local_speaker_tracking_enabled { return; }
+                let Some(end) = candidate.timing.as_ref()
+                    .filter(|timing| content_key(&timing.text) == body_key)
+                    .and_then(|timing| timing.words.last()).and_then(|word| word.end_ms)
+                else { return; };
+                end
+            } else {
+                let Some(projection) = &state.source_owner_projection_stability else { return; };
+                if projection.signature.key != body_key { return; }
+                let Some(end) = projection.signature.words.last().and_then(|word| word.2) else { return; };
+                end
+            };
             let Some(runtime) = state.runtime.clone() else { return; };
             (state.owner_delivery_generation, owner_end_ms, state.next_input_destination_offset, runtime)
         };
         // Do not let the legacy whole-prefix poll cancel a cropped worker.
         // Short captures keep the existing path and its recorded acceptance.
-        if (destination_bytes / 32 > SOURCE_SNAPSHOT_MAX_PCM_MS) != anchor.is_some() { return; }
+        if !admitted && (destination_bytes / 32 > SOURCE_SNAPSHOT_MAX_PCM_MS) != anchor.is_some() { return; }
         let (request_id, parent_lifecycle_generation, pcm, captured_origin_bytes, captured_through_ms) = {
             let mut slot = self.source_snapshot.lock();
             if slot.closed || slot.parent_stream_id != Some(parent_stream_id) { return; }
@@ -195,9 +211,10 @@ impl VolcengineStreamingASR {
         };
         let anchor = anchor.cloned();
         let slot = Arc::clone(&self.source_snapshot);
-        let child = Arc::new(Self::new_with_session_options_and_proxy(
+        let child = Self::new_with_session_options_and_proxy(
             self.credentials.clone(), self.hotwords.clone(), self.session_options, self.proxy_config.clone(),
-        ));
+        );
+        let child = Arc::new(if admitted { child.with_owner_activity_only(true) } else { child });
         log::info!("[asr] lexical source snapshot claimed parent_stream={parent_stream_id} request={request_id} owner_end_ms={owner_end_ms} captured_origin_bytes={captured_origin_bytes} captured_through_ms={captured_through_ms} anchor_generation={:?}", anchor.as_ref().map(|anchor|anchor.generation));
         let task = runtime.spawn(async move {
             let _cleanup = CancelSnapshotDecoder(Arc::clone(&child));
@@ -303,9 +320,11 @@ impl VolcengineStreamingASR {
 
     pub(crate) fn pause_early_ledger_continuation_after(&self, min_stable: Duration,
         anchor: &LiveLedgerAnchor) -> Option<LiveLedgerContinuation> {
-        if self.state.lock().next_input_destination_offset / 32 <= SOURCE_SNAPSHOT_MAX_PCM_MS { return None; }
         let primary = self.selected_live_owner_candidate()?;
-        if primary.owner_permission != LiveOwnerPermission::SourceProjection
+        let admitted = self.owner_activity_only
+            && primary.owner_permission == LiveOwnerPermission::Admitted;
+        if (!admitted && (primary.owner_permission != LiveOwnerPermission::SourceProjection
+            || self.state.lock().next_input_destination_offset / 32 <= SOURCE_SNAPSHOT_MAX_PCM_MS))
             || primary.stability_source.authority != "primary"
             || primary.updated_at.elapsed() < min_stable
         { return None; }
@@ -322,7 +341,7 @@ impl VolcengineStreamingASR {
             || bound.source_text != anchor.source_text || bound.source != anchor.source || bound.boundary != anchor.boundary
             || snapshot.parent_stream_id != anchor.source.capture_stream_id
             || snapshot.parent_lifecycle_generation != lifecycle_generation
-            || snapshot.completed_at.elapsed() < min_stable
+            || (!admitted && snapshot.completed_at.elapsed() < min_stable)
             || snapshot.captured_origin_bytes % 32 != 0
             || snapshot.captured_pcm_bytes == 0 || snapshot.captured_pcm_bytes % 2 != 0
             || snapshot.captured_origin_bytes.checked_add(snapshot.captured_pcm_bytes)? / 32 != snapshot.captured_through_ms
@@ -333,18 +352,23 @@ impl VolcengineStreamingASR {
         let (source_owner, physical, _) = self.source_owner_evidence_snapshot();
         let state = self.state.lock();
         if !state.is_connected || state.finishing || state.owner_isolation_frozen
-            || !enrolled_owner_identity_verified(&state) || state.destination_ledger_incomplete
+            || (if admitted { state.local_speaker_tracking_enabled } else { !enrolled_owner_identity_verified(&state) })
+            || state.destination_ledger_incomplete
             || snapshot.source_epoch != state.owner_delivery_generation
             || primary.stability_source.generation != state.owner_delivery_generation
             || snapshot.captured_through_ms > state.next_input_destination_offset / 32
             || self.retained_pcm.lock().len() as u64 != state.next_input_destination_offset
         { return None; }
-        let (candidate, signature) = primary_source_owner_supported_candidate(&state, &source_owner, &physical)?;
-        if crate::transcript_boundary::content_key(&candidate.text) != crate::transcript_boundary::content_key(&primary.text) { return None; }
-        let timing = crate::transcript_boundary::TimedTranscript {
-            text: candidate.text,
-            words: signature.words.into_iter().map(|(text,start_ms,end_ms)|
-                crate::transcript_boundary::TimedTranscriptWord { text,start_ms,end_ms }).collect(),
+        let timing = if admitted {
+            primary.timing.clone()?
+        } else {
+            let (candidate, signature) = primary_source_owner_supported_candidate(&state, &source_owner, &physical)?;
+            if crate::transcript_boundary::content_key(&candidate.text) != crate::transcript_boundary::content_key(&primary.text) { return None; }
+            crate::transcript_boundary::TimedTranscript {
+                text: candidate.text,
+                words: signature.words.into_iter().map(|(text,start_ms,end_ms)|
+                    crate::transcript_boundary::TimedTranscriptWord { text,start_ms,end_ms }).collect(),
+            }
         };
         let parent_suffix = timing.timed_suffix_after_delivery(&anchor.boundary)?;
         let suffix_signature = SourceOwnerProjectionSignature {
@@ -354,11 +378,22 @@ impl VolcengineStreamingASR {
                 (crate::transcript_boundary::content_key(&word.text),word.start_ms,word.end_ms)).collect(),
         };
         let (owners, foreign) = source_projection_audio_permissions(&state, &source_owner, &physical);
-        let confirmed = snapshot_owned_aligned_prefix(&suffix_signature, &parent_suffix.text,
-            &child_suffix, (origin_ms,snapshot.captured_through_ms), &owners, &foreign)?;
+        let confirmed = if admitted {
+            // The child owns its own recognition certificate. Only the same
+            // new words after the submitted audio occurrence may be appended;
+            // different child wording cannot revise the immutable prefix.
+            let common = crate::transcript_boundary::stable_content_prefix(
+                &child_suffix.text, std::iter::once(parent_suffix.text.as_str()));
+            snapshot_timed_prefix(&child_suffix, &crate::transcript_boundary::content_key(&common))?
+        } else {
+            snapshot_owned_aligned_prefix(&suffix_signature, &parent_suffix.text,
+                &child_suffix, (origin_ms,snapshot.captured_through_ms), &owners, &foreign)?
+        };
         let owner_caught_up = crate::transcript_boundary::content_key(&confirmed.text) == suffix_signature.key
-            && state.qualified_owner_speech_end_ms.is_some_and(|end| end <= snapshot.captured_through_ms)
-            && source_owner.iter().all(|range| range.1 <= snapshot.captured_through_ms);
+            && (admitted || {
+                state.qualified_owner_speech_end_ms.is_some_and(|end| end <= snapshot.captured_through_ms)
+                    && source_owner.iter().all(|range| range.1 <= snapshot.captured_through_ms)
+            });
         let slot = self.source_snapshot.lock();
         if slot.closed || slot.lifecycle_generation != lifecycle_generation
             || slot.capture_generation != capture_generation || self.asr_stream_id() != snapshot.parent_stream_id { return None; }
@@ -373,12 +408,16 @@ impl VolcengineStreamingASR {
 
     pub(crate) fn ledger_continuation_is_current(&self, continuation: &LiveLedgerContinuation) -> bool {
         use crate::transcript_boundary::{content_key, TimedTranscript, TimedTranscriptWord};
+        let admitted_current = self.owner_activity_only.then(|| self.selected_live_owner_candidate()).flatten()
+            .filter(|candidate| candidate.owner_permission == LiveOwnerPermission::Admitted
+                && candidate.stability_source.authority == "primary");
         let (source_owner, physical, _) = self.source_owner_evidence_snapshot();
         let state = self.state.lock();
         let retained_bytes = self.retained_pcm.lock().len() as u64;
         let slot = self.source_snapshot.lock();
+        let admitted = admitted_current.is_some() && !state.local_speaker_tracking_enabled;
         if !(state.is_connected && !state.finishing && !state.owner_isolation_frozen
-            && enrolled_owner_identity_verified(&state) && !state.destination_ledger_incomplete
+            && (admitted || enrolled_owner_identity_verified(&state)) && !state.destination_ledger_incomplete
             && retained_bytes == state.next_input_destination_offset
             && state.owner_delivery_generation == continuation.suffix.source.owner_generation
             && !slot.closed && slot.parent_stream_id == Some(self.asr_stream_id())
@@ -394,18 +433,23 @@ impl VolcengineStreamingASR {
             || snapshot.captured_origin_bytes.checked_add(snapshot.captured_pcm_bytes)
                 .is_none_or(|end| end / 32 != snapshot.captured_through_ms)
             || snapshot.captured_through_ms > state.next_input_destination_offset / 32
-            || (continuation.owner_caught_up && (!state.qualified_owner_speech_end_ms
+            || (!admitted && continuation.owner_caught_up && (!state.qualified_owner_speech_end_ms
                 .is_some_and(|end| end <= snapshot.captured_through_ms)
                 || source_owner.iter().any(|range| range.1 > snapshot.captured_through_ms)))
         { return false; }
-        let Some((candidate, signature)) = primary_source_owner_supported_candidate(&state, &source_owner, &physical) else { return false; };
-        let current = TimedTranscript { text:candidate.text,
-            words:signature.words.into_iter().map(|(text,start_ms,end_ms)|TimedTranscriptWord {text,start_ms,end_ms}).collect() };
+        let current = if admitted {
+            let Some(current) = admitted_current.and_then(|candidate| candidate.timing) else { return false; };
+            current
+        } else {
+            let Some((candidate, signature)) = primary_source_owner_supported_candidate(&state, &source_owner, &physical) else { return false; };
+            TimedTranscript { text:candidate.text,
+                words:signature.words.into_iter().map(|(text,start_ms,end_ms)|TimedTranscriptWord {text,start_ms,end_ms}).collect() }
+        };
         let Some(suffix) = current.timed_suffix_after_delivery(&continuation.anchor.boundary) else { return false; };
         let selected_key = content_key(&continuation.suffix.timing.text);
         let (owners, foreign) = source_projection_audio_permissions(&state, &source_owner, &physical);
         !selected_key.is_empty() && content_key(&suffix.text).starts_with(&selected_key)
-            && content_key(&continuation.suffix.timing.owner_supported_prefix("", &owners, &foreign)) == selected_key
+            && (admitted || content_key(&continuation.suffix.timing.owner_supported_prefix("", &owners, &foreign)) == selected_key)
     }
 
     #[cfg(test)]
