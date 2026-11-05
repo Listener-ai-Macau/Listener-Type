@@ -1,35 +1,47 @@
-# Listener v1.0.6-rc1 · Type build243 / Firmware38
+# Listener v1.0.6-rc1 · Type build264 / Firmware38
 
 | Download | File |
 | --- | --- |
-| **Windows app** | **[Download MSI](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
-| **ESP32-S3 firmware · USB or Bluetooth OTA** | **[Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
+| **Windows app** | **[Download MSI · build264](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| Firmware · USB flashing or Bluetooth OTA | [Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip) |
 
-## In this app update
+## What's changed since build258
 
-When a clean raw final differs too much from an earlier pasted prefix to locate a safe tail, Type attempts to replace only the same session’s verified, unchanged editor range with the complete final. If the range cannot be verified, it leaves the existing text untouched and reports that it may be incomplete. This scenario has targeted tests; actual end-to-end reproduction in the original editor is still pending.
+- **Less repeated background computation.** Retired wake-recovery jobs check cancellation before heavy inference. Model worker threads park between runs. Personal activity and identity checks coalesce adjacent updates while retaining every source chunk and draining the final tail.
+- **Release temporary memory after dictation analysis.** Once the final personal-activity worker exits, Type reclaims unused working buffers while keeping its model loaded for reuse. Cleanup does not publish recognition, speaker or stop evidence.
+- **Clear completion feedback.** Successful dictation uses the short “Completed” status. Routine completion and other nonblocking status messages no longer look like errors; actual failure states retain their handling. History and numeric diagnostics retain the underlying delivery facts.
+- **Better evidence for intermittent problems.** Bounded timing, signal-health and resource counters help distinguish early ending and delayed delivery. Raw audio recording remains off by default.
 
-Type retries the original wake-recording cancellation when the initial Bluetooth control write fails, while protecting later recordings and firmware updates. It also improves recovery of the wake helper, bundles the CPU voice-activity runtime for fresh Windows installations, and reduces sensitive diagnostic logging. Raw recording retention remains off by default.
+Controlled local tests of the real detection models reduced CPU time for an eight-second synthetic input by about 42%; this is not a fixed whole-app reduction. The production memory/reuse test released about 63 MiB, and a separate maximum-window-first allocation layout released about 139 MiB. Cleanup took about 12 ms in the production test, and five source-window lengths produced identical scores before and after cleanup in the same loaded model. Memory savings vary with allocation history. Background wake checks still have CPU and temporary-memory peaks; long-term whole-app RAM reduction has not been established across all workloads.
 
-## Before using
+## Dictation and clipboard
 
-US$49 is the hardware price. Type is free and open source. Recognition and optional text services require preparation and separate usage charges; this release does not provide a ready-to-use official cloud account or allowance. USB flashing and Bluetooth OTA use the same firmware ZIP.
+Windows retains incremental on-screen insertion. At completion, Type copies the complete finalized text from the same session's history to the clipboard. This final copy does not send another paste. Completion-first copying is on by default on Windows; an existing saved choice is respected.
 
-The cancellation retry is bounded and applies to the original connection and wake request; it cannot guarantee recovery if the connection remains unavailable or changes. A delayed scoped cancellation was verified on a physical device using a separate BLE client. The actual intermittent timeout and Type retry were not reproduced end to end, and complete encrypted sniffer following was not qualified. Intermittent Bluetooth timeout, occasional wake failure, other-computer and long-term physical behavior remain under investigation. Review translations and wording suggestions against the original.
+If a target application is still reading the last temporary clipboard fragment when the complete final is copied, it may read the complete text in place of that fragment. Review the inserted result. A newer user clipboard copy is protected. Windows clipboard history is not required for ordinary copying and pasting. The experimental clipboard-free streaming route remains disabled.
 
-Translations can alter meaning or numbers and require review. Enhanced CPU translation requires optional components. Cloud recognition and wording services may incur separate charges. Long files use overlapping segments; check boundaries and unrecognized portions. Closing the file transcription window loses audio and resume progress, while copied or saved text remains. MP3/M4A depend on system codecs. Historical brownout causes and long live recordings with the actual owner remain unverified.
+Build258's background wake-recovery receiver fix, guarded final-sentence drain and stale wake-control protections are included. Source/identity guards, live audio delivery and the configured stop wait remain in place.
+
+## Current limits and setup
+
+**This remains a prerelease. Ongoing dictation can still end prematurely.** Capture-continuation confirmation failures and host quiet-stop cases reproduced on November 3 remain under investigation. Resource and presentation improvements do not establish a complete fix for intermittent early ending, tail delivery or acoustic wake misses.
+
+Intermittent Bluetooth timeouts, other-computer behavior and long-term physical reliability remain open. Recognition and optional wording/translation services require setup and may incur separate usage charges. Review translations and wording against the original because meaning or numbers can change. Closing file transcription loses unsaved audio and resume progress.
+
+US$49 is the hardware price. Type is free and open source. No ready-to-use official cloud account or allowance is included. Firmware38 is unchanged; USB flashing and Bluetooth OTA use the same firmware ZIP. This publication updates the Windows MSI download; it does not create an automatic-updater manifest or a macOS installer.
 
 ## File identity
 
-- Type source: `1a70146c4a8f05dee6d063f2d0347869ff022b2a` · `build-source/type243-20261031`
-- MSI: 306556928 bytes · SHA256 `bf958e6bbf5d9be989b002d60a81a286b076f1f4836652d0720041b7960c9c0a`
-- Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`
-- ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`
+- Windows runtime source: `73d8f10005cb098a7c069ab8e6a8e9c7e64b20a0` · build264.
+- Windows MSI: 306823168 bytes · SHA256 `728c43d621243d0e0b4465c584a9da9463b67284217d9a3ceea16a412af2a2d6`.
+- The release tag includes a documentation-only follow-up that aligns the download pages; application/build inputs match the runtime source above.
+- Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`.
+- Firmware ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`.
 
 ## 中文说明
 
-本次更新在提前上屏的文字与最终原文无法安全对齐时，尝试只替换本次录音在同一输入框内已确认且未被修改的范围；不能确认时不强贴，并提示内容可能不完整。此路径已做定向测试，原输入框端到端复现仍待确认。
+本次集中发布已在本机安装验证的 Type264，包含减少重复模型计算、旧唤醒任务取消、线程闲时休眠，以及检测任务退出后的临时内存回收。模型继续保留以供下一次复用。实际模型代码测试释放约63 MiB，另一种受控分配布局约139 MiB；不同音频和缓存历史的收益会变化，不能当作整套软件的固定降幅。后台唤醒计算仍有短时CPU和内存峰值。
 
-同时，在自动唤醒录音的取消指令暂时失败时，对原录音执行有限重试，同时保护后续录音及固件更新。改善唤醒辅助程序恢复，补齐新装机器的 CPU 语音活动检测组件，并减少敏感诊断日志。原始录音默认不保留。
+正常完成统一显示“已完成”，普通状态说明不再呈现得像报错。实际失败处理、历史记录和诊断事实保留。实时分段上屏继续，结束时仅复制与历史一致的完整终稿，不再额外粘贴；Windows默认开启完整复制，已有用户选择继续尊重。目标软件若读取最后片段特别慢，仍可能读到完整终稿，请留意实际输入结果。普通复制不需要开启Windows剪贴板历史。
 
-蓝牙持续不可用或连接已更换时，重试不保证成功。实体设备已验证延迟取消，但通过独立蓝牙程序操作；尚未完整复现 Type 自身的真实超时与重试，抓包也未完整跟随。偶发蓝牙超时和唤醒失败的根因仍在排查。
+RC1仍为预发布，持续讲话时偶发提前结束、部分尾句交付、噪声下唤醒和蓝牙间歇故障尚未整体解决。此次资源优化不宣称这些问题已经根治。固件仍为Firmware38，本次更新Windows公开MSI下载。
