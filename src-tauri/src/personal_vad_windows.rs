@@ -1,6 +1,6 @@
 //! Fixed Windows CPU adapter; the endpoint reducer is platform independent.
 use super::{fuse_presence, latest_target_source_end, PresenceAudioBuffer, PresenceObservation, PresenceState, PresenceVerifier, OWNER_ACTIVITY_MIN_PROBABILITY};
-use ort::{session::Session, value::TensorRef};
+use ort::{session::{RunOptions, Session}, value::TensorRef};
 use parking_lot::Mutex;
 use sha2::{Digest, Sha256};
 use std::{
@@ -45,6 +45,24 @@ pub(crate) fn enrollment_reference(pcm: &[u8]) -> Result<PersonalVadReference, S
 
 struct Runtime {
     detector: Session,
+    idle_reclamation: RunOptions,
+}
+
+/// A stream retains the model, but must not retain its peak working arena after
+/// its worker exits. Leave concurrent users alone; the final user reclaims.
+struct RuntimeWorkingMemoryLease<'a>(&'a Arc<Mutex<Runtime>>);
+
+impl Drop for RuntimeWorkingMemoryLease<'_> {
+    fn drop(&mut self) {
+        // The shared cache and this worker are the only owners when idle.
+        // Reclamation is optional, and must never wait behind another run.
+        if std::thread::panicking() || Arc::strong_count(self.0) != 2 { return; }
+        if let Some(mut runtime) = self.0.try_lock() {
+            if let Err(error) = runtime.reclaim_working_memory() {
+                log::debug!("[owner-activity] idle memory reclamation skipped: {error}");
+            }
+        }
+    }
 }
 
 fn model_path(name: &str) -> Result<std::path::PathBuf, String> {
@@ -130,7 +148,27 @@ fn encode_reference(pcm: &[u8]) -> Result<Vec<f32>, String> {
 impl Runtime {
     fn load() -> Result<Self, String> {
         initialize_runtime()?;
-        Ok(Self { detector: load_session(&model_path(DETECTOR)?, DETECTOR_SHA)? })
+        let mut idle_reclamation = RunOptions::new().map_err(|e| e.to_string())?;
+        idle_reclamation.add_config_entry("memory.enable_memory_arena_shrinkage", "cpu:0")
+            .map_err(|e| e.to_string())?;
+        Ok(Self { detector: load_session(&model_path(DETECTOR)?, DETECTOR_SHA)?, idle_reclamation })
+    }
+
+    fn reclaim_working_memory(&mut self) -> Result<(), String> {
+        // ORT applies shrinkage at the end of Run, not as a standalone API.
+        // One minimal, synthetic feature window frees unused arena regions
+        // without unloading weights or penalizing every live audio window.
+        // Its output is discarded: it is never source/identity/STOP evidence.
+        let features = [0.0f32; 14 * 80];
+        let reference = [1.0f32 / 192.0f32.sqrt(); 192];
+        let audio = TensorRef::from_array_view(([1usize, 14usize, 80usize], &features[..]))
+            .map_err(|e| e.to_string())?;
+        let speaker = TensorRef::from_array_view(([1usize, 192usize], &reference[..]))
+            .map_err(|e| e.to_string())?;
+        let _discarded = self.detector.run_with_options(
+            ort::inputs!["speaker_embedding" => speaker, "fbank" => audio], &self.idle_reclamation)
+            .map_err(|e| format!("reclaim personal VAD working memory: {e}"))?;
+        Ok(())
     }
 
     #[cfg(test)]
@@ -227,6 +265,7 @@ impl PersonalVadStream {
                     None => encode_reference(&reference_pcm)?,
                 };
                 let loaded = runtime()?;
+                let _working_memory = RuntimeWorkingMemoryLease(&loaded);
                 #[cfg(test)]
                 eprintln!("[saved-presence] runtime loaded");
                 log::info!("[owner-activity] reference ready source={source} verified_wake_pcm_ms={} output=all_chunks", reference_pcm.len()/32);
@@ -447,6 +486,51 @@ impl Drop for PersonalVadStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "explicit installed local models; synthetic memory/reuse comparison, no microphone/profile/cloud"]
+    fn idle_reclamation_keeps_model_warm_and_scores_identical() {
+        use windows::Win32::System::{ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX}, Threading::GetCurrentProcess};
+        fn private_bytes() -> usize {
+            let mut counters = PROCESS_MEMORY_COUNTERS_EX::default();
+            unsafe { GetProcessMemoryInfo(GetCurrentProcess(),
+                &mut counters as *mut _ as *mut PROCESS_MEMORY_COUNTERS,
+                std::mem::size_of_val(&counters) as u32).unwrap(); }
+            counters.PrivateUsage
+        }
+        let reference = vec![1.0 / 192f32.sqrt(); 192];
+        let pcm: Vec<u8> = (0..38_400).flat_map(|i| {
+            (((i as f32 * std::f32::consts::TAU * 210.0 / 16_000.0).sin() * 4_000.) as i16).to_le_bytes()
+        }).collect();
+        let cache = Arc::new(Mutex::new(Runtime::load().unwrap()));
+        let worker = Arc::clone(&cache);
+        let lease = RuntimeWorkingMemoryLease(&worker);
+        let mut expected = Vec::new();
+        for chunks in [1, 2, 4, 8, 15] {
+            expected.push(cache.lock().probabilities(&reference, &pcm[..chunks * CHUNK_BYTES]).unwrap());
+        }
+        let before = private_bytes();
+        let started = Instant::now();
+        drop(lease); // Exercise the production worker-exit path, not another session.
+        let reclaim_ms = started.elapsed().as_secs_f64() * 1_000.;
+        let after = private_bytes();
+        let reuse_started = Instant::now();
+        for (chunks, expected) in [1, 2, 4, 8, 15].into_iter().zip(expected) {
+            assert_eq!(cache.lock().probabilities(&reference, &pcm[..chunks * CHUNK_BYTES]).unwrap(), expected,
+                "idle reclamation changed the source window with {chunks} chunks");
+        }
+        println!("IDLE_MEMORY_REPORT:{}", serde_json::json!({
+            "privateBeforeBytes":before,"privateAfterBytes":after,"reclaimMs":reclaim_ms,
+            "reuseAllFiveWindowsMs":reuse_started.elapsed().as_secs_f64()*1_000.,
+            "sameSession":true,"scoresIdentical":true,"syntheticInput":true,
+            "privateProfileRead":false,"cloudCalls":0,
+        }));
+        // Arena region sizes depend on which window was observed first. Check
+        // material reclamation, and report the measured amount rather than
+        // imposing one particular synthetic allocation layout on all streams.
+        assert!(before.saturating_sub(after) > 8 * 1024 * 1024,
+            "the verified working arena was not reclaimed");
+    }
 
     #[test]
     #[ignore = "explicit installed local models; eight-second synthetic CPU/source-frontier replay, no microphone/profile/cloud"]
