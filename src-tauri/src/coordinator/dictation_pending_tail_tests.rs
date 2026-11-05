@@ -20,32 +20,60 @@ fn complete_pending_tail_clock(now: Instant, quiet_ms: u64) -> SettledTargetEndp
 }
 
 #[test]
-fn completed_recognition_tail_requests_normal_finalization_without_consuming_words() {
+fn covered_pending_tail_requests_normal_finalization_without_consuming_words() {
     let now = Instant::now();
-    let mut before = complete_pending_tail_clock(now, 2_999);
-    assert!(!before.is_due(now, 3_000));
-    let mut due = complete_pending_tail_clock(now, 3_000);
-    assert!(due.is_due(now, 3_000));
-    assert!(due.pending_body_quiet_proposal);
-    assert!(due.pending_owner_delivery_active(now), "STOP must preserve final-tail obligations");
-    assert!(due.pending_owner_delivery.as_ref().unwrap().recognition_pending);
-    assert_eq!(due.pending_owner_delivery.as_ref().unwrap().key, "等待最终确认的尾句");
+    for terminal in [Some(true), Some(false), None] {
+        for recognition_pending in [true, false] {
+            let setup = |quiet_ms| {
+                let mut clock = complete_pending_tail_clock(now, quiet_ms);
+                clock.latest_visible_body_ends_terminal = terminal;
+                clock.pending_owner_delivery.as_mut().unwrap().recognition_pending = recognition_pending;
+                clock
+            };
+            assert!(!setup(2_999).is_due(now, 3_000));
+            let mut due = setup(3_000);
+            assert!(due.is_due(now, 3_000), "covered tail terminal={terminal:?} recognition_pending={recognition_pending}");
+            assert!(due.pending_body_quiet_proposal);
+            assert!(due.pending_owner_delivery_active(now), "STOP must preserve final-tail obligations");
+            let pending = due.pending_owner_delivery.as_ref().unwrap();
+            assert_eq!(pending.recognition_pending, recognition_pending);
+            assert_eq!(pending.key, "等待最终确认的尾句");
+        }
+    }
 }
 
 #[test]
-fn pending_recognition_tail_keeps_long_guard_for_open_or_unobserved_input() {
+fn pending_tail_keeps_long_guard_for_unobserved_input_and_its_delivery_window() {
     let now = Instant::now();
-    for case in 0..5 {
+    for case in 0..4 {
         let mut clock = complete_pending_tail_clock(now, 3_000);
         match case {
-            0 => clock.latest_visible_body_ends_terminal = Some(false),
-            1 => clock.latest_visible_body_ends_terminal = None,
-            2 => clock.last_body_delivery_at = None,
-            3 => clock.latest_update.as_mut().unwrap().provider_audio_duration_ms = Some(19_000),
-            _ => clock.pending_owner_delivery.as_mut().unwrap().recognition_pending = false,
+            0 => clock.last_body_delivery_at = None,
+            1 => clock.latest_update.as_mut().unwrap().provider_audio_duration_ms = Some(19_000),
+            2 => clock.last_body_delivery_at = Some(now - Duration::from_millis(2_999)),
+            _ => clock.automatic_wake_session = false,
         }
-        assert!(!clock.is_due(now, 3_000), "case {case} has not earned recognition-only finalization");
+        assert!(!clock.pending_body_quiet_stop_due(23_672, now, 3_000), "case {case} has not earned covered-tail finalization");
     }
+}
+
+#[test]
+fn pending_tail_retains_longer_configuration_and_fresh_owner_activity() {
+    use crate::personal_vad::{PresenceObservation, PresenceState};
+    let now = Instant::now();
+    let mut clock = complete_pending_tail_clock(now, 4_999);
+    clock.last_body_delivery_at = Some(now - Duration::from_secs(10));
+    assert!(!clock.pending_body_quiet_stop_due(25_671, now, 5_000));
+    let mut clock = complete_pending_tail_clock(now, 5_000);
+    clock.last_body_delivery_at = Some(now - Duration::from_secs(10));
+    assert!(clock.pending_body_quiet_stop_due(25_672, now, 5_000));
+    clock.note_personal_presence(Some(PresenceObservation {
+        analyzed_end_ms: 25_672, last_positive_end_ms: Some(25_000),
+        last_unresolved_end_ms: None, source_history_complete: true,
+        state: PresenceState::Owner, observed_at: now,
+    }), now);
+    assert!(!clock.pending_body_quiet_stop_due(25_672, now, 5_000),
+        "new owner-positive audio must veto an otherwise quiet proposal");
 }
 
 #[test]
@@ -83,6 +111,7 @@ fn intermittent_tail_fault_matrix_rejects_resumed_and_out_of_order_speech() {
         };
         let initial = base + Duration::from_millis(seed * 10_000);
         let mut clock = complete_pending_tail_clock(initial, 3_000);
+        clock.latest_visible_body_ends_terminal = match seed % 3 { 0 => Some(true), 1 => Some(false), _ => None };
         assert!(clock.is_due(initial, 3_000), "seed={seed}: valid quiet must stay usable");
         let source = 23_672 + 1 + next() % 200;
         let receipt = initial + Duration::from_millis(next() % 700);
@@ -122,6 +151,7 @@ fn intermittent_tail_fault_matrix_holds_continuous_speech_then_releases_real_qui
     let base = Instant::now();
     for seed in 1_u64..=32 {
         let mut clock = complete_pending_tail_clock(base, 3_000);
+        clock.latest_visible_body_ends_terminal = match seed % 3 { 0 => Some(true), 1 => Some(false), _ => None };
         let mut source = 23_672;
         let mut elapsed = 0;
         // Exercise a long dictation without wall-clock sleeps or model calls.

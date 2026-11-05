@@ -572,14 +572,15 @@ impl SettledTargetEndpointClock {
         }
         let Some(silence) = self.local_vad_stop_observation.as_ref()
             .and_then(LocalVadStopObservation::confirmed_silence) else { return false; };
-        // A completed visible clause can remain provisional until the provider
-        // receives end-of-input. Do not make it wait eight seconds for the
-        // very confirmation that normal drain/finalization must request.
-        // PendingBodyDelivery already has owner permission. This only closes
-        // capture; it never certifies or consumes the unconfirmed words.
-        let recognition_tail_ready = self.pending_owner_delivery.as_ref()
-            .is_some_and(|pending| pending.recognition_pending)
-            && self.latest_visible_body_ends_terminal == Some(true)
+        // A permitted tail can need end-of-input before recognition or lexical
+        // delivery finishes. Punctuation and provisional/confirmed state are
+        // text properties, not evidence that the microphone is still active.
+        // Use the ordinary endpoint only after an established body and provider
+        // coverage of the last detected speech. The fresh continuous-silence,
+        // owner-positive and actual delivery guards below retain stop authority.
+        // This closes capture through normal drain/finalization; it never
+        // certifies, consumes or drops the pending words.
+        let pending_tail_ready = self.pending_owner_delivery.is_some()
             && self.last_body_delivery_at.is_some()
             && self.latest_local_vad_evidence
                 .and_then(|evidence| evidence.last_detected_speech_end_ms)
@@ -587,7 +588,7 @@ impl SettledTargetEndpointClock {
                 .is_some_and(|(speech_end, provider_end)| {
                     provider_end.saturating_add(ENDPOINT_PROVIDER_CATCH_UP_GRACE_MS) >= speech_end
                 });
-        let timeout_ms = timeout_ms.max(if recognition_tail_ready {
+        let timeout_ms = timeout_ms.max(if pending_tail_ready {
             RECOGNITION_TAIL_QUIET_FINALIZE_MS
         } else {
             PENDING_BODY_QUIET_FINALIZE_MS
