@@ -163,7 +163,9 @@ fn recording_retention_uses_only_its_own_paste_lease() {
         let receipt = PasteReceipt {
             ticket: dispatch_ticket.id, revision: dispatch_ticket.revision,
             payload: transport.into(), reader: None, before: None, value_before: None, last_value_probe: None,
-            dispatched_at: Instant::now(),
+            dispatched_at: Instant::now() - if completion_first && !consumed {
+                PASTE_RECEIPT_OBSERVATION_BUDGET - Duration::from_millis(300)
+            } else { Duration::ZERO },
             observation: PasteObservation { consumed,
                 proof: consumed.then_some(PasteReceiptProof::ExactEdit),
                 ..Default::default() },
@@ -183,6 +185,12 @@ fn recording_retention_uses_only_its_own_paste_lease() {
         } else {
             Command::RetainRecording(origin, session, final_text, false, reply)
         }).unwrap();
+        if completion_first && !consumed && !foreign && !new_copy {
+            assert!(matches!(results.recv_timeout(Duration::from_millis(70)), Err(mpsc::RecvTimeoutError::Timeout)),
+                "a final copy cannot replace the just-dispatched fragment immediately");
+            assert_eq!(board.get_text().unwrap(), transport,
+                "a delayed native clipboard read must still receive only its submitted fragment");
+        }
         assert_eq!(results.recv_timeout(Duration::from_secs(3)).unwrap(), expected,
             "completion_first={completion_first} consumed={consumed} foreign={foreign} new_copy={new_copy}");
         assert_eq!(board.get_text().unwrap(), match expected {
@@ -190,6 +198,60 @@ fn recording_retention_uses_only_its_own_paste_lease() {
             _ if new_copy => "new user copy",
             _ => transport,
         });
+        drop(commands);
+        worker.join().unwrap();
+    }
+}
+
+#[test]
+#[ignore = "requires an isolated clipboard window station"]
+fn completion_first_waiting_handoff_preserves_new_user_copy() {
+    use std::ffi::c_void;
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetProcessWindowStation() -> *mut c_void;
+        fn GetUserObjectInformationW(handle: *mut c_void, index: i32,
+            info: *mut c_void, length: u32, needed: *mut u32) -> i32;
+    }
+    let mut name = [0u16; 128]; let mut needed = 0;
+    assert_ne!(unsafe { GetUserObjectInformationW(GetProcessWindowStation(), 2,
+        name.as_mut_ptr().cast(), (name.len() * 2) as u32, &mut needed) }, 0);
+    let end = name.iter().position(|c| *c == 0).unwrap_or(name.len());
+    assert!(String::from_utf16_lossy(&name[..end]).starts_with("ListenerClipboardCase_"));
+
+    for newer in ["new user copy", "last tail"] {
+        let session = uuid::Uuid::new_v4();
+        let mut board = arboard::Clipboard::new().unwrap();
+        board.set_text("before recording").unwrap();
+        let origin = ticket();
+        let dispatch_ticket = {
+            let owner = begin_external_write();
+            super::super::set_clipboard_text(&mut board, "last tail",
+                super::super::ClipboardWritePurpose::PasteTransport).unwrap();
+            ClipboardTicket { id: *owner, revision: clipboard_revision() }
+        };
+        let (commands, receiver) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let receipt = PasteReceipt {
+                ticket: dispatch_ticket.id, revision: dispatch_ticket.revision,
+                payload: "last tail".into(), reader: None, before: None, value_before: None,
+                last_value_probe: None,
+                dispatched_at: Instant::now() - (PASTE_RECEIPT_OBSERVATION_BUDGET - Duration::from_millis(600)),
+                observation: PasteObservation::default(), completion: None, session_body: None,
+                observed_document: None, expected_session_document: None, strict_session_edit: false,
+                staged_selection: false, dispatch_session: Some(session),
+            };
+            run_with_capture_and_dispatch(receiver, Some(receipt),
+                || (None, crate::selection::FocusedInputState::Unknown),
+                |_, _, _| panic!("copy must never send another paste"));
+        });
+        let (reply, results) = mpsc::channel();
+        commands.send(Command::PublishRecording(origin, session, "complete final body and last tail".into(), true, reply)).unwrap();
+        assert!(matches!(results.recv_timeout(Duration::from_millis(70)), Err(mpsc::RecvTimeoutError::Timeout)));
+        assert_eq!(board.get_text().unwrap(), "last tail");
+        board.set_text(newer).unwrap();
+        assert_eq!(results.recv_timeout(Duration::from_secs(2)).unwrap(), RetentionResult::Superseded);
+        assert_eq!(board.get_text().unwrap(), newer, "even an equal-text newer copy owns a new revision");
         drop(commands);
         worker.join().unwrap();
     }

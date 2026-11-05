@@ -442,6 +442,8 @@ pub(crate) fn publish_recording(origin: ClipboardTicket, session: uuid::Uuid,
     receiver.recv().unwrap_or(RetentionResult::Failed)
 }
 
+const PASTE_RECEIPT_OBSERVATION_BUDGET: Duration = Duration::from_secs(5);
+
 struct PasteReceipt {
     ticket: u64,
     revision: Option<u64>,
@@ -523,7 +525,7 @@ impl PasteReceipt {
 
     fn expire_if_due(&mut self, observed_at: Instant) -> bool {
         if self.completion.is_none()
-            || observed_at.saturating_duration_since(self.dispatched_at) < Duration::from_secs(5)
+            || observed_at.saturating_duration_since(self.dispatched_at) < PASTE_RECEIPT_OBSERVATION_BUDGET
         {
             return false;
         }
@@ -652,6 +654,7 @@ struct PendingRetention {
     ticket: u64,
     text: String,
     started: Instant,
+    completion_first: bool,
     reply: Sender<RetentionResult>,
 }
 
@@ -727,6 +730,23 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                     continue;
                 }
                 finish(&mut pending, RetentionResult::Superseded);
+                if paste_unconfirmed && receipt.is_some_and(|receipt|
+                    receipt.dispatched_at.elapsed() < PASTE_RECEIPT_OBSERVATION_BUDGET)
+                {
+                    // A final three-character paste can still be queued when
+                    // the complete transcript arrives milliseconds later. Keep
+                    // that exact payload through its existing receipt window;
+                    // completion-first is not permission to truncate the lease.
+                    pending = Some(PendingRetention {
+                        ticket: ticket.id, text, started: Instant::now(),
+                        completion_first: true, reply,
+                    });
+                    log::info!("[insertion] final clipboard publication waiting for paste handoff ticket={} remaining_ms={}",
+                        ticket.id, PASTE_RECEIPT_OBSERVATION_BUDGET
+                            .saturating_sub(receipt.expect("unconfirmed matching paste").dispatched_at.elapsed()).as_millis());
+                    drop(owner);
+                    continue;
+                }
                 *owner = owner.wrapping_add(1);
                 let result = publish_retained_if_current(&text, ticket.revision);
                 let result = if result == RetentionResult::Stored && paste_unconfirmed {
@@ -1104,6 +1124,7 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                     ticket: ticket.id,
                     text,
                     started: Instant::now(),
+                    completion_first: false,
                     reply,
                 });
             }
@@ -1156,7 +1177,22 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
             drop(owner);
             finish(&mut pending, result);
             paste_receipt = None;
-        } else if job.started.elapsed() >= Duration::from_secs(5) {
+        } else if job.completion_first && receipt.dispatched_at.elapsed() >= PASTE_RECEIPT_OBSERVATION_BUDGET {
+            // Preserve the explicit complete-copy preference after the old
+            // observation budget. This is still unconfirmed, not a fabricated
+            // editor receipt or a second paste. New copies were checked above
+            // and are checked atomically again by the publication helper.
+            *owner = owner.wrapping_add(1);
+            let result = publish_retained_if_current(&job.text, receipt.revision);
+            let result = if result == RetentionResult::Stored {
+                RetentionResult::StoredWithoutPasteConfirmation
+            } else { result };
+            log::info!("[insertion] final clipboard publication after paste handoff window ticket={} elapsed_ms={} result={result:?}",
+                job.ticket, receipt.dispatched_at.elapsed().as_millis());
+            drop(owner);
+            finish(&mut pending, result);
+            paste_receipt = None;
+        } else if !job.completion_first && job.started.elapsed() >= PASTE_RECEIPT_OBSERVATION_BUDGET {
             // Timeout only abandons the job; it never authorizes overwriting a
             // payload that an asynchronous target may still be about to read.
             drop(owner);
