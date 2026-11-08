@@ -550,7 +550,14 @@ mod imp {
     /// it never creates a temporary WAV or returns recognized ambient text.
     pub(crate) fn confirm_pcm_if_ready(pcm: &[u8], phrase: &str, timeout: Duration) -> Result<WakeHelperResult, String> {
         let result = client().confirm_with_transport(pcm, phrase, timeout, false, true);
-        if result.as_ref().is_err_and(|error| error == super::WAKE_HELPER_NOT_READY_ERROR_CODE) { schedule_recovery(); }
+        if let Err(error)=&result {
+            let missing=error==super::WAKE_HELPER_NOT_READY_ERROR_CODE
+                ||client().process.try_lock().is_some_and(|slot|slot.is_none());
+            if missing {
+                schedule_recovery();
+                return Err(super::WAKE_HELPER_NOT_READY_ERROR_CODE.to_string());
+            }
+        }
         result
     }
 

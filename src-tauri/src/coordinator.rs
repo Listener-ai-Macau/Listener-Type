@@ -80,6 +80,8 @@ mod microphone_wake_buffer;
 #[cfg(target_os = "windows")]
 mod microphone_wake_decoder;
 #[cfg(target_os = "windows")]
+mod microphone_wake_confirmation;
+#[cfg(target_os = "windows")]
 mod onboard_key_sync;
 mod source_integrity;
 mod support;

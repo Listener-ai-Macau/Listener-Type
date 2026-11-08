@@ -3,15 +3,32 @@ use super::microphone_wake_buffer::{WakeBuffer, PCM_BYTES_PER_SECOND};
 use crate::wake_phrase::{Match, StreamingDetector};
 use parking_lot::Mutex;
 
+#[cfg(test)]
 pub(super) fn confirm_candidate(
     pcm: &[u8],
     phrase: &str,
 ) -> Result<Option<crate::wake_phrase::LocalPhraseRelation>, String> {
+    confirm_candidate_with_timeout(pcm, phrase, std::time::Duration::from_secs(4))
+}
+
+pub(super) fn confirm_candidate_with_timeout(
+    pcm: &[u8],
+    phrase: &str,
+    timeout: std::time::Duration,
+) -> Result<Option<crate::wake_phrase::LocalPhraseRelation>, String> {
     let boosted = crate::wake_phrase::gain_normalized_pcm16(pcm);
+    confirm_normalized_candidate_with_timeout(&boosted, phrase, timeout)
+}
+
+pub(super) fn confirm_normalized_candidate_with_timeout(
+    pcm: &[u8],
+    phrase: &str,
+    timeout: std::time::Duration,
+) -> Result<Option<crate::wake_phrase::LocalPhraseRelation>, String> {
     crate::asr::local::wake_helper::confirm_pcm_if_ready(
-        &boosted,
+        pcm,
         phrase,
-        std::time::Duration::from_secs(4),
+        timeout,
     )
     .map(|result| result.matched.then_some(result.phrase_relation))
 }
@@ -141,6 +158,45 @@ impl Decoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "explicit synthetic first-candidate diagnostic; no microphone, cloud or private audio"]
+    fn microphone_wake_first_candidate_confirmation_context_diagnostic() {
+        let root = std::path::PathBuf::from(std::env::var("LISTENER_WAKE_DIAG_DIR").unwrap());
+        crate::asr::local::wake_helper::preload().unwrap();
+        for name in ["wake_huihui", "wake_slow_first", "neg_kaishi_luxiang"] {
+            let prefix_seconds = 585usize;
+            let mut audio = vec![0; prefix_seconds * PCM_BYTES_PER_SECOND as usize];
+            let wav = std::fs::read(root.join(format!("{name}.wav"))).unwrap();
+            let offset = wav.windows(4).position(|w| w == b"data").unwrap() + 8;
+            let length = u32::from_le_bytes(wav[offset - 4..offset].try_into().unwrap()) as usize;
+            audio.extend_from_slice(&wav[offset..offset + length]);
+            audio.extend(vec![0; PCM_BYTES_PER_SECOND as usize]);
+            let mut decoder = Decoder::new(StreamingDetector::new_strict("开始录音").unwrap(), "开始录音".into());
+            let buffer = Mutex::new(WakeBuffer::default());
+            let mut observed = false;
+            for pcm in audio.chunks(5_120) {
+                let (start, end) = buffer.lock().append(pcm);
+                let Some(found) = decoder.accept(Chunk {start,end,pcm:pcm.to_vec()}, &buffer).unwrap() else {continue};
+                let keyword_end = (found.audio_end_seconds.unwrap() as f64 * 16_000.0).round() as u64 * 2;
+                let old_start = ((found.start_seconds.unwrap_or(0.0) as f64 * 16_000.0).max(0.0) as u64 * 2).max(buffer.lock().start);
+                let broader_start = keyword_end.saturating_sub(4*PCM_BYTES_PER_SECOND).min(old_start).max(buffer.lock().start);
+                let clip = {let b=buffer.lock(); b.range(old_start,b.end.min(keyword_end+PCM_BYTES_PER_SECOND)).unwrap()};
+                let broader = {let b=buffer.lock(); b.range(broader_start,b.end.min(keyword_end+PCM_BYTES_PER_SECOND)).unwrap()};
+                let old = confirm_candidate(&clip,"开始录音");
+                let padded = confirm_candidate(&broader,"开始录音");
+                let later_end = (keyword_end+PCM_BYTES_PER_SECOND).min(audio.len()as u64);
+                let later=&audio[broader_start as usize..later_end as usize];
+                let context = confirm_candidate(later,"开始录音");
+                eprintln!("first-candidate case={name} idle_s={prefix_seconds} keyword_ms={} old_start_ms={} broader_start_ms={} accepted_ms={} old_ms={} broader_ms={} old={old:?} padded={padded:?} with_original_max_context={context:?}",keyword_end/32,old_start/32,broader_start/32,end/32,clip.len()/32,broader.len()/32);
+                if name.starts_with("neg_") {assert!(padded.unwrap().is_none()&&context.unwrap().is_none());}
+                observed=true;
+                break;
+            }
+            eprintln!("first-candidate case={name} observed={observed}");
+            if !name.starts_with("neg_") {assert!(observed);}
+        }
+    }
 
     #[test]
     #[ignore = "requires explicit synthetic fixture directory; uses local KWS, no microphone or cloud"]

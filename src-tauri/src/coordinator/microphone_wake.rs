@@ -590,20 +590,14 @@ fn run_detector(
                 Err(_) => break,
             }
         };
-        let confirmation_pcm = {
-            let buffer = ingress.buffer.lock();
-            let start = candidate.len() as u64;
-            let start = keyword_end.saturating_sub(start).max(buffer.start);
-            let end = buffer.end.min(keyword_end + 32_000);
-            match buffer.range(start, end) {
-                Ok(pcm) => pcm,
-                Err(_) => break,
-            }
-        };
-        let local_relation =
-            super::microphone_wake_decoder::confirm_candidate(&confirmation_pcm, &phrase)
-                .ok()
-                .flatten();
+        let candidate_start = keyword_end - candidate.len() as u64;
+        let local_relation = super::microphone_wake_confirmation::confirm_live_candidate(
+            &ingress.buffer,
+            &cancel,
+            candidate_start,
+            keyword_end,
+            |pcm, timeout| super::microphone_wake_decoder::confirm_normalized_candidate_with_timeout(pcm, &phrase, timeout),
+        );
         if local_relation.is_none() {
             log::info!("[microphone-wake] keyword not independently confirmed generation={token}");
             runtime.reject_candidate(token);
@@ -612,7 +606,6 @@ fn run_detector(
         if cancel.load(Ordering::SeqCst) {
             break;
         }
-        let candidate_start = keyword_end - candidate.len() as u64;
         let owner_allowed = verify_confirmed_owner(
             &ingress,
             &cancel,
