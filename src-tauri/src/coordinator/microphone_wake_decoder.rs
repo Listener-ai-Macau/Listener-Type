@@ -3,14 +3,17 @@ use super::microphone_wake_buffer::{WakeBuffer, PCM_BYTES_PER_SECOND};
 use crate::wake_phrase::{Match, StreamingDetector};
 use parking_lot::Mutex;
 
-pub(super) fn confirm_candidate(pcm: &[u8], phrase: &str) -> Result<bool, String> {
+pub(super) fn confirm_candidate(
+    pcm: &[u8],
+    phrase: &str,
+) -> Result<Option<crate::wake_phrase::LocalPhraseRelation>, String> {
     let boosted = crate::wake_phrase::gain_normalized_pcm16(pcm);
     crate::asr::local::wake_helper::confirm_pcm_if_ready(
         &boosted,
         phrase,
         std::time::Duration::from_secs(4),
     )
-    .map(|result| result.matched)
+    .map(|result| result.matched.then_some(result.phrase_relation))
 }
 
 pub(super) struct Chunk {
@@ -202,7 +205,7 @@ mod tests {
                         let buffer = buffer.lock();
                         buffer.range(begin, buffer.end).unwrap()
                     };
-                    confirm_candidate(&pcm, "开始录音").unwrap()
+                    confirm_candidate(&pcm, "开始录音").unwrap().is_some()
                 } else {
                     false
                 };

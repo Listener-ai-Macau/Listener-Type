@@ -532,9 +532,11 @@ fn run_detector(
                 Err(_) => break,
             }
         };
-        if !super::microphone_wake_decoder::confirm_candidate(&confirmation_pcm, &phrase)
-            .unwrap_or(false)
-        {
+        let local_relation =
+            super::microphone_wake_decoder::confirm_candidate(&confirmation_pcm, &phrase)
+                .ok()
+                .flatten();
+        if local_relation.is_none() {
             log::info!("[microphone-wake] keyword not independently confirmed generation={token}");
             runtime.reject_candidate(token);
             break;
@@ -549,7 +551,12 @@ fn run_detector(
         let Some(inner) = inner.upgrade() else {
             break;
         };
-        if !verified.is_ok_and(|v| v.matched) {
+        if !super::dictation::microphone_wake_owner_allowed(
+            true,
+            local_relation,
+            candidate.len() / 32,
+            &verified,
+        ) {
             log::info!(
                 "[microphone-wake] keyword rejected by existing voiceprint gate generation={token}"
             );

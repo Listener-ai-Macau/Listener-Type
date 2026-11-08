@@ -445,6 +445,29 @@ fn evaluate_owner_gate_evidence(
     }
 }
 
+/// Desktop microphone wake must use the same owner/phrase policy as BLE,
+/// rather than interpreting the embedding verifier's standalone flag as the
+/// final wake decision. Both independent phrase stages remain mandatory here.
+#[cfg(target_os = "windows")]
+pub(super) fn microphone_wake_owner_allowed(
+    complete_keyword: bool,
+    local_relation: Option<crate::wake_phrase::LocalPhraseRelation>,
+    pcm_ms: usize,
+    verification: &Result<crate::speaker_verification::VerificationResult, String>,
+) -> bool {
+    use crate::speech_decision_kernel::{arbitrate_wake, wake_phrase_signal, KeywordPhraseEvidence};
+    use denzic_voice_activation_v1_core::{GateDecision, LocalPhraseRelation, PhraseSignal};
+    let confirmed = matches!(local_relation, Some(LocalPhraseRelation::ExactStart | LocalPhraseRelation::PhoneticStart | LocalPhraseRelation::PresentLater));
+    let phrase = if complete_keyword && confirmed {
+        wake_phrase_signal(KeywordPhraseEvidence::Complete, local_relation)
+    } else { PhraseSignal::None };
+    let owner = evaluate_owner_gate_evidence(&mut 0, &mut 0.0, phrase, pcm_ms, verification);
+    let result = arbitrate_wake(phrase, owner.access, false);
+    log::info!("[microphone-wake] owner arbitration local_relation={local_relation:?} pcm_ms={pcm_ms} score={:?} access={:?} decision={:?}",
+        verification.as_ref().ok().map(|value| value.score), owner.access, result.decision);
+    result.decision == GateDecision::Accept
+}
+
 fn evaluate_candidate_owner_gate(
     candidate: &mut BufferedSpeakerCandidate,
     phrase_signal: denzic_voice_activation_v1_core::PhraseSignal,

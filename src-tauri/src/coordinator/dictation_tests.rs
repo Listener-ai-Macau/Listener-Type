@@ -14744,6 +14744,30 @@ fn ambiguous_owner_history_survives_one_noisy_window() {
 }
 
 #[test]
+#[cfg(target_os = "windows")]
+fn microphone_wake_owner_gate_matches_board_policy_for_actual_rejected_score() {
+    use crate::speaker_verification::{VerificationPolicy, VerificationResult};
+    use crate::speech_decision_kernel::{arbitrate_wake, wake_phrase_signal, KeywordPhraseEvidence};
+    use denzic_voice_activation_v1_core::{GateDecision, LocalPhraseRelation};
+    for score in [0.15, 0.1999, 0.20, 0.313291, 0.40, 0.42] {
+        for pcm_ms in [1799, 1800, 2280] {
+            let verification = Ok(VerificationResult { matched: score >= 0.42, owner_matched: score >= 0.42, score, policy: VerificationPolicy::Enrolled });
+            let relation = Some(LocalPhraseRelation::ExactStart);
+            let phrase = wake_phrase_signal(KeywordPhraseEvidence::Complete, relation);
+            let expected = super::evaluate_owner_gate_evidence(&mut 0, &mut 0.0, phrase, pcm_ms, &verification);
+            assert_eq!(super::microphone_wake_owner_allowed(true, relation, pcm_ms, &verification),
+                arbitrate_wake(phrase, expected.access, false).decision == GateDecision::Accept);
+        }
+    }
+    let observed = Ok(VerificationResult { matched: false, owner_matched: false, score: 0.313291, policy: VerificationPolicy::Enrolled });
+    assert!(super::microphone_wake_owner_allowed(true, Some(LocalPhraseRelation::ExactStart), 2280, &observed));
+    assert!(!super::microphone_wake_owner_allowed(false, Some(LocalPhraseRelation::ExactStart), 2280, &observed));
+    assert!(!super::microphone_wake_owner_allowed(true, None, 2280, &observed));
+    assert!(!super::microphone_wake_owner_allowed(true, Some(LocalPhraseRelation::Absent), 2280, &observed));
+    assert!(!super::microphone_wake_owner_allowed(true, Some(LocalPhraseRelation::ExactStart), 2280, &Err("unavailable".into())));
+}
+
+#[test]
 fn complete_local_phrase_recovers_noisy_owner_but_never_kws_or_errors() {
     let noisy_owner = Ok(crate::speaker_verification::VerificationResult {
         matched: false,
