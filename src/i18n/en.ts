@@ -795,6 +795,7 @@ export const en: typeof zhCN = {
     },
     recording: {
       "microphoneWakeTitle": "Wake with computer microphone",
+      "microphoneWakeAutomaticDesc": "Listen locally through the selected microphone while idle. Say the wake phrase to start dictation; it ends automatically after you stop speaking. You can also use the hotkey or checkmark. Listening resumes afterwards. No standby audio is saved or sent.",
       "microphoneWakeDesc": "Listen locally through the selected microphone while idle. Say the wake phrase to start dictation; the hotkey or checkmark ends it. Listening resumes afterwards. No standby audio is saved or sent.",
       "microphoneWakePhrase": "Wake phrase",
       "microphoneWakePhraseDesc": "Shared with Listener device wake and its existing voiceprint. Changing it requires enrolling the voiceprint again.",

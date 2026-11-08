@@ -296,6 +296,10 @@ async fn begin_microphone_session(inner: &Arc<Inner>, translation: bool, wake_to
     clear_embedded_audio_final_result(inner);
     begin_embedded_audio_preview_session(inner, current_session_id);
     #[cfg(target_os = "windows")]
+    if wake_token.is_some() {
+        arm_microphone_wake_body_guard(inner, current_session_id);
+    }
+    #[cfg(target_os = "windows")]
     {
         let prepared = inner.windows_ime.prepare_session();
         let mut slots = inner.prepared_windows_ime_session.lock();
@@ -501,6 +505,8 @@ async fn begin_microphone_session(inner: &Arc<Inner>, translation: bool, wake_to
         let asr = build_volcengine_asr(inner, current_session_id);
         let bridge = Arc::new(DeferredAsrBridge::new());
         let consumer: Arc<dyn crate::recorder::AudioConsumer> = bridge.clone();
+        #[cfg(target_os = "windows")]
+        let consumer = microphone_endpoint_consumer(inner, current_session_id, &asr, consumer);
         if !store_asr_for_session(
             inner,
             current_session_id,

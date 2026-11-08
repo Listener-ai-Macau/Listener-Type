@@ -48,6 +48,7 @@ struct Data {
     generation: u64,
     capture: Option<IdleCapture>,
     wake_start_owner: Option<SessionId>,
+    dictation_owner: Option<SessionId>,
     retry_at: Instant,
     status: Status,
 }
@@ -67,6 +68,7 @@ impl Default for Runtime {
                 generation: 0,
                 capture: None,
                 wake_start_owner: None,
+                dictation_owner: None,
                 retry_at: Instant::now(),
                 status: Status {
                     state: "off".into(),
@@ -145,6 +147,15 @@ impl Runtime {
         self.notify.notify_one();
     }
 
+    pub fn owns_dictation_session(&self, session: SessionId) -> bool {
+        self.data.lock().dictation_owner == Some(session)
+    }
+
+    #[cfg(test)]
+    pub fn mark_dictation_owner_for_test(&self, session: SessionId) {
+        self.data.lock().dictation_owner = Some(session);
+    }
+
     pub fn set_preview_active(&self, active: bool) {
         self.preview_active.store(active, Ordering::SeqCst);
         if active {
@@ -197,6 +208,7 @@ impl Runtime {
         let session = create()?;
         capture.claimed_session = Some(session);
         data.wake_start_owner = Some(session);
+        data.dictation_owner = Some(session);
         Some(session)
     }
 

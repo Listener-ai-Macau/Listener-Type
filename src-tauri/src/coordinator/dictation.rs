@@ -575,6 +575,8 @@ fn polish_prefetch_adoptable(prefetch: &PolishPrefetch, final_text: &str) -> boo
 }
 
 include!("dictation_target_speaker_update.rs");
+#[cfg(target_os = "windows")]
+include!("dictation_microphone_endpoint.rs");
 
 fn qualified_owner_speech_end_ms(
     update: &crate::asr::volcengine::TargetSpeakerUpdate,

@@ -792,6 +792,7 @@ export const zhCN = {
     },
     recording: {
       "microphoneWakeTitle": "电脑麦克风唤醒",
+      "microphoneWakeAutomaticDesc": "空闲时通过所选麦克风在本机监听。说出唤醒词开始听写，停说后自动结束；也可用快捷键或勾号结束，随后恢复监听。待机音频不会保存或上传。",
       "microphoneWakeDesc": "空闲时通过所选麦克风在本机监听。说出唤醒词即可开始听写，用快捷键或勾号结束后会恢复监听。待机音频不会保存或上传。",
       "microphoneWakePhrase": "唤醒词",
       "microphoneWakePhraseDesc": "与 Listener 设备共用唤醒词和现有声纹。修改唤醒词后，需要重新录入声纹。",

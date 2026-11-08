@@ -363,9 +363,13 @@ fn manual_endpoint_vad_allowed(
     policy: TargetSpeakerEndpointPolicy,
     update: &crate::asr::volcengine::TargetSpeakerUpdate,
 ) -> bool {
-    policy.body_started
-        && !automatic_wake_session_active(inner, session_id)
-        && !update.local_speaker_tracking_enabled
+    let mut untracked_capture = !automatic_wake_session_active(inner, session_id);
+    #[cfg(target_os = "windows")]
+    { untracked_capture |= inner.microphone_wake.owns_dictation_session(session_id); }
+    // Native wake capture has already proved the activation owner, but does
+    // not fabricate BLE's per-body speaker tracker. Its independent VAD uses
+    // the existing untracked-capture endpoint evidence and silence contract.
+    policy.body_started && untracked_capture && !update.local_speaker_tracking_enabled
 }
 
 fn settled_target_wall_clock_timeout_ms(endpoint_timeout_ms: u64) -> u64 {

@@ -752,6 +752,7 @@ export const ko: typeof zhCN = {
     },
     recording: {
       "microphoneWakeTitle": "컴퓨터 마이크로 깨우기",
+      "microphoneWakeAutomaticDesc": "대기 중 선택한 마이크에서 로컬로 감지합니다. 호출어로 받아쓰기를 시작하고 말을 멈추면 자동으로 종료합니다. 단축키나 체크 표시로도 종료할 수 있으며 이후 대기로 돌아갑니다. 대기 음성은 저장하거나 전송하지 않습니다.",
       "microphoneWakeDesc": "대기 중 선택한 마이크에서 로컬로 감지합니다. 호출어로 받아쓰기를 시작하고 단축키나 체크 표시로 종료하면 대기로 돌아갑니다. 대기 음성은 저장하거나 전송하지 않습니다.",
       "microphoneWakePhrase": "호출어",
       "microphoneWakePhraseDesc": "Listener 기기 및 기존 성문과 공유합니다. 변경하면 성문을 다시 등록해야 합니다.",

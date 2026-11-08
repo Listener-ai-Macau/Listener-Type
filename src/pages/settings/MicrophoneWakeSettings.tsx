@@ -35,7 +35,8 @@ export function MicrophoneWakeSettings() {
   };
   const state = prefs.microphoneWakeEnabled ? status?.state ?? 'preparing' : 'off';
   return <>
-    <SettingRow label={t('settings.recording.microphoneWakeTitle')} desc={t('settings.recording.microphoneWakeDesc')}>
+    <SettingRow label={t('settings.recording.microphoneWakeTitle')} desc={t(prefs.activeAsrProvider === 'volcengine'
+      ? 'settings.recording.microphoneWakeAutomaticDesc' : 'settings.recording.microphoneWakeDesc')}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, pointerEvents: busy ? 'none' : undefined, opacity: busy ? 0.6 : 1 }}>
         <span role="status" style={{ fontSize: 11, color: 'var(--ol-ink-3)' }}>{t(`settings.recording.microphoneWakeStates.${state}`)}</span>
         <Toggle on={prefs.microphoneWakeEnabled} onToggle={() => void save({ microphoneWakeEnabled: !prefs.microphoneWakeEnabled })} />

@@ -794,6 +794,7 @@ export const zhTW: typeof zhCN = {
     },
     recording: {
       "microphoneWakeTitle": "電腦麥克風喚醒",
+      "microphoneWakeAutomaticDesc": "閒置時透過所選麥克風在本機監聽。說出喚醒詞開始聽寫，停止說話後自動結束；也可用快捷鍵或勾號結束，隨後恢復監聽。待機音訊不會儲存或上傳。",
       "microphoneWakeDesc": "閒置時透過所選麥克風在本機監聽。說出喚醒詞即可開始聽寫，用快捷鍵或勾號結束後會恢復監聽。待機音訊不會儲存或上傳。",
       "microphoneWakePhrase": "喚醒詞",
       "microphoneWakePhraseDesc": "與 Listener 裝置共用喚醒詞和現有聲紋。修改喚醒詞後，需要重新錄入聲紋。",

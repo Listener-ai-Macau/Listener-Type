@@ -391,6 +391,11 @@ fn handle_target_speaker_endpoint_stop(
         ticket,
     };
     async_runtime::spawn(async move {
+        #[cfg(target_os = "windows")]
+        if inner.microphone_wake.owns_dictation_session(session_id) {
+            finish_microphone_endpoint_stop(&inner, stop_reason, admission, &stop_dispatched, &stop_completed).await;
+            return;
+        }
         let stop_result = request_embedded_ble_recording_stop_from_host_for_endpoint(
             &inner,
             stop_reason,

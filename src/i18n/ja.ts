@@ -752,6 +752,7 @@ export const ja: typeof zhCN = {
     },
     recording: {
       "microphoneWakeTitle": "PCマイクで呼び出す",
+      "microphoneWakeAutomaticDesc": "待機中は選択したマイクでローカル検出します。ウェイクワードで音声入力を開始し、話し終えると自動で終了します。ショートカットかチェックマークでも終了でき、その後は待機に戻ります。待機音声は保存・送信しません。",
       "microphoneWakeDesc": "待機中は選択したマイクでローカル検出します。ウェイクワードで音声入力を開始し、ショートカットかチェックマークで終了すると待機に戻ります。待機音声は保存・送信しません。",
       "microphoneWakePhrase": "ウェイクワード",
       "microphoneWakePhraseDesc": "Listener本体と既存の声紋を共有します。変更後は声紋の再登録が必要です。",
