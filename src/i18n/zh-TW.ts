@@ -793,6 +793,21 @@ export const zhTW: typeof zhCN = {
       about: '關於',
     },
     recording: {
+      "microphoneWakeTitle": "電腦麥克風喚醒",
+      "microphoneWakeDesc": "閒置時透過所選麥克風在本機監聽。說出喚醒詞即可開始聽寫，用快捷鍵或勾號結束後會恢復監聽。待機音訊不會儲存或上傳。",
+      "microphoneWakePhrase": "喚醒詞",
+      "microphoneWakePhraseDesc": "與 Listener 裝置共用喚醒詞和現有聲紋。修改喚醒詞後，需要重新錄入聲紋。",
+      "microphoneWakeError": "無法啟動監聽。請檢查麥克風權限和所選麥克風，再關閉並重新開啟此開關。",
+      "microphoneWakeStates": {
+        "off": "已關閉",
+        "preparing": "準備中",
+        "listening": "等待喚醒",
+        "starting": "正在開始聽寫",
+        "recording": "聽寫中",
+        "paused": "錄音或麥克風測試期間暫停",
+        "error": "麥克風無法使用",
+        "unsupported": "暫不可用"
+      },
       title: '錄音',
       desc: '定義全局錄音的快捷鍵與觸發方式。',
       hotkeyLabel: '錄音快捷鍵',

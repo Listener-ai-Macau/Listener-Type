@@ -751,6 +751,21 @@ export const ko: typeof zhCN = {
       about: '정보',
     },
     recording: {
+      "microphoneWakeTitle": "컴퓨터 마이크로 깨우기",
+      "microphoneWakeDesc": "대기 중 선택한 마이크에서 로컬로 감지합니다. 호출어로 받아쓰기를 시작하고 단축키나 체크 표시로 종료하면 대기로 돌아갑니다. 대기 음성은 저장하거나 전송하지 않습니다.",
+      "microphoneWakePhrase": "호출어",
+      "microphoneWakePhraseDesc": "Listener 기기 및 기존 성문과 공유합니다. 변경하면 성문을 다시 등록해야 합니다.",
+      "microphoneWakeError": "대기 감지를 시작할 수 없습니다. 마이크 권한과 선택을 확인한 후 이 설정을 껐다 켜세요.",
+      "microphoneWakeStates": {
+        "off": "꺼짐",
+        "preparing": "준비 중",
+        "listening": "호출 대기",
+        "starting": "시작 중",
+        "recording": "받아쓰기 중",
+        "paused": "녹음 또는 마이크 테스트 중 일시 중지",
+        "error": "마이크 사용 불가",
+        "unsupported": "사용 불가"
+      },
       title: '녹음',
       desc: '전역 녹음의 단축키와 트리거 방식을 정의합니다.',
       hotkeyLabel: '녹음 단축키',

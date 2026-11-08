@@ -610,6 +610,7 @@ pub fn set_settings(
     // 没有 HotkeySettingsContext，必须靠事件感知录音键变化，否则面板可见时
     // 用户改键会让浮窗里的 "{recordHotkey}" 文案一直停留在旧值。
     persist_settings(&*coord, prefs.clone())?;
+    coord.refresh_microphone_wake();
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     crate::asr::content_recovery_assets::prepare_in_background(&prefs.owner_content_recovery_locale);
     if prefs.show_capsule != previous_prefs.show_capsule {
@@ -760,11 +761,18 @@ pub fn list_microphone_devices() -> Result<Vec<crate::recorder::MicrophoneDevice
 }
 
 #[tauri::command]
+pub fn get_microphone_wake_status(coord: CoordinatorState<'_>) -> serde_json::Value {
+    coord.microphone_wake_status()
+}
+
+#[tauri::command]
 pub async fn start_microphone_level_monitor(
     app: AppHandle,
     device_name: String,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let coordinator = app.state::<Arc<Coordinator>>();
+        coordinator.set_microphone_preview_active(true);
         let state = app.state::<MicrophoneMonitorState>();
         if let Some(existing) = state.lock().take() {
             existing.stop();
@@ -781,9 +789,11 @@ pub async fn start_microphone_level_monitor(
         let level_handler: Arc<dyn Fn(f32) + Send + Sync> = Arc::new(move |level| {
             let _ = level_app.emit("microphone:level", serde_json::json!({ "level": level }));
         });
-        let (recorder, _runtime_errors, _archive_active) =
-            Recorder::start(microphone_device_name, consumer, level_handler, None)
-                .map_err(|e| e.to_string())?;
+        let started = Recorder::start(microphone_device_name, consumer, level_handler, None);
+        let (recorder, _runtime_errors, _archive_active) = match started {
+            Ok(result) => result,
+            Err(error) => { coordinator.set_microphone_preview_active(false); return Err(error.to_string()); }
+        };
         *state.lock() = Some(recorder);
         Ok(())
     })
@@ -799,6 +809,7 @@ pub async fn stop_microphone_level_monitor(app: AppHandle) {
         if let Some(recorder) = recorder {
             recorder.stop();
         }
+        app.state::<Arc<Coordinator>>().set_microphone_preview_active(false);
     })
     .await;
 }

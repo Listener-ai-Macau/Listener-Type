@@ -751,6 +751,21 @@ export const ja: typeof zhCN = {
       about: '情報',
     },
     recording: {
+      "microphoneWakeTitle": "PCマイクで呼び出す",
+      "microphoneWakeDesc": "待機中は選択したマイクでローカル検出します。ウェイクワードで音声入力を開始し、ショートカットかチェックマークで終了すると待機に戻ります。待機音声は保存・送信しません。",
+      "microphoneWakePhrase": "ウェイクワード",
+      "microphoneWakePhraseDesc": "Listener本体と既存の声紋を共有します。変更後は声紋の再登録が必要です。",
+      "microphoneWakeError": "待機を開始できません。マイクのアクセス権と選択を確認し、この設定をオフにしてから再度オンにしてください。",
+      "microphoneWakeStates": {
+        "off": "オフ",
+        "preparing": "準備中",
+        "listening": "呼びかけ待ち",
+        "starting": "開始中",
+        "recording": "音声入力中",
+        "paused": "録音・マイクテスト中は一時停止",
+        "error": "マイクを利用できません",
+        "unsupported": "利用不可"
+      },
       title: '録音',
       desc: 'グローバル録音のショートカットとトリガー方式を定義します。',
       hotkeyLabel: '録音ショートカット',

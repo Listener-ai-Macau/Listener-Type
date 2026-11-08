@@ -974,6 +974,7 @@ pub fn run() {
             commands::set_shortcut_recording_active,
             commands::get_windows_ime_status,
             commands::list_microphone_devices,
+            commands::get_microphone_wake_status,
             commands::start_microphone_level_monitor,
             commands::stop_microphone_level_monitor,
             commands::get_credentials,

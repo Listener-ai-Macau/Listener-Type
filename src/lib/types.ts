@@ -429,6 +429,8 @@ export interface UserPreferences {
   muteDuringRecording: boolean;
   /** 录音输入设备名称。空字符串 = 使用系统默认麦克风。 */
   microphoneDeviceName: string;
+  /** Local standby wake on the selected computer microphone; opt-in. */
+  microphoneWakeEnabled: boolean;
   /** 听写输入源。默认 embeddedBle；用户手动改过后才保留 microphone。 */
   dictationInputSource: DictationInputSource;
   /** 输入源是否已经由用户显式改过。false 表示沿用产品默认 embeddedBle。 */

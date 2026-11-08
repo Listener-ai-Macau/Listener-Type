@@ -791,6 +791,21 @@ export const zhCN = {
       about: '关于',
     },
     recording: {
+      "microphoneWakeTitle": "电脑麦克风唤醒",
+      "microphoneWakeDesc": "空闲时通过所选麦克风在本机监听。说出唤醒词即可开始听写，用快捷键或勾号结束后会恢复监听。待机音频不会保存或上传。",
+      "microphoneWakePhrase": "唤醒词",
+      "microphoneWakePhraseDesc": "与 Listener 设备共用唤醒词和现有声纹。修改唤醒词后，需要重新录入声纹。",
+      "microphoneWakeError": "未能启动监听。请检查麦克风权限和所选麦克风，再关闭并重新打开此开关。",
+      "microphoneWakeStates": {
+        "off": "已关闭",
+        "preparing": "准备中",
+        "listening": "等待唤醒",
+        "starting": "正在开始听写",
+        "recording": "听写中",
+        "paused": "录音或麦克风测试期间暂停",
+        "error": "麦克风不可用",
+        "unsupported": "暂不可用"
+      },
       title: '录音',
       desc: '全局录音快捷键。按一次开始，再按一次结束。',
       hotkeyLabel: '录音快捷键',

@@ -487,6 +487,16 @@ mod imp {
             self.transcribe_samples(&samples)
         }
 
+        pub(crate) fn transcribe_pcm16le(&self, pcm: &[u8], enhanced: bool) -> Result<String, String> {
+            if pcm.is_empty() || pcm.len() % 2 != 0 || pcm.len() > 12 * 32_000 {
+                return Err("invalid bounded microphone wake PCM".into());
+            }
+            let samples = pcm.chunks_exact(2)
+                .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / 32768.0).collect();
+            let samples = if enhanced { self.denoise_samples(samples) } else { samples };
+            self.transcribe_samples(&samples)
+        }
+
         pub fn warm_up(&self) -> Result<(), String> {
             // Loading the ONNX sessions is not enough to make the first wake
             // confirmation warm. Exercise the same denoiser + recognizer path

@@ -255,15 +255,30 @@ pub(super) async fn begin_session_with_translation(
     inner: &Arc<Inner>,
     translation: bool,
 ) -> Result<(), String> {
+    begin_microphone_session(inner, translation, None).await
+}
+
+#[cfg(target_os = "windows")]
+pub(super) async fn begin_session_from_microphone_wake(inner: &Arc<Inner>, token: u64) -> Result<(), String> {
+    begin_microphone_session(inner, false, Some(token)).await
+}
+
+async fn begin_microphone_session(inner: &Arc<Inner>, translation: bool, wake_token: Option<u64>) -> Result<(), String> {
     if !recording_gate::try_admit_arc(inner, RecordIntent::HotkeyPress, "microphone recording start") {
         return Err("Recording is unavailable during firmware OTA".to_string());
     }
+    if wake_token.is_some() && (!inner.prefs.get().microphone_wake_enabled
+        || inner.prefs.get().dictation_input_source != DictationInputSource::Microphone) { return Ok(()); }
     let current_session_id = {
         let mut state = inner.state.lock();
         // r23：HWND 与标题原子成对抓取，自愈路径靠标题识别真实窗口。
         let (focus_target, focus_title) = capture_focus_target_with_title();
-        let Some(session_id) =
-            begin_session_state(&mut state, focus_target, capture_frontmost_app())
+        let mut create = || begin_session_state(&mut state, focus_target, capture_frontmost_app());
+        #[cfg(target_os = "windows")]
+        let created = if let Some(token) = wake_token { inner.microphone_wake.claim_start(token, create) } else { create() };
+        #[cfg(not(target_os = "windows"))]
+        let created = create();
+        let Some(session_id) = created
         else {
             return Ok(());
         };
@@ -636,12 +651,18 @@ pub(super) async fn start_recorder_for_starting(
     } else {
         None
     };
-    match Recorder::start(
-        microphone_device_name,
-        consumer,
-        level_handler,
-        audio_archive_path,
-    ) {
+    #[cfg(target_os = "windows")]
+    let adopted = inner.microphone_wake.adopt(session_id, Arc::clone(&consumer), Arc::clone(&level_handler), audio_archive_path.clone());
+    #[cfg(not(target_os = "windows"))]
+    let adopted: Option<Result<(Recorder, mpsc::Receiver<RecorderError>, bool), String>> = None;
+    let capture = if let Some(result) = adopted {
+        result.map_err(RecorderError::EngineFailed)
+    } else {
+        #[cfg(target_os = "windows")]
+        inner.microphone_wake.stop_idle();
+        Recorder::start(microphone_device_name, consumer, level_handler, audio_archive_path)
+    };
+    match capture {
         Ok((rec, runtime_errors, archive_active)) => {
             // 把 archive 实际创建状态存到 Inner，让 history 写入路径（含 empty-transcript
             // 失败分支）读真实情况，而不是 prefs 开关。修 pr_agent "Wrong Flag" 反馈。

@@ -1253,6 +1253,9 @@ pub struct UserPreferences {
     /// 录音输入设备名称。空字符串 = 使用系统默认麦克风。
     #[serde(default)]
     pub microphone_device_name: String,
+    /// Explicit opt-in: locally listen on the selected computer microphone.
+    #[serde(default)]
+    pub microphone_wake_enabled: bool,
     /// 听写输入源。默认使用嵌入式 VKA1 BLE 键盘/音频入口；用户手动改过后才保留麦克风。
     #[serde(default)]
     pub dictation_input_source: DictationInputSource,
@@ -1596,6 +1599,8 @@ struct UserPreferencesWire {
     #[serde(default)]
     microphone_device_name: String,
     #[serde(default)]
+    microphone_wake_enabled: bool,
+    #[serde(default)]
     dictation_input_source: DictationInputSource,
     #[serde(default)]
     dictation_input_source_user_overridden: bool,
@@ -1742,6 +1747,7 @@ impl Default for UserPreferencesWire {
             show_capsule: prefs.show_capsule,
             mute_during_recording: prefs.mute_during_recording,
             microphone_device_name: prefs.microphone_device_name,
+            microphone_wake_enabled: prefs.microphone_wake_enabled,
             dictation_input_source: prefs.dictation_input_source,
             dictation_input_source_user_overridden: prefs.dictation_input_source_user_overridden,
             active_asr_provider: prefs.active_asr_provider,
@@ -1941,6 +1947,7 @@ impl<'de> Deserialize<'de> for UserPreferences {
             show_capsule: wire.show_capsule,
             mute_during_recording: wire.mute_during_recording,
             microphone_device_name: wire.microphone_device_name,
+            microphone_wake_enabled: wire.microphone_wake_enabled,
             dictation_input_source,
             dictation_input_source_user_overridden: wire.dictation_input_source_user_overridden,
             active_asr_provider: wire.active_asr_provider,
@@ -2399,6 +2406,7 @@ impl Default for UserPreferences {
             show_capsule: true,
             mute_during_recording: false,
             microphone_device_name: String::new(),
+            microphone_wake_enabled: false,
             dictation_input_source: DictationInputSource::EmbeddedBle,
             dictation_input_source_user_overridden: false,
             active_asr_provider: default_active_asr_provider(),

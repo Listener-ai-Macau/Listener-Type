@@ -211,6 +211,7 @@ let mockSettings: UserPreferences = {
   showCapsule: true,
   muteDuringRecording: false,
   microphoneDeviceName: '',
+  microphoneWakeEnabled: false,
   dictationInputSource: 'embeddedBle',
   dictationInputSourceUserOverridden: false,
   activeAsrProvider: 'volcengine',
@@ -963,6 +964,17 @@ export function getWindowsImeStatus(): Promise<WindowsImeStatus> {
 
 export function listMicrophoneDevices(): Promise<MicrophoneDevice[]> {
   return invokeOrMock('list_microphone_devices', undefined, () => mockMicrophoneDevices);
+}
+
+export interface MicrophoneWakeStatus {
+  state: 'off' | 'preparing' | 'listening' | 'starting' | 'recording' | 'paused' | 'error' | 'unsupported';
+  capturedSamples: number;
+  wakes: number;
+  error: string | null;
+}
+
+export function getMicrophoneWakeStatus(): Promise<MicrophoneWakeStatus> {
+  return invokeOrMock('get_microphone_wake_status', undefined, () => ({ state: 'off', capturedSamples: 0, wakes: 0, error: null }));
 }
 
 export function startMicrophoneLevelMonitor(deviceName: string): Promise<void> {

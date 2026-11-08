@@ -74,6 +74,12 @@ mod qa_question_context;
 mod recording_gate;
 mod resources;
 #[cfg(target_os = "windows")]
+mod microphone_wake;
+#[cfg(target_os = "windows")]
+mod microphone_wake_buffer;
+#[cfg(target_os = "windows")]
+mod microphone_wake_decoder;
+#[cfg(target_os = "windows")]
 mod onboard_key_sync;
 mod source_integrity;
 mod support;
@@ -318,6 +324,8 @@ struct Inner {
     #[cfg(target_os = "windows")]
     foundry_local_runtime: Arc<FoundryLocalRuntime>,
     recorder: Mutex<Option<SessionResource<Recorder>>>,
+    #[cfg(target_os = "windows")]
+    microphone_wake: Arc<microphone_wake::Runtime>,
     /// 当前 dictation / QA session 的 wav 归档是否真的被写到磁盘上。
     /// 由 Recorder::start 返回值 (archive_active) 写入；history.append 路径读取，
     /// 决定 DictationSession.has_audio_recording 字段。比单纯读 prefs.record_audio_for_debug
@@ -1234,6 +1242,7 @@ impl Coordinator {
                 recording_lifecycle: Mutex::new(Default::default()),
                 asr: Mutex::new(None),
                 recorder: Mutex::new(None),
+                microphone_wake: Arc::new(Default::default()),
                 device_processing_hint_revision: AtomicU64::new(0),
                 device_processing_hint_io: Mutex::new(()),
 
@@ -1482,6 +1491,31 @@ impl Coordinator {
             let _ = history_app.emit("history:updated", ());
         });
         *self.inner.app.lock() = Some(handle);
+        self.refresh_microphone_wake();
+    }
+
+    pub fn refresh_microphone_wake(&self) {
+        #[cfg(target_os = "windows")]
+        {
+            if self.inner.prefs.get().microphone_wake_enabled {
+                self.inner.microphone_wake.start_supervisor(Arc::downgrade(&self.inner));
+            }
+            self.inner.microphone_wake.refresh();
+        }
+    }
+
+    pub fn microphone_wake_status(&self) -> serde_json::Value {
+        #[cfg(target_os = "windows")]
+        { serde_json::to_value(self.inner.microphone_wake.status()).unwrap_or_default() }
+        #[cfg(not(target_os = "windows"))]
+        { serde_json::json!({ "state": "unsupported", "capturedSamples": 0, "wakes": 0, "error": null }) }
+    }
+
+    pub fn set_microphone_preview_active(&self, active: bool) {
+        #[cfg(target_os = "windows")]
+        self.inner.microphone_wake.set_preview_active(active);
+        #[cfg(not(target_os = "windows"))]
+        let _ = active;
     }
 
     pub fn auto_select_embedded_ble_input_source_in_background(&self) {
@@ -1541,6 +1575,8 @@ impl Coordinator {
     #[allow(dead_code)]
     pub fn request_shutdown(&self) {
         let first_shutdown = !self.inner.shutdown.swap(true, Ordering::SeqCst);
+        #[cfg(target_os = "windows")]
+        { self.inner.microphone_wake.stop_idle(); self.inner.microphone_wake.refresh(); }
         if first_shutdown {
             #[cfg(target_os = "windows")]
             {
@@ -4387,6 +4423,8 @@ async fn begin_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
     }
     // QA 默认不留痕（qa_save_history 默认 false），录音文件归档也跟着不开。
     // 调试 QA 麦克风请用主听写路径。
+    #[cfg(target_os = "windows")]
+    inner.microphone_wake.stop_idle();
     match Recorder::start(microphone_device_name, consumer, level_handler, None) {
         Ok((rec, runtime_errors, archive_active)) => {
             let state = inner.qa_state.lock();

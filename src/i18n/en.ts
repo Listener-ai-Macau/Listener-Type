@@ -794,6 +794,21 @@ export const en: typeof zhCN = {
       about: 'About',
     },
     recording: {
+      "microphoneWakeTitle": "Wake with computer microphone",
+      "microphoneWakeDesc": "Listen locally through the selected microphone while idle. Say the wake phrase to start dictation; the hotkey or checkmark ends it. Listening resumes afterwards. No standby audio is saved or sent.",
+      "microphoneWakePhrase": "Wake phrase",
+      "microphoneWakePhraseDesc": "Shared with Listener device wake and its existing voiceprint. Changing it requires enrolling the voiceprint again.",
+      "microphoneWakeError": "Could not start listening. Check microphone access and the selected microphone, then turn this switch off and on.",
+      "microphoneWakeStates": {
+        "off": "Off",
+        "preparing": "Preparing",
+        "listening": "Listening for wake phrase",
+        "starting": "Starting dictation",
+        "recording": "Dictating",
+        "paused": "Paused during recording or microphone test",
+        "error": "Microphone unavailable",
+        "unsupported": "Unavailable"
+      },
       ...enFirmwareMaintenance,
       title: 'Recording',
       desc: 'Global recording hotkey and trigger mode.',

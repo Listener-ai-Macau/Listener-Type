@@ -61,6 +61,11 @@ mod imp {
             wav_path: String,
             phrase: String,
         },
+        ConfirmPcm {
+            request_id: String,
+            pcm_base64: String,
+            phrase: String,
+        },
         Transcribe {
             request_id: String,
             wav_path: String,
@@ -309,11 +314,18 @@ mod imp {
         }
 
         fn confirm_with_start_policy(
+            &self, pcm: &[u8], phrase: &str, timeout: Duration, allow_cold_start: bool,
+        ) -> Result<WakeHelperResult, String> {
+            self.confirm_with_transport(pcm, phrase, timeout, allow_cold_start, false)
+        }
+
+        fn confirm_with_transport(
             &self,
             pcm: &[u8],
             phrase: &str,
             timeout: Duration,
             allow_cold_start: bool,
+            in_memory: bool,
         ) -> Result<WakeHelperResult, String> {
             if pcm.is_empty() {
                 return Err("local wake helper received empty PCM".to_string());
@@ -333,14 +345,21 @@ mod imp {
                     return Err(super::WAKE_HELPER_NOT_READY_ERROR_CODE.to_string());
                 }
             }
-            let wav = TempWavFile::create_without_context_padding(pcm)
-                .map_err(|err| format!("prepare local wake helper WAV: {err:#}"))?;
-            let request_id = Uuid::new_v4().to_string();
-            let request = HelperRequest::Confirm {
-                request_id: request_id.clone(),
-                wav_path: wav.path().to_string_lossy().into_owned(),
-                phrase: phrase.to_string(),
+            let wav = if in_memory { None } else {
+                Some(TempWavFile::create_without_context_padding(pcm)
+                    .map_err(|err| format!("prepare local wake helper WAV: {err:#}"))?)
             };
+            let request_id = Uuid::new_v4().to_string();
+            let request = if in_memory {
+                use base64::Engine;
+                if pcm.len() > 12 * 32_000 || pcm.len() % 2 != 0 { return Err("invalid bounded microphone wake PCM".into()); }
+                HelperRequest::ConfirmPcm { request_id: request_id.clone(),
+                    pcm_base64: base64::engine::general_purpose::STANDARD.encode(pcm), phrase: phrase.to_string() }
+            } else { HelperRequest::Confirm {
+                request_id: request_id.clone(),
+                wav_path: wav.as_ref().expect("WAV confirmation").path().to_string_lossy().into_owned(),
+                phrase: phrase.to_string(),
+            } };
 
             let process = Self::ensure_process(&mut process_slot)?;
             if let Err(err) = process.send(&request) {
@@ -525,6 +544,14 @@ mod imp {
 
     pub fn preload() -> Result<(), String> {
         client().preload()
+    }
+
+    /// Computer standby audio crosses the existing helper's private pipe only;
+    /// it never creates a temporary WAV or returns recognized ambient text.
+    pub(crate) fn confirm_pcm_if_ready(pcm: &[u8], phrase: &str, timeout: Duration) -> Result<WakeHelperResult, String> {
+        let result = client().confirm_with_transport(pcm, phrase, timeout, false, true);
+        if result.as_ref().is_err_and(|error| error == super::WAKE_HELPER_NOT_READY_ERROR_CODE) { schedule_recovery(); }
+        result
     }
 
     pub fn confirm(
@@ -764,6 +791,24 @@ mod imp {
                 Err(_) => continue,
             };
             let response = match request {
+                HelperRequest::ConfirmPcm { request_id, pcm_base64, phrase } => {
+                    use base64::Engine;
+                    let started = Instant::now();
+                    let transcript = (|| {
+                        if pcm_base64.len() > 512_000 { return Err("microphone wake PCM too long".to_string()); }
+                        let pcm = base64::engine::general_purpose::STANDARD.decode(pcm_base64).map_err(|error| error.to_string())?;
+                        let raw = paraformer.transcribe_pcm16le(&pcm, false)?;
+                        if phrase_relation_matches(crate::wake_phrase::local_transcript_phrase_relation(&raw, &phrase)) { return Ok(raw); }
+                        paraformer.transcribe_pcm16le(&pcm, true)
+                    })();
+                    let evidence = transcript.as_ref().ok().map(|text| transcript_evidence(text, &phrase));
+                    HelperResponse::Result { request_id,
+                        matched: evidence.as_ref().is_some_and(|value| phrase_relation_matches(value.phrase_relation)),
+                        phrase_relation: evidence.as_ref().map(|value| value.phrase_relation).unwrap_or(crate::wake_phrase::LocalPhraseRelation::Absent),
+                        transcript_chars: evidence.as_ref().map_or(0, |value| value.transcript_chars),
+                        phonetic_prefix_units: 0, phonetic_suffix_units: 0, phonetic_best_distance: 0, phonetic_best_window_start: 0,
+                        inference_ms: started.elapsed().as_millis() as u64, transcript_text: None, error: transcript.err() }
+                },
                 HelperRequest::CompareKeyword { request_id, wav_path, phrase, claimed_end_seconds } => {
                     use sha2::{Digest, Sha256};
                     let started = Instant::now();
@@ -1745,6 +1790,8 @@ mod imp {
 pub use imp::{
     compare_keyword, confirm, confirm_if_ready, preload, run_helper, transcribe_if_ready, ShadowTranscriptResult, WakeHelperResult,
 };
+#[cfg(target_os = "windows")]
+pub(crate) use imp::confirm_pcm_if_ready;
 
 #[cfg(not(target_os = "windows"))]
 #[derive(Debug, Clone, PartialEq, Eq)]

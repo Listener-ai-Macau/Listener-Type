@@ -210,6 +210,8 @@ pub(super) fn stop_microphone_preview_monitor(inner: &Arc<Inner>, owner: &str) {
         log::info!("[recorder] stopping microphone preview monitor before {owner}");
         recorder.stop();
     }
+    #[cfg(target_os = "windows")]
+    inner.microphone_wake.set_preview_active(false);
 }
 
 /// Acquire system-output mute for the duration of a recording session.

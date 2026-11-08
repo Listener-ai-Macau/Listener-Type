@@ -11,7 +11,7 @@
 //! - 产品句柄停止平台 session，并保留 Listener 的 PCM/RMS/WAV 语义。
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 
@@ -96,12 +96,20 @@ pub enum RecorderError {
 /// 采集器句柄。Drop 请求平台取消；显式 `stop` 还会等待采集线程退出。
 pub struct Recorder {
     session: Mutex<Option<RecorderCapture>>,
+    output: Arc<Mutex<Option<RecorderOutput>>>,
+    stream_state: Arc<StreamState>,
+}
+
+struct RecorderOutput {
+    consumer: Arc<dyn AudioConsumer>,
+    level_handler: Arc<dyn Fn(f32) + Send + Sync>,
+    archiver: Option<Arc<Mutex<WavArchiver>>>,
 }
 
 impl Recorder {
     #[cfg(test)]
     pub(crate) fn without_device_for_test() -> Self {
-        Self { session: Mutex::new(None) }
+        Self { session: Mutex::new(None), output: Arc::new(Mutex::new(None)), stream_state: Arc::new(StreamState::new()) }
     }
 
     /// 启动采集。`consumer` 收到 16 kHz/Mono/Int16-LE 的 PCM；
@@ -137,18 +145,19 @@ impl Recorder {
         let archive_active = archiver.is_some();
         let state = Arc::new(StreamState::new());
         let state_for_sink = Arc::clone(&state);
-        let consumer_for_sink = Arc::clone(&consumer);
-        let level_for_sink = Arc::clone(&level_handler);
-        let archive_for_sink = archiver.clone();
+        let output = Arc::new(Mutex::new(Some(RecorderOutput { consumer, level_handler, archiver })));
+        let output_for_sink = Arc::clone(&output);
         let error_tx = runtime_error_tx.clone();
         let sink = move |samples: &[f32], input_sr| {
+            let guard = output_for_sink.lock();
+            let Some(output) = guard.as_ref() else { return; };
             process_callback(
                 samples,
                 1,
                 input_sr,
-                consumer_for_sink.as_ref(),
-                level_for_sink.as_ref(),
-                archive_for_sink.as_deref(),
+                output.consumer.as_ref(),
+                output.level_handler.as_ref(),
+                output.archiver.as_deref(),
                 state_for_sink.as_ref(),
             );
         };
@@ -185,10 +194,45 @@ impl Recorder {
         Ok((
             Self {
                 session: Mutex::new(Some(session)),
+                output,
+                stream_state: state,
             },
             runtime_error_rx,
             archive_active,
         ))
+    }
+
+    /// Transfer a live capture without reopening the device. The source tail
+    /// is claimed while callbacks are excluded; seed and later PCM therefore
+    /// reach the new consumer exactly once and in source order.
+    pub(crate) fn handoff(
+        &self,
+        consumer: Arc<dyn AudioConsumer>,
+        level_handler: Arc<dyn Fn(f32) + Send + Sync>,
+        archive_path: Option<PathBuf>,
+        take_tail: impl FnOnce() -> Result<Vec<u8>, String>,
+    ) -> Result<bool, String> {
+        let mut output = self.output.lock();
+        if output.is_none() { return Err("microphone capture output is unavailable".into()); }
+        let tail = take_tail()?;
+        let archiver = archive_path.and_then(|path| match WavArchiver::create(&path) {
+            Ok(archive) => Some(Arc::new(Mutex::new(archive))),
+            Err(error) => { log::warn!("[recorder] wake handoff archive unavailable: {error}"); None }
+        });
+        let archive_active = archiver.is_some();
+        if !tail.is_empty() {
+            if let Some(archive) = archiver.as_ref() { archive.lock().append(&tail); }
+            consumer.consume_pcm_chunk(&tail);
+        }
+        *output = Some(RecorderOutput { consumer, level_handler: Arc::clone(&level_handler), archiver });
+        self.set_diagnostics_enabled(true);
+        // The capture has already delivered real PCM to the wake detector.
+        level_handler(0.0);
+        Ok(archive_active)
+    }
+
+    pub(crate) fn set_diagnostics_enabled(&self, enabled: bool) {
+        self.stream_state.diagnostics_enabled.store(enabled, Ordering::Relaxed);
     }
 
     /// 停止采集并等待音频线程退出。
@@ -249,6 +293,7 @@ fn map_capture_runtime_error(message: String) -> RecorderError {
 
 /// 跨回调维持的状态：上一帧残留（重采样），诊断计数与峰值。
 struct StreamState {
+    diagnostics_enabled: AtomicBool,
     /// 上一回调没被消费完的"小数位置"。线性插值重采样会跨 buffer。
     resample_phase: Mutex<f64>,
     /// 上一回调最后一帧（单声道下混后），下一回调插值起点。
@@ -263,6 +308,7 @@ struct StreamState {
 impl StreamState {
     fn new() -> Self {
         Self {
+            diagnostics_enabled: AtomicBool::new(true),
             resample_phase: Mutex::new(0.0),
             last_sample: Mutex::new(0.0),
             callback_count: AtomicUsize::new(0),
@@ -312,7 +358,7 @@ fn process_callback(
     let count = state.callback_count.fetch_add(1, Ordering::Relaxed) + 1;
     update_peak(&state.peak_input_rms_milli, input_rms);
     update_peak(&state.peak_output_rms_milli, output_rms);
-    if count == 1 || count % LOG_EVERY_N_CALLBACKS == 0 {
+    if state.diagnostics_enabled.load(Ordering::Relaxed) && (count == 1 || count % LOG_EVERY_N_CALLBACKS == 0) {
         let pk_in = state.peak_input_rms_milli.load(Ordering::Relaxed) as f32 / 1000.0;
         let pk_out = state.peak_output_rms_milli.load(Ordering::Relaxed) as f32 / 1000.0;
         log::info!(
@@ -506,6 +552,64 @@ mod tests {
         fn consume_pcm_chunk(&self, pcm: &[u8]) {
             self.chunks.lock().unwrap().push(pcm.to_vec());
         }
+    }
+
+    #[test]
+    fn microphone_wake_handoff_delivers_tail_then_future_pcm_once_without_reopening() {
+        let before = Arc::new(RecordingConsumer::default());
+        let after = Arc::new(RecordingConsumer::default());
+        let recorder = Recorder::without_device_for_test();
+        *recorder.output.lock() = Some(RecorderOutput { consumer: before.clone(), level_handler: Arc::new(|_| {}), archiver: None });
+        recorder.set_diagnostics_enabled(false);
+        let level_calls = Arc::new(AtomicUsize::new(0));
+        let calls = level_calls.clone();
+        assert!(!recorder.handoff(after.clone(), Arc::new(move |_| { calls.fetch_add(1, Ordering::SeqCst); }), None,
+            || Ok(vec![1, 0, 2, 0])).unwrap());
+        {
+            let guard = recorder.output.lock();
+            let output = guard.as_ref().unwrap();
+            process_callback(&[0.25, -0.25], 1, 16_000, output.consumer.as_ref(), output.level_handler.as_ref(), None, &recorder.stream_state);
+        }
+        assert!(before.chunks.lock().unwrap().is_empty());
+        let chunks = after.chunks.lock().unwrap();
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0], [1, 0, 2, 0]);
+        assert_eq!(chunks[1], quantize_to_i16_le(&[0.25, -0.25]).0);
+        assert_eq!(level_calls.load(Ordering::SeqCst), 2);
+        assert!(recorder.stream_state.diagnostics_enabled.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn microphone_wake_handoff_failure_preserves_previous_destination() {
+        let before = Arc::new(RecordingConsumer::default());
+        let after = Arc::new(RecordingConsumer::default());
+        let recorder = Recorder::without_device_for_test();
+        assert!(recorder.handoff(after.clone(), Arc::new(|_| {}), None, || Ok(vec![])).is_err());
+        *recorder.output.lock() = Some(RecorderOutput { consumer: before.clone(), level_handler: Arc::new(|_| {}), archiver: None });
+        assert!(recorder.handoff(after.clone(), Arc::new(|_| {}), None, || Err("expired".into())).is_err());
+        recorder.output.lock().as_ref().unwrap().consumer.consume_pcm_chunk(&[3, 0]);
+        assert_eq!(*before.chunks.lock().unwrap(), vec![vec![3, 0]]);
+        assert!(after.chunks.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn microphone_wake_archive_contains_only_handed_off_body() {
+        let path = std::env::temp_dir().join(format!("listener-wake-{}.wav", uuid::Uuid::new_v4()));
+        let recorder = Recorder::without_device_for_test();
+        *recorder.output.lock() = Some(RecorderOutput { consumer: Arc::new(RecordingConsumer::default()), level_handler: Arc::new(|_| {}), archiver: None });
+        let sink = Arc::new(RecordingConsumer::default());
+        assert!(recorder.handoff(sink, Arc::new(|_| {}), Some(path.clone()), || Ok(vec![1, 0, 2, 0])).unwrap());
+        let future = quantize_to_i16_le(&[0.25, -0.25]).0;
+        {
+            let guard = recorder.output.lock();
+            let output = guard.as_ref().unwrap();
+            process_callback(&[0.25, -0.25], 1, 16_000, output.consumer.as_ref(), output.level_handler.as_ref(), output.archiver.as_deref(), &recorder.stream_state);
+        }
+        recorder.stop();
+        let wav = std::fs::read(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(wav[44..], [vec![1, 0, 2, 0], future].concat());
+        assert_eq!(u32::from_le_bytes(wav[40..44].try_into().unwrap()) as usize, wav.len() - 44);
     }
 
     fn decode_i16_le(bytes: &[u8]) -> Vec<i16> {

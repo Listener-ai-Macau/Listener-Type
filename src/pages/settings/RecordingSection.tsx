@@ -33,6 +33,8 @@ import { useHotkeySettings } from '../../state/HotkeySettingsContext';
 import { SelectLite } from '../../components/ui/SelectLite';
 import { Card, Collapsible } from '../_atoms';
 import { SettingRow, Toggle, inputStyle } from './shared';
+import { currentPlatform } from '../../lib/hotkey';
+import { MicrophoneWakeSettings } from './MicrophoneWakeSettings';
 
 // ─── autostart helpers（OS 持有状态，不存 prefs）──────────────────────
 
@@ -1145,6 +1147,7 @@ export function RecordingSection({ onSetupListener }: { onSetupListener?: () => 
           }}
         />
       )}
+      {currentPlatform().isWindows && selectedInputSource === 'microphone' && <MicrophoneWakeSettings />}
       <SettingRow label={t('settings.recording.capsuleLabel')} desc={t('settings.recording.capsuleDesc')}>
         <Toggle on={prefs.showCapsule} onToggle={onShowCapsuleChange} />
       </SettingRow>
