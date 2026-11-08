@@ -1,31 +1,14 @@
-# Listener v1.0.6-rc1 · Type build270 / Firmware38
+# Listener v1.0.6-rc1 · Type build268 / Firmware38
 
 | Download | File |
 | --- | --- |
-| **Windows app** | **[Download MSI · build270](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · build268](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | Firmware · USB flashing or Bluetooth OTA | [Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip) |
 
-## What’s changed since build269
-
-- **Finish computer wake dictation automatically with Volcengine.** Build269 could start a real computer-microphone recording, but its existing endpoint requests still reached a BLE-only stop dispatcher. Accepted microphone-wake sessions now stop their own native recorder and enter the ordinary finalization pipeline. Device STOP writes and manual microphone sessions keep their existing paths.
-- **Use the existing speech and ending rules.** Native PCM now feeds the same bounded local VAD and source-sample clock as the endpoint requires. The common automatic body/no-body lifecycle uses the already-proved keyword trim; it does not remove a later literal wake phrase from body text. No new silence timeout is introduced. Native stop admission requires fresh analyzed silence, the current speech epoch, and the matching session and recorder. Continuing or newly started speech, unknown/stale analysis and replacement sessions reject an old proposal.
-- **Keep the final clause on the ordinary stream.** Ready words retain their normal incremental pass before endpoint reduction. Normal native finalization then saves history and copies that same complete final text without sending another paste. The microphone returns to idle listening after completion. Hotkey/checkmark ending remains available; other recognition providers retain manual ending.
-
-The native capture adapter was checked with the existing real VAD on isolated synthetic speech, silence and renewed speech. Shared endpoint, stale-stop, device-stop transaction and final-clause regressions passed. These checks are not a claim that all real-room intermittent ending cases are resolved; the fresh physical automatic-end result remains under natural use.
-
-## Included from build269
-
-### Owner and short-phrase repair since build268
-
-- **Use the established owner decision for computer wake.** Build268 could recognize and independently confirm the complete phrase but still reject an existing owner because its new microphone entry interpreted the embedding verifier’s raw flag as the final decision. Computer wake now carries the confirmed phrase relation into the same owner/phrase evaluator and decision kernel used by the device path. Existing thresholds, protected voiceprints and device decisions are unchanged.
-- **Retain short wake audio through the original retry ladder.** A short or initially weak owner window can continue receiving the same microphone source through the established bounded verification windows. Cancellation and source expiry stop the retry; following dictation audio stays in the handoff buffer and is delivered once. Unconfirmed phrases, low scores and verification errors still cannot authorize a wake.
-
-Regression checks use the observed rejection’s numeric score and duration, compare computer decisions with the unchanged device policy, cover short-window continuation/cancellation, and rerun full/near phrase and long-idle synthetic model cases. The first build269 spoken-wake trial was reported able to record; its automatic-end failure is addressed above. The standby capture, clipboard, recognition services and firmware from build268 are retained.
-
-## Included from build268
+## What’s changed since build267
 
 - **Optional computer microphone wake.** In Settings → Recording, select Microphone and enable “Wake with computer microphone”. This independent switch is off by default. It uses the shared Chinese wake phrase and existing voiceprint policy; a strict local keyword hit also needs independent local phrase confirmation. Recognition after wake uses your configured service or model.
-- **Keep the same live microphone capture.** A bounded in-memory source buffer retains words spoken after the verified keyword boundary while ordinary dictation starts. Cancel, input/device changes, manual dictation, question recording, microphone tests and firmware OTA keep their ownership guards. Idle listening resumes after recording ends. Build270 adds the shared automatic-end path for Volcengine as described above; other recognition providers use the hotkey or checkmark.
+- **Keep the same live microphone capture.** A bounded in-memory source buffer retains words spoken after the verified keyword boundary while ordinary dictation starts. Cancel, input/device changes, manual dictation, question recording, microphone tests and firmware OTA keep their ownership guards. Idle listening resumes after recording ends. Use the hotkey or checkmark to end computer microphone dictation; this change does not add a new silence-end policy.
 - **Handle long-idle keyword timing.** Ambiguous native keyword timestamps are checked by re-decoding short windows from the same retained source. An early unproven label can receive a bounded amount of subsequent audio; an estimated observation time never becomes permission to discard audio.
 - **Bound standby work.** The PCM buffer retains at most 12 seconds, decoder history is renewed with overlap, and callback logging is suppressed during standby. Phrase confirmation reuses the existing helper and transfers PCM in memory without a temporary recording file or ambient transcript response. Standby audio is not uploaded or archived; normal dictation history/debug choices still apply after wake.
 
@@ -71,19 +54,15 @@ US$49 is the hardware price. Type is free and open source. No ready-to-use offic
 
 ## File identity
 
-- Windows runtime source: `9c6283095a33ea7ef8085366090a9e1c59df5730` · build270.
-- Windows MSI: 305704960 bytes · SHA256 `e6001a01c0a2d72a6dda7aba5c1aeaf9daf6d9c3385fa6455cc02c79e91c13d0`.
+- Windows runtime source: `db58ab628866dcaefc3b47b7657e47d8b6100b4e` · build268.
+- Windows MSI: 305700864 bytes · SHA256 `4c76d2999a453fa9118351fab2ac37a28f0316aee1a0fc2ee7a8ab26b839131a`.
 - The release tag includes a documentation-only follow-up that aligns the download pages; application/build inputs match the runtime source above.
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`.
 - Firmware ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`.
 
 ## 中文说明
 
-本次发布已在本机安装验证的 Type270。269真实回传已能唤醒录音，但停止请求仍被只接受板子的分发挡回；电脑PCM也未接入原本地说话检测。270把已接受的电脑唤醒会话接到同一VAD、源采样时钟及自动正文／无正文规则，匹配当前会话和录音后停止电脑采集，再进入普通收尾。没有新增静音时长；讲话、待定／落后检测、新会话或旧停止请求不能越过保护。该自动结束目前适用于火山识别，其它识别方式继续快捷键／勾号结束。尾句先正常流式，收尾后保存历史并只复制完整终稿，不再额外粘贴；完成后恢复待机。定向离线真VAD与合成音频、停止归属、原板子事务和尾句检查通过，实际房间的新自动结束表现继续按自然使用记录。
-
-包含269的机主与短词修复。修复268电脑唤醒已识别完整词，却因直接采用底层声纹标志而误拒绝既有机主的接入缺口：携带真实完整词确认关系，复用设备路径正在使用的综合判断与仲裁。短音频窗口沿原有有界重试继续接收同源音频，正文保留给一次正常交接；取消、来源过期、未确认词、低分及验证异常的拒绝保持。没有修改声纹阈值、保护资料或设备原有判定。回归覆盖现场数字证据、与原策略的一致性、短窗／取消及完整词／近似词／长静音合成模型案例；269首次自然回传已能录音，自动结束缺口由上文270处理。包含以下268功能与既有限制。
-
-Type268 新增电脑待机唤醒。新增独立的电脑麦克风待机唤醒开关，默认关闭；在「设置 → 录音」选择麦克风后可启用。沿用共用中文唤醒词及原声纹策略，关键词命中还需现有本地助手确认完整词，近似词不能仅凭关键词标签开始听写。同一条录音流按可靠唤醒词边界交接正文，避免重开麦克风的空档；用快捷键或勾号结束后恢复待机。270已在上文补齐火山识别的共用自动结束路径，其它识别方式仍手动结束。待机内存音频最多12秒，确认通过内存传输，不上传、不保存临时录音，也不回传环境转写。唤醒后的识别仍用已配置服务或模型，历史与调试录音沿原设置。
+本次发布已在本机安装验证的 Type268。新增独立的电脑麦克风待机唤醒开关，默认关闭；在「设置 → 录音」选择麦克风后可启用。沿用共用中文唤醒词及原声纹策略，关键词命中还需现有本地助手确认完整词，近似词不能仅凭关键词标签开始听写。同一条录音流按可靠唤醒词边界交接正文，避免重开麦克风的空档；用快捷键或勾号结束后恢复待机。本次没有新增电脑麦克风的静音自动结束策略。待机内存音频最多12秒，确认通过内存传输，不上传、不保存临时录音，也不回传环境转写。唤醒后的识别仍用已配置服务或模型，历史与调试录音沿原设置。
 
 本地合成音覆盖0、34和95秒静音后的完整词、三个近似词及推理队列缺块，长静音边界不可靠时只用同源短窗重新取证，不能以估算位置裁掉开头。取消、替代会话、录音资源与原助手行为相关检查通过；不据此宣称所有真实房间、噪声或长期实物唤醒均已通过。保留以下既有修复与限制。
 
