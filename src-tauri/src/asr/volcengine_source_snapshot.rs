@@ -85,6 +85,64 @@ fn snapshot_timed_prefix(
     (covered == key).then(|| TimedTranscript { text: timing.text[..end].into(), words })
 }
 
+fn admitted_snapshot_stable_end(
+    state: &mut SyncState, candidate: &SelectedLiveOwnerCandidate,
+    anchor: &LiveLedgerAnchor, now: Instant,
+) -> Option<u64> {
+    let maturity=Duration::from_secs(1);
+    if state.pause_early_stability_floor.is_some_and(|at| now.saturating_duration_since(at)<maturity)
+        || state.pause_early_stability_source.is_some_and(|source|source!=candidate.stability_source)
+    { return None; }
+    // Growth at the live edge cannot reset the age of an unchanged earlier
+    // prefix. Reuse the ordinary revision ledger; this only plans recognition,
+    // never grants word/owner/editor authority or changes the stop clock.
+    let stable=rolling_stable_transcript_prefix_after(&mut state.pause_early_recent_revisions,
+        &candidate.text,candidate.updated_at,now,maturity,&anchor.source_key)?;
+    let timing=candidate.timing.as_ref().filter(|t|
+        crate::transcript_boundary::content_key(&t.text)==crate::transcript_boundary::content_key(&candidate.text))?;
+    let prefix=snapshot_timed_prefix(timing,&crate::transcript_boundary::content_key(&stable))?;
+    let suffix=prefix.timed_suffix_after_delivery(&anchor.boundary)?;
+    if crate::transcript_boundary::content_key(&suffix.text).is_empty(){return None;}
+    suffix.words.last()?.end_ms
+}
+
+fn source_snapshot_confirmation(state: &SyncState, admitted: bool)
+    -> Result<crate::transcript_boundary::TimedTranscript,&'static str>
+{
+    let timing=state.provider_timed_transcript.as_ref().ok_or("missing_provider_timing")?;
+    if !state.recognition_boundary.requires_confirmation(){return Err("missing_native_finality");}
+    let prefix=if admitted {
+        // Whole-response confirmation is already valid for admitted capture.
+        // It still must map exactly to this decoder's own timed words below.
+        state.recognition_boundary.confirmed_admitted_prefix(&timing.text,Some(timing))
+    }else{state.recognition_boundary.confirmed_prefix(&timing.text,Some(timing))}
+        .ok_or("no_confirmed_prefix")?;
+    snapshot_timed_prefix(timing,&crate::transcript_boundary::content_key(&prefix))
+        .ok_or("confirmed_rendering_not_timed")
+}
+
+fn snapshot_child_suffix(
+    child: &crate::transcript_boundary::TimedTranscript,
+    parent_suffix: &crate::transcript_boundary::TimedTranscript,
+    submitted: &crate::transcript_boundary::TimedDeliveryBoundary,
+    admitted: bool,
+) -> Option<crate::transcript_boundary::TimedTranscript> {
+    use crate::transcript_boundary::{content_key,TimedTranscript};
+    if let Some(suffix)=child.timed_suffix_after_delivery(submitted){return Some(suffix);}
+    if !admitted || child.words.first()?.start_ms?<submitted.range_ms().1{return None;}
+    // A clipped decoder may omit the old context and begin directly with new
+    // speech. Prove its first word is the FIRST unsubmitted parent occurrence,
+    // using the existing unique whole-token/midpoint seam matcher. Do not
+    // search forward for a later repeated word or borrow parent word timing.
+    let first=parent_suffix.words.first()?.clone();
+    let first_view=TimedTranscript {text:first.text.clone(),words:vec![first]};
+    let first_key=content_key(&first_view.text);
+    let first_boundary=first_view.delivery_boundary(&first_key)?;
+    let after_first=child.timed_suffix_after_delivery(&first_boundary)?;
+    let prefix=child.text.strip_suffix(&after_first.text)?;
+    (content_key(prefix)==first_key).then(||child.clone())
+}
+
 impl VolcengineStreamingASR {
     fn cancel_source_snapshot(&self) {
         #[cfg(target_os = "windows")]
@@ -145,10 +203,10 @@ impl VolcengineStreamingASR {
         }
         // Reuse the existing source-permission maturity. This is not a new
         // endpoint delay and cannot turn unknown audio into silence or Owner.
-        if candidate.updated_at.elapsed() < Duration::from_secs(1) { return; }
+        if !admitted && candidate.updated_at.elapsed() < Duration::from_secs(1) { return; }
         let parent_stream_id = candidate.stability_source.decoder;
         let (source_epoch, owner_end_ms, destination_bytes, runtime) = {
-            let state = self.state.lock();
+            let mut state = self.state.lock();
             if !state.is_connected || state.finishing || state.owner_isolation_frozen
                 || parent_stream_id != self.asr_stream_id()
                 || candidate.stability_source.generation != state.owner_delivery_generation
@@ -159,10 +217,8 @@ impl VolcengineStreamingASR {
                 // a new enrolled-speaker permission. Keep it tied to this
                 // decoder's actual timed source and an already submitted seam.
                 if state.local_speaker_tracking_enabled { return; }
-                let Some(end) = candidate.timing.as_ref()
-                    .filter(|timing| content_key(&timing.text) == body_key)
-                    .and_then(|timing| timing.words.last()).and_then(|word| word.end_ms)
-                else { return; };
+                let Some(end)=anchor.and_then(|anchor|
+                    admitted_snapshot_stable_end(&mut state,candidate,anchor,Instant::now())) else{return;};
                 end
             } else {
                 let Some(projection) = &state.source_owner_projection_stability else { return; };
@@ -225,11 +281,21 @@ impl VolcengineStreamingASR {
                 child.send_last_frame().await?;
                 child.await_final_result().await?;
                 let state = child.state.lock();
-                let confirmed = state.provider_timed_transcript.as_ref().and_then(|timing| {
-                    if !state.recognition_boundary.requires_confirmation() { return None; }
-                    let prefix = state.recognition_boundary.confirmed_prefix(&timing.text, Some(timing))?;
-                    snapshot_timed_prefix(timing, &crate::transcript_boundary::content_key(&prefix))
-                });
+                #[cfg(test)]
+                if let Some(root)=std::env::var_os("LISTENER_SYNTHETIC_TAIL_PIPELINE_DIAG_DIR") {
+                    // Explicit synthetic-only integration probe. This block
+                    // does not exist in the shipping application.
+                    let path=std::path::PathBuf::from(root).join(format!("child-{parent_stream_id}-{request_id}.json"));
+                    let diagnostic=serde_json::json!({"synthetic":true,"originMs":captured_origin_bytes/32,
+                        "throughMs":captured_through_ms,"frames":state.diagnostic_provider_responses});
+                    if let Ok(bytes)=serde_json::to_vec_pretty(&diagnostic){let _=std::fs::write(path,bytes);}
+                }
+                let confirmed=source_snapshot_confirmation(&state,admitted).map_err(|reason| {
+                    log::info!("[asr] lexical source snapshot certificate unavailable parent_stream={parent_stream_id} request={request_id} reason={reason} provider_timing_chars={:?} provider_timing_words={:?} native_finality={} admitted={admitted}",
+                        state.provider_timed_transcript.as_ref().map(|t|t.text.chars().count()),
+                        state.provider_timed_transcript.as_ref().map(|t|t.words.len()),state.recognition_boundary.requires_confirmation());
+                    reason
+                }).ok();
                 Ok::<_, VolcengineASRError>(confirmed.map(|confirmed| SourceSnapshotResult {
                     anchor, parent_stream_id, parent_lifecycle_generation, source_epoch,
                     child_decoder_id: child.asr_stream_id(), captured_origin_bytes,
@@ -326,7 +392,7 @@ impl VolcengineStreamingASR {
         if (!admitted && (primary.owner_permission != LiveOwnerPermission::SourceProjection
             || self.state.lock().next_input_destination_offset / 32 <= SOURCE_SNAPSHOT_MAX_PCM_MS))
             || primary.stability_source.authority != "primary"
-            || primary.updated_at.elapsed() < min_stable
+            || (!admitted && primary.updated_at.elapsed() < min_stable)
         { return None; }
         self.maybe_start_source_snapshot_from(&primary, Some(anchor));
         let (snapshot, lifecycle_generation, capture_generation) = {
@@ -348,7 +414,6 @@ impl VolcengineStreamingASR {
         { return None; }
         let origin_ms = snapshot.captured_origin_bytes / 32;
         let child = snapshot.confirmed.shifted_from_clip(origin_ms, snapshot.captured_through_ms)?;
-        let child_suffix = child.timed_suffix_after_delivery(&anchor.boundary)?;
         let (source_owner, physical, _) = self.source_owner_evidence_snapshot();
         let state = self.state.lock();
         if !state.is_connected || state.finishing || state.owner_isolation_frozen
@@ -371,6 +436,7 @@ impl VolcengineStreamingASR {
             }
         };
         let parent_suffix = timing.timed_suffix_after_delivery(&anchor.boundary)?;
+        let child_suffix=snapshot_child_suffix(&child,&parent_suffix,&anchor.boundary,admitted)?;
         let suffix_signature = SourceOwnerProjectionSignature {
             independent_anchor_key: None,
             key: crate::transcript_boundary::content_key(&parent_suffix.text),

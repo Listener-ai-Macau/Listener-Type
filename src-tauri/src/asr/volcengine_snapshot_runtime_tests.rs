@@ -713,3 +713,267 @@ fn admitted_tail_worker_claims_only_submitted_suffix_with_existing_replay_budget
     });
 }
 
+#[cfg(target_os = "windows")]
+fn grow_admitted_tail(asr: &VolcengineStreamingASR, fresh: Instant) -> String {
+    let mut state=asr.state.lock();
+    let before=state.best_transcript_text.clone();
+    state.best_transcript_text.push_str("新的词还在增加。");
+    state.best_transcript_committed_at=Some(fresh);
+    let mut timing=state.best_transcript_timing.clone().unwrap();
+    timing.text=state.best_transcript_text.clone();
+    timing.words.push(crate::transcript_boundary::TimedTranscriptWord {
+        text:"新的词还在增加。".into(),start_ms:Some(18_000),end_ms:Some(19_500)});
+    state.best_transcript_timing=Some(timing.clone());
+    state.provider_timed_transcript=Some(timing);
+    state.pause_early_recent_revisions.push_back((fresh-Duration::from_secs(2),before.clone()));
+    before
+}
+
+#[test]
+#[cfg(target_os = "windows")]
+fn admitted_growing_tail_plans_mature_prefix_without_waiting_for_whole_sentence() {
+    let runtime=tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    runtime.block_on(async {
+        let (asr,anchor)=admitted_tail_snapshot_fixture();
+        grow_admitted_tail(&asr,Instant::now());
+        asr.state.lock().runtime=Some(Handle::current());
+        asr.source_snapshot.lock().result=None;
+        let candidate=asr.selected_live_owner_candidate().unwrap();
+        assert!(candidate.updated_at.elapsed()<Duration::from_millis(500));
+        assert_eq!(admitted_snapshot_stable_end(&mut asr.state.lock(),&candidate,&anchor,Instant::now()),Some(14_500));
+        asr.maybe_start_source_snapshot_from(&candidate,Some(&anchor));
+        let slot=asr.source_snapshot.lock();
+        assert!(slot.flight.is_some(),"new words must not postpone recognition of a prefix unchanged for the existing maturity window");
+        assert_eq!(slot.replayed_pcm_bytes,11_000*32);
+        drop(slot);
+        asr.seal_source_snapshot(); // no task is yielded, so no socket is opened
+    });
+}
+
+#[test]
+#[cfg(target_os = "windows")]
+fn admitted_confirmed_continuation_streams_while_primary_tail_keeps_growing() {
+    let (asr,anchor)=admitted_tail_snapshot_fixture();
+    grow_admitted_tail(&asr,Instant::now());
+    let continued=asr.pause_early_ledger_continuation_after(Duration::from_secs(1),&anchor)
+        .expect("an independently confirmed same-source continuation does not wait for the current full text to stop changing");
+    assert_eq!(continued.suffix.timing.text,"尾句继续写入。");
+    assert!(!continued.owner_caught_up,"the new unconfirmed growth is still pending");
+    assert!(asr.ledger_continuation_is_current(&continued));
+    let next=continued.advance(&crate::transcript_boundary::content_key("尾句继续写入。"),
+        &crate::transcript_boundary::content_key(&continued.source_text())).unwrap();
+    assert_eq!(asr.pending_body_delivery_after(&next.source_key).unwrap().key,
+        crate::transcript_boundary::content_key("新的词还在增加。"));
+}
+
+#[test]
+#[cfg(target_os = "windows")]
+fn admitted_prefix_planner_rejects_fresh_rewrites_and_new_authority() {
+    for case in 0..4 {
+        let (asr,anchor)=admitted_tail_snapshot_fixture();
+        grow_admitted_tail(&asr,Instant::now());
+        let candidate=asr.selected_live_owner_candidate().unwrap();
+        {
+            let mut state=asr.state.lock();
+            match case {
+                0=>{state.pause_early_recent_revisions.clear();},
+                1=>state.pause_early_stability_floor=Some(Instant::now()),
+                2=>state.pause_early_recent_revisions.front_mut().unwrap().1="旧的另一段正文。".into(),
+                _=>state.pause_early_stability_source=Some(OwnerDeliveryStabilitySource {
+                    decoder:candidate.stability_source.decoder+1,..candidate.stability_source}),
+            }
+        }
+        assert!(admitted_snapshot_stable_end(&mut asr.state.lock(),&candidate,&anchor,Instant::now()).is_none(),"case={case}");
+    }
+}
+
+#[test]
+fn source_snapshot_extracts_admitted_native_rendering_only_with_its_own_word_alignment() {
+    let asr=uplink_stall_test_asr();
+    let response=json!({"text":"我先整理文件。明天再检查设备。","utterances":[
+        {"text":"我先整理文件。","definite":true,"additions":{"source":"two_pass"},
+            "words":[{"text":"我先整理文件。","start_time":100,"end_time":900}]},
+        {"text":"明天在检查设备。","definite":true,"additions":{"source":"two_pass"},
+            "words":[{"text":"明天再检查设备。","start_time":1200,"end_time":2200}]}]});
+    let mut state=asr.state.lock();
+    state.recognition_boundary.update(&response);
+    state.provider_timed_transcript=Some(super::super::volcengine_transcript::timed_transcript_from_result(&response));
+    assert_eq!(source_snapshot_confirmation(&state,false).unwrap().text,"我先整理文件。",
+        "whole rendering is no source-projected word-ownership grant");
+    assert_eq!(source_snapshot_confirmation(&state,true).unwrap().text,"我先整理文件。明天再检查设备。");
+    state.provider_timed_transcript.as_mut().unwrap().words[1].text="明天在检查设备。".into();
+    assert_eq!(source_snapshot_confirmation(&state,true).unwrap_err(),"confirmed_rendering_not_timed",
+        "a native string cannot borrow another rendering's word coordinates");
+}
+
+#[test]
+#[cfg(target_os = "windows")]
+fn synthetic_provider_frames_confirm_a_tail_while_later_primary_words_are_growing() {
+    use crate::transcript_boundary::{content_key,TimedTranscriptWord};
+    let frames:Vec<Value>=serde_json::from_str(include_str!("testdata/source_snapshot_synthetic_frames.json")).unwrap();
+    let child=uplink_stall_test_asr().with_owner_activity_only(true);
+    for frame in &frames {child.apply_saved_native_result_for_test(&frame["result"],frame["final"].as_bool().unwrap());}
+    let confirmed=source_snapshot_confirmation(&child.state.lock(),true).unwrap();
+    let opening=frames.last().unwrap()["result"]["utterances"][0]["text"].as_str().unwrap();
+    let boundary=confirmed.delivery_boundary(&content_key(opening)).unwrap();
+    let asr=uplink_stall_test_asr().with_owner_activity_only(true);
+    let source=LiveDeliverySource {capture_stream_id:asr.asr_stream_id(),
+        capture_generation:asr.source_snapshot.lock().capture_generation,
+        decoder_stream_id:asr.asr_stream_id(),owner_generation:asr.state.lock().owner_delivery_generation};
+    let anchor=LiveLedgerAnchor {source,generation:1,source_text:opening.into(),source_key:content_key(opening),boundary};
+    {
+        let mut state=asr.state.lock();
+        let mut growing=confirmed.clone();growing.text.push_str("新的词还在增加。");
+        growing.words.push(TimedTranscriptWord {text:"新的词还在增加。".into(),start_ms:Some(18_000),end_ms:Some(19_500)});
+        state.is_connected=true;state.next_input_destination_offset=20_000*32;
+        state.best_transcript_text=growing.text.clone();state.best_transcript_timing=Some(growing.clone());
+        state.provider_timed_transcript=Some(growing);state.best_transcript_committed_at=Some(Instant::now());
+        state.recognition_boundary.update(&frames.last().unwrap()["result"]);
+    }
+    *asr.retained_pcm.lock()=vec![0;20_000*32];
+    {let mut slot=asr.source_snapshot.lock();slot.closed=false;slot.parent_stream_id=Some(asr.asr_stream_id());
+        slot.result=Some(SourceSnapshotResult {anchor:Some(anchor.clone()),parent_stream_id:asr.asr_stream_id(),
+            parent_lifecycle_generation:slot.lifecycle_generation,source_epoch:source.owner_generation,child_decoder_id:child.asr_stream_id(),
+            captured_origin_bytes:0,captured_pcm_bytes:20_000*32,captured_through_ms:20_000,confirmed:confirmed.clone(),completed_at:Instant::now()});}
+    let continued=asr.pause_early_ledger_continuation_after(Duration::from_secs(1),&anchor).unwrap();
+    assert_eq!(continued.source_text(),confirmed.text,"the actual synthetic provider rendering must append once before capture ends");
+    assert!(!continued.owner_caught_up);
+    assert!(asr.ledger_continuation_is_current(&continued));
+    let next=continued.advance(&content_key(&continued.suffix.timing.text),&content_key(&continued.source_text())).unwrap();
+    assert_eq!(asr.pending_body_delivery_after(&next.source_key).unwrap().key,content_key("新的词还在增加。"));
+}
+
+#[test]
+fn snapshot_omitted_context_requires_first_new_audio_occurrence_not_a_later_repeat() {
+    use crate::transcript_boundary::{content_key,TimedTranscript,TimedTranscriptWord};
+    let parent=TimedTranscript {text:"已上屏。继续继续。".into(),words:vec![
+        TimedTranscriptWord {text:"已上屏。".into(),start_ms:Some(100),end_ms:Some(500)},
+        TimedTranscriptWord {text:"继续".into(),start_ms:Some(1000),end_ms:Some(1300)},
+        TimedTranscriptWord {text:"继续。".into(),start_ms:Some(1600),end_ms:Some(1900)}]};
+    let submitted=parent.delivery_boundary(&content_key("已上屏。")).unwrap();
+    let pending=parent.timed_suffix_after_delivery(&submitted).unwrap();
+    let child=TimedTranscript {text:"继续继续。".into(),words:parent.words[1..].to_vec()};
+    assert!(child.timed_suffix_after_delivery(&submitted).is_none());
+    assert!(snapshot_child_suffix(&child,&pending,&submitted,true).is_some());
+    assert!(snapshot_child_suffix(&child,&pending,&submitted,false).is_none(),"source-projected ownership retains its existing seam");
+    let later=TimedTranscript {text:"继续。".into(),words:vec![parent.words[2].clone()]};
+    assert!(snapshot_child_suffix(&later,&pending,&submitted,true).is_none(),"a matching later repetition cannot skip the first unsubmitted word");
+    let mut unknown=child.clone();unknown.words[0].start_ms=None;
+    assert!(snapshot_child_suffix(&unknown,&pending,&submitted,true).is_none());
+    let mut overlapping=child.clone();overlapping.words[0].start_ms=Some(400);
+    assert!(snapshot_child_suffix(&overlapping,&pending,&submitted,true).is_none(),"new-only path cannot repeat an already submitted interval");
+}
+
+#[test]
+fn captured_synthetic_child_can_omit_old_context_without_blocking_new_words() {
+    use crate::transcript_boundary::content_key;
+    let frames:Vec<Value>=serde_json::from_str(include_str!("testdata/source_snapshot_synthetic_frames.json")).unwrap();
+    let parent=super::super::volcengine_transcript::timed_transcript_from_result(&frames.last().unwrap()["result"]);
+    let opening=frames.last().unwrap()["result"]["utterances"][0]["text"].as_str().unwrap();
+    let submitted=parent.delivery_boundary(&content_key(opening)).unwrap();
+    let pending=parent.timed_suffix_after_delivery(&submitted).unwrap();
+    let saved:Value=serde_json::from_str(include_str!("testdata/source_snapshot_synthetic_no_context.json")).unwrap();
+    let decoder=uplink_stall_test_asr().with_owner_activity_only(true);
+    decoder.apply_saved_native_result_for_test(&saved["result"],true);
+    let confirmed=source_snapshot_confirmation(&decoder.state.lock(),true).unwrap();
+    let child=confirmed.shifted_from_clip(saved["originMs"].as_u64().unwrap(),saved["throughMs"].as_u64().unwrap()).unwrap();
+    assert!(child.timed_suffix_after_delivery(&submitted).is_none(),"saved failure: the decoder did not repeat the old context");
+    let suffix=snapshot_child_suffix(&child,&pending,&submitted,true).unwrap();
+    let common=crate::transcript_boundary::stable_content_prefix(&suffix.text,std::iter::once(pending.text.as_str()));
+    let safe=snapshot_timed_prefix(&suffix,&content_key(&common)).unwrap();
+    assert_eq!(safe.text,"前半句已经进入");
+    assert!(!safe.text.contains('书'),"the child correction that disagrees with the parent remains pending");
+}
+
+#[tokio::test]
+#[ignore = "one explicit synthetic PCM request to existing configured ASR; no microphone/editor/profile mutation"]
+async fn diagnostic_synthetic_source_snapshot_decoder_response() {
+    let root=std::path::PathBuf::from(std::env::var_os("LISTENER_SOURCE_SNAPSHOT_DIAG_DIR").expect("explicit synthetic diagnostic directory"));
+    let wav=std::fs::read(root.join("synthetic_tail.wav")).unwrap();
+    let mut pcm=denzic_audio_v1_core::read_wav_pcm16le(&wav).unwrap();
+    assert!(pcm.len()<30*32000 && !pcm.is_empty());
+    pcm.extend(vec![0;32000]);
+    let proxy=crate::coordinator::read_asr_proxy_config("volcengine").unwrap();
+    let asr=Arc::new(VolcengineStreamingASR::new_with_proxy_config(
+        crate::coordinator::read_volc_credentials(),Vec::new(),proxy).with_owner_activity_only(true));
+    let _cancel=CancelSnapshotDecoder(Arc::clone(&asr));
+    let began=Instant::now();
+    let result=tokio::time::timeout(Duration::from_secs(30),async {
+        asr.open_session().await?;
+        asr.mark_audio_delivery_ready();
+        AudioConsumer::consume_pcm_chunk(&*asr,&pcm);
+        asr.send_last_frame().await?;
+        asr.await_final_result().await
+    }).await;
+    assert!(matches!(&result,Ok(Ok(_))),"configured synthetic request failed; no live capture or user data was used");
+    let state=asr.state.lock();
+    let timing=state.provider_timed_transcript.as_ref();
+    let strict=timing.and_then(|t|state.recognition_boundary.confirmed_prefix(&t.text,Some(t)));
+    let admitted=timing.and_then(|t|state.recognition_boundary.confirmed_admitted_prefix(&t.text,Some(t)));
+    let strict_timed=timing.zip(strict.as_ref()).and_then(|(t,p)|snapshot_timed_prefix(t,&crate::transcript_boundary::content_key(p)));
+    let admitted_timed=timing.zip(admitted.as_ref()).and_then(|(t,p)|snapshot_timed_prefix(t,&crate::transcript_boundary::content_key(p)));
+    let numeric=serde_json::json!({"synthetic":true,"requestCount":1,"elapsedMs":began.elapsed().as_millis(),
+        "providerTimingChars":timing.map(|t|t.text.chars().count()),"providerTimingWords":timing.map(|t|t.words.len()),
+        "requiresConfirmation":state.recognition_boundary.requires_confirmation(),
+        "strictConfirmedChars":strict.as_ref().map(|s|s.chars().count()),"admittedConfirmedChars":admitted.as_ref().map(|s|s.chars().count()),
+        "strictTimedCertificate":strict_timed.is_some(),"admittedTimedCertificate":admitted_timed.is_some(),
+        "syntheticFinalChars":state.best_transcript_text.chars().count()});
+    std::fs::write(root.join("synthetic-child-response-numeric.json"),serde_json::to_vec_pretty(&numeric).unwrap()).unwrap();
+    // Every frame is generated from the explicitly synthetic WAV above. Keep
+    // the actual provider shape for deterministic parser/worker regression.
+    std::fs::write(root.join("synthetic-provider-frames.json"),serde_json::to_vec_pretty(&state.diagnostic_provider_responses).unwrap()).unwrap();
+    println!("{numeric}");
+}
+
+#[tokio::test]
+#[ignore = "explicit real-time synthetic ASR/tail worker integration; existing service usage, no microphone/editor/profile writes"]
+async fn diagnostic_synthetic_continuous_tail_pipeline() {
+    use crate::transcript_boundary::content_key;
+    let root=std::path::PathBuf::from(std::env::var_os("LISTENER_SYNTHETIC_TAIL_PIPELINE_DIAG_DIR").unwrap());
+    let wav=std::fs::read(root.join("full-synthetic-baseline-synthetic_tail.wav")).unwrap();
+    let mut pcm=denzic_audio_v1_core::read_wav_pcm16le(&wav).unwrap();
+    let speech_ms=pcm.len()/32;assert!(speech_ms<30_000);
+    pcm.extend(vec![0;32_000]);
+    let asr=Arc::new(VolcengineStreamingASR::new_with_proxy_config(crate::coordinator::read_volc_credentials(),
+        Vec::new(),crate::coordinator::read_asr_proxy_config("volcengine").unwrap()).with_owner_activity_only(true));
+    let _cancel=CancelSnapshotDecoder(Arc::clone(&asr));
+    asr.open_session().await.unwrap();asr.mark_audio_delivery_ready();
+    let start=Instant::now();let mut sent_ms=0;let mut consumed=String::new();
+    let mut anchor:Option<LiveLedgerAnchor>=None;let mut events=Vec::new();
+    for chunk in pcm.chunks(3200) {
+        AudioConsumer::consume_pcm_chunk(&*asr,chunk);sent_ms+=chunk.len()/32;
+        tokio::time::sleep(Duration::from_millis((chunk.len()/32)as u64)).await;
+        if let Some(continued)=anchor.as_ref().and_then(|a|asr.pause_early_ledger_continuation_after(Duration::from_secs(1),a)) {
+            let text=continued.source_text();let key=content_key(&text);
+            if key.starts_with(&consumed)&&key.len()>consumed.len() {
+                if let Some(next)=continued.advance(&content_key(&continued.suffix.timing.text),&key) {
+                    let parent_age=asr.selected_live_owner_candidate().map(|c|c.updated_at.elapsed().as_millis());
+                    consumed=key;anchor=Some(next);
+                    events.push(json!({"sentMs":sent_ms,"elapsedMs":start.elapsed().as_millis(),"source":"child","chars":text.chars().count(),"parentAgeMs":parent_age}));
+                    continue;
+                }
+            }
+        }
+        if let Some(view)=asr.pause_early_delivery_evidence_after(Duration::from_secs(1),&consumed) {
+            let key=content_key(&view.text);
+            if key.starts_with(&consumed)&&key.len()>consumed.len() {
+                if let Some(boundary)=view.timing.as_ref().and_then(|t|t.timing.delivery_boundary(&key)) {
+                    let generation=anchor.as_ref().map_or(1,|a|a.generation+1);
+                    anchor=Some(LiveLedgerAnchor {source:view.source,generation,source_key:key.clone(),source_text:view.text.clone(),boundary});
+                    consumed=key;events.push(json!({"sentMs":sent_ms,"elapsedMs":start.elapsed().as_millis(),"source":"primary","chars":view.text.chars().count()}));
+                }
+            }
+        }
+    }
+    let before_end=events.clone();
+    asr.send_last_frame().await.unwrap();
+    let final_result=asr.await_final_result().await.unwrap();
+    let slot=asr.source_snapshot.lock();
+    let data=json!({"synthetic":true,"speechMs":speech_ms,"sentMs":sent_ms,"beforeProtocolEnd":before_end,
+        "earlyChildWhileParentGrowing":events.iter().any(|e|e["source"]=="child"&&e["sentMs"].as_u64().is_some_and(|t|t<(speech_ms as u64))&&e["parentAgeMs"].as_u64().is_some_and(|age|age<1000)),
+        "requests":slot.next_request_id,"replayedPcmBytes":slot.replayed_pcm_bytes,"inputBytes":pcm.len(),
+        "finalChars":final_result.text.chars().count(),"lastSnapshotOutcome":slot.last_outcome});
+    std::fs::write(root.join("synthetic-continuous-pipeline.json"),serde_json::to_vec_pretty(&data).unwrap()).unwrap();
+    println!("{data}");
+}
+

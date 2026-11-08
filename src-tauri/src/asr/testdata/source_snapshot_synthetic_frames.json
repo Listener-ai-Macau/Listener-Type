@@ -1,0 +1,903 @@
+[
+  {
+    "final": false,
+    "result": {
+      "text": "",
+      "utterances": []
+    }
+  },
+  {
+    "final": false,
+    "result": {
+      "text": "这。",
+      "utterances": [
+        {
+          "text": "这。",
+          "end_time": 500,
+          "definite": false,
+          "words": [
+            {
+              "end_time": 340,
+              "start_time": 260,
+              "text": "这"
+            }
+          ],
+          "additions": {
+            "source": "stream"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "final": false,
+    "result": {
+      "text": "这是一段。",
+      "utterances": [
+        {
+          "text": "这是一段。",
+          "end_time": 899,
+          "definite": false,
+          "words": [
+            {
+              "end_time": 200,
+              "start_time": 120,
+              "text": "这"
+            },
+            {
+              "end_time": 360,
+              "start_time": 280,
+              "text": "是"
+            },
+            {
+              "end_time": 440,
+              "start_time": 360,
+              "text": "一"
+            },
+            {
+              "end_time": 740,
+              "start_time": 660,
+              "text": "段"
+            }
+          ],
+          "additions": {
+            "source": "stream"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "final": false,
+    "result": {
+      "text": "这是一段刘。",
+      "utterances": [
+        {
+          "text": "这是一段刘。",
+          "end_time": 1499,
+          "definite": false,
+          "words": [
+            {
+              "end_time": 200,
+              "start_time": 120,
+              "text": "这"
+            },
+            {
+              "end_time": 360,
+              "start_time": 280,
+              "text": "是"
+            },
+            {
+              "end_time": 440,
+              "start_time": 360,
+              "text": "一"
+            },
+            {
+              "end_time": 600,
+              "start_time": 520,
+              "text": "段"
+            },
+            {
+              "end_time": 1220,
+              "start_time": 1140,
+              "text": "刘"
+            }
+          ],
+          "additions": {
+            "source": "stream"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "final": false,
+    "result": {
+      "text": "这是一段流式输入测试。",
+      "utterances": [
+        {
+          "text": "这是一段流式输入测试。",
+          "end_time": 2802,
+          "definite": true,
+          "words": [
+            {
+              "end_time": 280,
+              "start_time": 80,
+              "text": "这"
+            },
+            {
+              "end_time": 440,
+              "start_time": 280,
+              "text": "是"
+            },
+            {
+              "end_time": 600,
+              "start_time": 440,
+              "text": "一"
+            },
+            {
+              "end_time": 760,
+              "start_time": 600,
+              "text": "段"
+            },
+            {
+              "end_time": 960,
+              "start_time": 920,
+              "text": "流"
+            },
+            {
+              "end_time": 1200,
+              "start_time": 1160,
+              "text": "式"
+            },
+            {
+              "end_time": 1560,
+              "start_time": 1360,
+              "text": "输"
+            },
+            {
+              "end_time": 1760,
+              "start_time": 1560,
+              "text": "入"
+            },
+            {
+              "end_time": 2000,
+              "start_time": 1760,
+              "text": "测"
+            },
+            {
+              "end_time": 2160,
+              "start_time": 2000,
+              "text": "试"
+            }
+          ],
+          "additions": {
+            "source": "two_pass",
+            "speaker_id": "1"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "final": false,
+    "result": {
+      "text": "这是一段流式输入测试。",
+      "utterances": [
+        {
+          "text": "这是一段流式输入测试。",
+          "end_time": 2802,
+          "definite": true,
+          "words": [
+            {
+              "end_time": 280,
+              "start_time": 80,
+              "text": "这"
+            },
+            {
+              "end_time": 440,
+              "start_time": 280,
+              "text": "是"
+            },
+            {
+              "end_time": 600,
+              "start_time": 440,
+              "text": "一"
+            },
+            {
+              "end_time": 760,
+              "start_time": 600,
+              "text": "段"
+            },
+            {
+              "end_time": 960,
+              "start_time": 920,
+              "text": "流"
+            },
+            {
+              "end_time": 1200,
+              "start_time": 1160,
+              "text": "式"
+            },
+            {
+              "end_time": 1560,
+              "start_time": 1360,
+              "text": "输"
+            },
+            {
+              "end_time": 1760,
+              "start_time": 1560,
+              "text": "入"
+            },
+            {
+              "end_time": 2000,
+              "start_time": 1760,
+              "text": "测"
+            },
+            {
+              "end_time": 2160,
+              "start_time": 2000,
+              "text": "试"
+            }
+          ],
+          "additions": {
+            "source": "two_pass",
+            "speaker_id": "1"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "final": false,
+    "result": {
+      "text": "这是一段流式输入测试。前半句已经进入输入框，最后一句也应该及时出现。",
+      "utterances": [
+        {
+          "text": "这是一段流式输入测试。",
+          "end_time": 2802,
+          "definite": true,
+          "words": [
+            {
+              "end_time": 280,
+              "start_time": 80,
+              "text": "这"
+            },
+            {
+              "end_time": 440,
+              "start_time": 280,
+              "text": "是"
+            },
+            {
+              "end_time": 600,
+              "start_time": 440,
+              "text": "一"
+            },
+            {
+              "end_time": 760,
+              "start_time": 600,
+              "text": "段"
+            },
+            {
+              "end_time": 960,
+              "start_time": 920,
+              "text": "流"
+            },
+            {
+              "end_time": 1200,
+              "start_time": 1160,
+              "text": "式"
+            },
+            {
+              "end_time": 1560,
+              "start_time": 1360,
+              "text": "输"
+            },
+            {
+              "end_time": 1760,
+              "start_time": 1560,
+              "text": "入"
+            },
+            {
+              "end_time": 2000,
+              "start_time": 1760,
+              "text": "测"
+            },
+            {
+              "end_time": 2160,
+              "start_time": 2000,
+              "text": "试"
+            }
+          ],
+          "additions": {
+            "source": "two_pass",
+            "speaker_id": "1"
+          }
+        },
+        {
+          "text": "前半句已经进入输入框，最后一句也应该及时出现。",
+          "start_time": 2892,
+          "end_time": 8692,
+          "definite": true,
+          "words": [
+            {
+              "end_time": 3372,
+              "start_time": 3132,
+              "text": "前"
+            },
+            {
+              "end_time": 3572,
+              "start_time": 3372,
+              "text": "半"
+            },
+            {
+              "end_time": 3812,
+              "start_time": 3572,
+              "text": "句"
+            },
+            {
+              "end_time": 4052,
+              "start_time": 3852,
+              "text": "已"
+            },
+            {
+              "end_time": 4252,
+              "start_time": 4052,
+              "text": "经"
+            },
+            {
+              "end_time": 4452,
+              "start_time": 4252,
+              "text": "进"
+            },
+            {
+              "end_time": 4652,
+              "start_time": 4452,
+              "text": "入"
+            },
+            {
+              "end_time": 4892,
+              "start_time": 4692,
+              "text": "输"
+            },
+            {
+              "end_time": 5052,
+              "start_time": 4892,
+              "text": "入"
+            },
+            {
+              "end_time": 5372,
+              "start_time": 5132,
+              "text": "框"
+            },
+            {
+              "end_time": 6012,
+              "start_time": 5812,
+              "text": "最"
+            },
+            {
+              "end_time": 6172,
+              "start_time": 6012,
+              "text": "后"
+            },
+            {
+              "end_time": 6372,
+              "start_time": 6172,
+              "text": "一"
+            },
+            {
+              "end_time": 6572,
+              "start_time": 6372,
+              "text": "句"
+            },
+            {
+              "end_time": 6852,
+              "start_time": 6572,
+              "text": "也"
+            },
+            {
+              "end_time": 7012,
+              "start_time": 6852,
+              "text": "应"
+            },
+            {
+              "end_time": 7252,
+              "start_time": 7012,
+              "text": "该"
+            },
+            {
+              "end_time": 7492,
+              "start_time": 7252,
+              "text": "及"
+            },
+            {
+              "end_time": 7652,
+              "start_time": 7492,
+              "text": "时"
+            },
+            {
+              "end_time": 7892,
+              "start_time": 7652,
+              "text": "出"
+            },
+            {
+              "end_time": 8132,
+              "start_time": 7892,
+              "text": "现"
+            }
+          ],
+          "additions": {
+            "source": "two_pass",
+            "speaker_id": "1"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "final": false,
+    "result": {
+      "text": "这是一段流式输入测试。前半句已经进入输入框，最后一句也应该及时出现。请保留完整内容。",
+      "utterances": [
+        {
+          "text": "这是一段流式输入测试。",
+          "end_time": 2802,
+          "definite": true,
+          "words": [
+            {
+              "end_time": 280,
+              "start_time": 80,
+              "text": "这"
+            },
+            {
+              "end_time": 440,
+              "start_time": 280,
+              "text": "是"
+            },
+            {
+              "end_time": 600,
+              "start_time": 440,
+              "text": "一"
+            },
+            {
+              "end_time": 760,
+              "start_time": 600,
+              "text": "段"
+            },
+            {
+              "end_time": 960,
+              "start_time": 920,
+              "text": "流"
+            },
+            {
+              "end_time": 1200,
+              "start_time": 1160,
+              "text": "式"
+            },
+            {
+              "end_time": 1560,
+              "start_time": 1360,
+              "text": "输"
+            },
+            {
+              "end_time": 1760,
+              "start_time": 1560,
+              "text": "入"
+            },
+            {
+              "end_time": 2000,
+              "start_time": 1760,
+              "text": "测"
+            },
+            {
+              "end_time": 2160,
+              "start_time": 2000,
+              "text": "试"
+            }
+          ],
+          "additions": {
+            "source": "two_pass",
+            "speaker_id": "1"
+          }
+        },
+        {
+          "text": "前半句已经进入输入框，最后一句也应该及时出现。",
+          "start_time": 2892,
+          "end_time": 8692,
+          "definite": true,
+          "words": [
+            {
+              "end_time": 3372,
+              "start_time": 3132,
+              "text": "前"
+            },
+            {
+              "end_time": 3572,
+              "start_time": 3372,
+              "text": "半"
+            },
+            {
+              "end_time": 3812,
+              "start_time": 3572,
+              "text": "句"
+            },
+            {
+              "end_time": 4052,
+              "start_time": 3852,
+              "text": "已"
+            },
+            {
+              "end_time": 4252,
+              "start_time": 4052,
+              "text": "经"
+            },
+            {
+              "end_time": 4452,
+              "start_time": 4252,
+              "text": "进"
+            },
+            {
+              "end_time": 4652,
+              "start_time": 4452,
+              "text": "入"
+            },
+            {
+              "end_time": 4892,
+              "start_time": 4692,
+              "text": "输"
+            },
+            {
+              "end_time": 5052,
+              "start_time": 4892,
+              "text": "入"
+            },
+            {
+              "end_time": 5372,
+              "start_time": 5132,
+              "text": "框"
+            },
+            {
+              "end_time": 6012,
+              "start_time": 5812,
+              "text": "最"
+            },
+            {
+              "end_time": 6172,
+              "start_time": 6012,
+              "text": "后"
+            },
+            {
+              "end_time": 6372,
+              "start_time": 6172,
+              "text": "一"
+            },
+            {
+              "end_time": 6572,
+              "start_time": 6372,
+              "text": "句"
+            },
+            {
+              "end_time": 6852,
+              "start_time": 6572,
+              "text": "也"
+            },
+            {
+              "end_time": 7012,
+              "start_time": 6852,
+              "text": "应"
+            },
+            {
+              "end_time": 7252,
+              "start_time": 7012,
+              "text": "该"
+            },
+            {
+              "end_time": 7492,
+              "start_time": 7252,
+              "text": "及"
+            },
+            {
+              "end_time": 7652,
+              "start_time": 7492,
+              "text": "时"
+            },
+            {
+              "end_time": 7892,
+              "start_time": 7652,
+              "text": "出"
+            },
+            {
+              "end_time": 8132,
+              "start_time": 7892,
+              "text": "现"
+            }
+          ],
+          "additions": {
+            "source": "two_pass",
+            "speaker_id": "1"
+          }
+        },
+        {
+          "text": "请保留完整内容。",
+          "start_time": 8772,
+          "end_time": 11112,
+          "definite": true,
+          "words": [
+            {
+              "end_time": 9292,
+              "start_time": 8972,
+              "text": "请"
+            },
+            {
+              "end_time": 9492,
+              "start_time": 9292,
+              "text": "保"
+            },
+            {
+              "end_time": 9692,
+              "start_time": 9492,
+              "text": "留"
+            },
+            {
+              "end_time": 9972,
+              "start_time": 9732,
+              "text": "完"
+            },
+            {
+              "end_time": 10172,
+              "start_time": 9972,
+              "text": "整"
+            },
+            {
+              "end_time": 10372,
+              "start_time": 10172,
+              "text": "内"
+            },
+            {
+              "end_time": 10572,
+              "start_time": 10372,
+              "text": "容"
+            }
+          ],
+          "additions": {
+            "source": "two_pass",
+            "speaker_id": "1"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "final": true,
+    "result": {
+      "text": "这是一段流式输入测试。前半句已经进入输入框，最后一句也应该及时出现。请保留完整内容。",
+      "utterances": [
+        {
+          "text": "这是一段流式输入测试。",
+          "end_time": 2802,
+          "definite": true,
+          "words": [
+            {
+              "end_time": 280,
+              "start_time": 80,
+              "text": "这"
+            },
+            {
+              "end_time": 440,
+              "start_time": 280,
+              "text": "是"
+            },
+            {
+              "end_time": 600,
+              "start_time": 440,
+              "text": "一"
+            },
+            {
+              "end_time": 760,
+              "start_time": 600,
+              "text": "段"
+            },
+            {
+              "end_time": 960,
+              "start_time": 920,
+              "text": "流"
+            },
+            {
+              "end_time": 1200,
+              "start_time": 1160,
+              "text": "式"
+            },
+            {
+              "end_time": 1560,
+              "start_time": 1360,
+              "text": "输"
+            },
+            {
+              "end_time": 1760,
+              "start_time": 1560,
+              "text": "入"
+            },
+            {
+              "end_time": 2000,
+              "start_time": 1760,
+              "text": "测"
+            },
+            {
+              "end_time": 2160,
+              "start_time": 2000,
+              "text": "试"
+            }
+          ],
+          "additions": {
+            "source": "two_pass",
+            "speaker_id": "1"
+          }
+        },
+        {
+          "text": "前半句已经进入输入框，最后一句也应该及时出现。",
+          "start_time": 2892,
+          "end_time": 8692,
+          "definite": true,
+          "words": [
+            {
+              "end_time": 3372,
+              "start_time": 3132,
+              "text": "前"
+            },
+            {
+              "end_time": 3572,
+              "start_time": 3372,
+              "text": "半"
+            },
+            {
+              "end_time": 3812,
+              "start_time": 3572,
+              "text": "句"
+            },
+            {
+              "end_time": 4052,
+              "start_time": 3852,
+              "text": "已"
+            },
+            {
+              "end_time": 4252,
+              "start_time": 4052,
+              "text": "经"
+            },
+            {
+              "end_time": 4452,
+              "start_time": 4252,
+              "text": "进"
+            },
+            {
+              "end_time": 4652,
+              "start_time": 4452,
+              "text": "入"
+            },
+            {
+              "end_time": 4892,
+              "start_time": 4692,
+              "text": "输"
+            },
+            {
+              "end_time": 5052,
+              "start_time": 4892,
+              "text": "入"
+            },
+            {
+              "end_time": 5372,
+              "start_time": 5132,
+              "text": "框"
+            },
+            {
+              "end_time": 6012,
+              "start_time": 5812,
+              "text": "最"
+            },
+            {
+              "end_time": 6172,
+              "start_time": 6012,
+              "text": "后"
+            },
+            {
+              "end_time": 6372,
+              "start_time": 6172,
+              "text": "一"
+            },
+            {
+              "end_time": 6572,
+              "start_time": 6372,
+              "text": "句"
+            },
+            {
+              "end_time": 6852,
+              "start_time": 6572,
+              "text": "也"
+            },
+            {
+              "end_time": 7012,
+              "start_time": 6852,
+              "text": "应"
+            },
+            {
+              "end_time": 7252,
+              "start_time": 7012,
+              "text": "该"
+            },
+            {
+              "end_time": 7492,
+              "start_time": 7252,
+              "text": "及"
+            },
+            {
+              "end_time": 7652,
+              "start_time": 7492,
+              "text": "时"
+            },
+            {
+              "end_time": 7892,
+              "start_time": 7652,
+              "text": "出"
+            },
+            {
+              "end_time": 8132,
+              "start_time": 7892,
+              "text": "现"
+            }
+          ],
+          "additions": {
+            "source": "two_pass",
+            "speaker_id": "1"
+          }
+        },
+        {
+          "text": "请保留完整内容。",
+          "start_time": 8772,
+          "end_time": 11112,
+          "definite": true,
+          "words": [
+            {
+              "end_time": 9292,
+              "start_time": 8972,
+              "text": "请"
+            },
+            {
+              "end_time": 9492,
+              "start_time": 9292,
+              "text": "保"
+            },
+            {
+              "end_time": 9692,
+              "start_time": 9492,
+              "text": "留"
+            },
+            {
+              "end_time": 9972,
+              "start_time": 9732,
+              "text": "完"
+            },
+            {
+              "end_time": 10172,
+              "start_time": 9972,
+              "text": "整"
+            },
+            {
+              "end_time": 10372,
+              "start_time": 10172,
+              "text": "内"
+            },
+            {
+              "end_time": 10572,
+              "start_time": 10372,
+              "text": "容"
+            }
+          ],
+          "additions": {
+            "source": "two_pass",
+            "speaker_id": "1"
+          }
+        }
+      ]
+    }
+  }
+]

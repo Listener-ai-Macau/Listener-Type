@@ -1,0 +1,62 @@
+{
+  "synthetic": true,
+  "originMs": 1000,
+  "throughMs": 4900,
+  "result": {
+    "text": "前半句已经进入书",
+    "utterances": [
+      {
+        "text": "前半句已经进入书",
+        "start_time": 1892,
+        "end_time": 3902,
+        "definite": true,
+        "words": [
+          {
+            "end_time": 2372,
+            "start_time": 2132,
+            "text": "前"
+          },
+          {
+            "end_time": 2572,
+            "start_time": 2372,
+            "text": "半"
+          },
+          {
+            "end_time": 2812,
+            "start_time": 2572,
+            "text": "句"
+          },
+          {
+            "end_time": 3052,
+            "start_time": 2892,
+            "text": "已"
+          },
+          {
+            "end_time": 3212,
+            "start_time": 3052,
+            "text": "经"
+          },
+          {
+            "end_time": 3412,
+            "start_time": 3212,
+            "text": "进"
+          },
+          {
+            "end_time": 3532,
+            "start_time": 3412,
+            "text": "入"
+          },
+          {
+            "end_time": 3732,
+            "start_time": 3692,
+            "text": "书"
+          }
+        ],
+        "additions": {
+          "source": "two_pass",
+          "speaker_id": "1"
+        }
+      }
+    ]
+  }
+}
