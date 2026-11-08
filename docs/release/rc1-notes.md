@@ -1,11 +1,21 @@
-# Listener v1.0.6-rc1 · Type build267 / Firmware38
+# Listener v1.0.6-rc1 · Type build268 / Firmware38
 
 | Download | File |
 | --- | --- |
-| **Windows app** | **[Download MSI · build267](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · build268](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | Firmware · USB flashing or Bluetooth OTA | [Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip) |
 
-## What's changed since build266
+## What’s changed since build267
+
+- **Optional computer microphone wake.** In Settings → Recording, select Microphone and enable “Wake with computer microphone”. This independent switch is off by default. It uses the shared Chinese wake phrase and existing voiceprint policy; a strict local keyword hit also needs independent local phrase confirmation. Recognition after wake uses your configured service or model.
+- **Keep the same live microphone capture.** A bounded in-memory source buffer retains words spoken after the verified keyword boundary while ordinary dictation starts. Cancel, input/device changes, manual dictation, question recording, microphone tests and firmware OTA keep their ownership guards. Idle listening resumes after recording ends. Use the hotkey or checkmark to end computer microphone dictation; this change does not add a new silence-end policy.
+- **Handle long-idle keyword timing.** Ambiguous native keyword timestamps are checked by re-decoding short windows from the same retained source. An early unproven label can receive a bounded amount of subsequent audio; an estimated observation time never becomes permission to discard audio.
+- **Bound standby work.** The PCM buffer retains at most 12 seconds, decoder history is renewed with overlap, and callback logging is suppressed during standby. Phrase confirmation reuses the existing helper and transfers PCM in memory without a temporary recording file or ambient transcript response. Standby audio is not uploaded or archived; normal dictation history/debug choices still apply after wake.
+
+Offline synthetic tests cover the full phrase and three similar phrases after 0, 34 and 95 seconds of silence, including dropped inference-queue chunks. Capture handoff, cancellation and existing recorder/helper behavior were checked separately. These tests do not establish physical wake success in every room or long-term reliability. Earlier intermittent stop and target-application limits remain below.
+
+## Included from build267
+
 
 - **Preserve the final streaming paste payload during handoff.** If the same session's last paste remains unconfirmed and contains a different payload from the complete final, Type keeps that fragment until a real receipt arrives or the existing five-second observation window from paste dispatch ends. An already-confirmed paste or identical payload still permits immediate final copying.
 - **Keep final copying separate from insertion.** The complete final is copied in the existing background clipboard worker; this operation does not send another paste or hold the completion UI open. Completion-first copying remains enabled by default, with saved choices respected.
@@ -44,15 +54,19 @@ US$49 is the hardware price. Type is free and open source. No ready-to-use offic
 
 ## File identity
 
-- Windows runtime source: `d4b441129b5cc7543329c59a80b05fe56775ed83` · build267.
-- Windows MSI: 305643520 bytes · SHA256 `887d1498c1ab58fe528d84162a75850c7f653ce4a15efd61abe1d962894b6c14`.
+- Windows runtime source: `db58ab628866dcaefc3b47b7657e47d8b6100b4e` · build268.
+- Windows MSI: 305700864 bytes · SHA256 `4c76d2999a453fa9118351fab2ac37a28f0316aee1a0fc2ee7a8ab26b839131a`.
 - The release tag includes a documentation-only follow-up that aligns the download pages; application/build inputs match the runtime source above.
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`.
 - Firmware ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`.
 
 ## 中文说明
 
-本次发布已在本机安装验证的 Type267。针对最后一次短片段粘贴尚未确认、完整终稿却立即覆盖剪贴板的竞争：先保留原短片段，收到真实回执可提前复制完整终稿，否则沿原有观察窗等到该次粘贴发出后5秒，再按完整复制优先设置复制。此步只更新剪贴板，不额外粘贴，也不拖住“已完成”界面。等待期间用户的新复制（含同文新版本）和新会话所有权继续受保护。观察窗到期仍记未确认；极慢目标超过该窗口仍可能读到整稿，不能宣称所有重复均已消除。
+本次发布已在本机安装验证的 Type268。新增独立的电脑麦克风待机唤醒开关，默认关闭；在「设置 → 录音」选择麦克风后可启用。沿用共用中文唤醒词及原声纹策略，关键词命中还需现有本地助手确认完整词，近似词不能仅凭关键词标签开始听写。同一条录音流按可靠唤醒词边界交接正文，避免重开麦克风的空档；用快捷键或勾号结束后恢复待机。本次没有新增电脑麦克风的静音自动结束策略。待机内存音频最多12秒，确认通过内存传输，不上传、不保存临时录音，也不回传环境转写。唤醒后的识别仍用已配置服务或模型，历史与调试录音沿原设置。
+
+本地合成音覆盖0、34和95秒静音后的完整词、三个近似词及推理队列缺块，长静音边界不可靠时只用同源短窗重新取证，不能以估算位置裁掉开头。取消、替代会话、录音资源与原助手行为相关检查通过；不据此宣称所有真实房间、噪声或长期实物唤醒均已通过。保留以下既有修复与限制。
+
+包含 Type267 的剪贴板修复。针对最后一次短片段粘贴尚未确认、完整终稿却立即覆盖剪贴板的竞争：先保留原短片段，收到真实回执可提前复制完整终稿，否则沿原有观察窗等到该次粘贴发出后5秒，再按完整复制优先设置复制。此步只更新剪贴板，不额外粘贴，也不拖住“已完成”界面。等待期间用户的新复制（含同文新版本）和新会话所有权继续受保护。观察窗到期仍记未确认；极慢目标超过该窗口仍可能读到整稿，不能宣称所有重复均已消除。
 
 包含之前Type266的改进。修复普通流式路径中尾句只能等待整段结束确认的缺口：已提交边界后的稳定片段可以使用现有识别服务做有界确认，合格新词沿同一增量账本上屏；取消、换会话或来源不匹配的旧结果不能继续写入。片段确认可能增加提供方用量，片段长度与累计回看量受限。识别回调只发布观察，由唯一端点循环先给就绪文字正常交付机会，再判定自动停止。已满足音频覆盖、持续安静等保护的尾句，也不再因句号或确认状态被额外拖住；未确认文字继续保留给正常最终识别。
 
