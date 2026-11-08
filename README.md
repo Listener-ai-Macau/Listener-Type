@@ -8,7 +8,7 @@ A microphone, a recording knob and four customizable keys. Speak a message, emai
 
 | Purpose | Direct download |
 | --- | --- |
-| **Windows app** | **[Download MSI · Type build268](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · Type build271](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **Firmware: USB flashing / Bluetooth OTA** | **[Download firmware ZIP · both methods](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 <!-- listener-local-text-entry -->
@@ -39,7 +39,7 @@ Firmware: **ESP32-S3 N16R8**, build `094f5a60049f59f4`. Select the same ZIP for 
 Type defaults to **USB wired flashing**, with the flasher included in the MSI. No Python, ESP-IDF or separate flashing software is required.
 Device settings are independent: select one USB/Bluetooth device and read its settings. Explicit edits save automatically when editing finishes; reading or switching devices does not write computer defaults. Names, lights, power, keys and knob settings stay on the selected board. Use this paired MSI and firmware ZIP.
 
-Type build268 adds optional **computer microphone wake** in Settings → Recording. Select Microphone, enable the switch and say the shared wake phrase. Local word confirmation and the existing voiceprint gate precede dictation; the same live capture carries the following words. Use the hotkey or checkmark to finish, then idle listening resumes. This switch is off by default. It retains build267’s clipboard handoff protection, earlier final-clause and resource improvements, and the short “Completed” status. Firmware38 is unchanged.
+Type build271 completes automatic ending for **computer microphone wake with Volcengine recognition**. Say the shared wake phrase, dictate normally, then stop speaking; the existing local speech and endpoint checks lead into normal finalization and idle listening. The hotkey and checkmark remain available. Other recognition providers use manual ending. The optional wake switch is in Settings → Recording and is off by default. This includes the owner/short-phrase wake repair, keeps saved voiceprints, ordinary streaming and final-copy-only clipboard behavior, and retains build267’s handoff protection. Firmware38 is unchanged.
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
