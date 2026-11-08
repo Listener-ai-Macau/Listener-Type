@@ -93,6 +93,27 @@ const VAD_RUNTIME_FILES: [&str; 3] = [
 pub(crate) const VAD_MODEL_SHA256: &str =
     "9E2449E1087496D8D4CABA907F23E0BD3F78D91FA552479BB9C23AC09CBB1FD6";
 
+/// On-demand crop proposals for wake recovery. Never downloads on the live
+/// path, and never supplies a keyword end or an endpoint/identity decision.
+pub(crate) fn cached_wake_speech_ranges(pcm: &[u8]) -> Result<Vec<(u64, u64)>, String> {
+    if pcm.len() % 2 != 0 { return Err("invalid wake speech PCM".into()); }
+    let root=crate::persistence::speaker_verification_root().map_err(|e|e.to_string())?;
+    let model=bundled_vad_model_path().unwrap_or_else(||root.join(VAD_MODEL_NAME));
+    if !model.is_file()||sha256_file(&model)?!=VAD_MODEL_SHA256 {
+        return Err("cached wake speech model unavailable".into());
+    }
+    let runtime=VadRuntime::load(&root,&model,VAD_MIN_SPEECH_SECONDS)?;
+    for bytes in pcm.chunks(VAD_WINDOW_SAMPLES*2) {
+        let samples=bytes.chunks_exact(2).map(|b|i16::from_le_bytes([b[0],b[1]])as f32/32768.0).collect::<Vec<_>>();
+        runtime.accept(&samples);
+    }
+    runtime.flush();
+    let length=(pcm.len()/2)as u64;
+    Ok(runtime.drain_speech_ranges(0).into_iter().filter_map(|(start,end)|{
+        let end=end.min(length);(start<end).then_some((start,end))
+    }).collect())
+}
+
 #[repr(C)]
 struct SileroVadModelConfig {
     model: *const c_char,

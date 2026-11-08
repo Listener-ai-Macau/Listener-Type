@@ -103,7 +103,13 @@ impl Decoder {
             // Long silence can make the native KWS timestamp segment-relative.
             // Re-decode immutable recent source windows to obtain a new proven
             // boundary. Never turn the observation clock into an audio proof.
+            match super::microphone_wake_onset::recover_source_clock(&self.phrase,buffer,self.accepted_end) {
+                Ok(Some((origin,result)))=>{self.origin=origin;found=Some(result);},
+                Ok(None)=>log::info!("[microphone-wake] keyword clock recovery pending source=vad_onset attempt={}",self.unproven_retries),
+                Err(_)=>log::info!("[microphone-wake] keyword clock recovery unavailable source=vad_onset attempt={}",self.unproven_retries),
+            }
             for seconds in [3, 6, 9] {
+                if found.as_ref().is_some_and(|result|result.audio_end_seconds.is_some()){break;}
                 let start = self
                     .accepted_end
                     .saturating_sub(seconds * PCM_BYTES_PER_SECOND)
