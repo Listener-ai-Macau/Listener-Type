@@ -8,6 +8,22 @@ fn arm_microphone_wake_body_guard(inner: &Arc<Inner>, session: SessionId) {
     arm_automatic_wake_text_guard(inner, session, String::new(), 0);
 }
 
+impl SettledTargetEndpointClock {
+    fn native_microphone_quiet_stop_due(&self, now: Instant, timeout_ms: u64) -> bool {
+        // Closing native input is what lets a provisional final clause finish
+        // recognition. Do not wait for that result before supplying its EOF.
+        // Reuse the existing continuous-silence reducer, not text age, room
+        // energy or a new timer. In-flight editor dispatch/receipts are checked
+        // by the common caller first; final words remain in the normal pipeline.
+        let captured = self.latest_update.as_ref().and_then(|u|u.audio_duration_ms);
+        let silence = self.local_vad_stop_observation.as_ref().and_then(LocalVadStopObservation::confirmed_silence);
+        captured.zip(silence).is_some_and(|(captured,silence)| {
+            crate::personal_vad::PresenceEndpoint::default()
+                .due_on_confirmed_silence(silence,captured,now,timeout_ms.max(EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS))
+        })
+    }
+}
+
 struct MicrophoneEndpointConsumer {
     target: Arc<dyn crate::recorder::AudioConsumer>,
     asr: Arc<VolcengineStreamingASR>,
@@ -202,6 +218,77 @@ mod microphone_endpoint_tests {
             admission.asr.local_speech_activity_sink().lock().state=state;
             assert!(!microphone_endpoint_silence_qualified(&admission));
         }
+    }
+
+    #[test]
+    #[ignore = "complete native VAD/controller/STOP replay with synthetic PCM; no device/cloud/editor"]
+    fn provisional_body_reaches_native_stop_through_complete_controller() {
+        use crate::asr::volcengine::PendingBodyDelivery;
+        let (coordinator,mut admission)=fixture(false);
+        admission.asr=Arc::new(VolcengineStreamingASR::new(VolcengineCredentials {
+            app_id:"offline".into(),access_token:"offline".into(),resource_id:"offline".into(),
+        },Vec::new()));
+        let asr=&admission.asr;
+        asr.prepare_local_speech_quality_session();
+        struct Sink;
+        impl crate::recorder::AudioConsumer for Sink {fn consume_pcm_chunk(&self,_:&[u8]){}}
+        let consumer=microphone_endpoint_consumer(&coordinator.inner,admission.ticket.session_id,asr,Arc::new(Sink));
+        let root=std::path::PathBuf::from(std::env::var_os("LISTENER_WAKE_DIAG_DIR").unwrap());
+        let mut pcm=denzic_audio_v1_core::read_wav_pcm16le(&std::fs::read(root.join("wake_huihui.wav")).unwrap()).unwrap();
+        pcm.extend(vec![0;5*32000]);
+        let base=Instant::now();
+        let mut native=SettledTargetEndpointClock {native_capture_endpoint:true,..Default::default()};
+        let mut legacy=SettledTargetEndpointClock::default();
+        let mut end=0;
+        let mut first_due=None;
+        let mut last_speech=0;
+        let mut body_started=false;
+        for chunk in pcm.chunks(3200) {
+            consumer.consume_pcm_chunk(chunk);end+=chunk.len() as u64/2;
+            let deadline=Instant::now()+Duration::from_secs(5);
+            while asr.local_speech_activity_snapshot().analyzed_through_samples+512<end {
+                assert!(Instant::now()<deadline);std::thread::sleep(Duration::from_millis(2));
+            }
+            let evidence=asr.local_speech_activity_snapshot();
+            let now=base+Duration::from_millis(end/16);
+            let mut raw=asr.endpoint_update_snapshot();
+            // Replay the observed provider geometry: body exists, no tracker,
+            // provisional tail and provider coverage behind the last VAD edge.
+            raw.provider_audio_duration_ms=Some(5300.min(end/16));
+            raw.pending_unattributed_speech=true;
+            body_started|=end/16>=3600;
+            let policy=TargetSpeakerEndpointPolicy {body_started,initial_body_wait_active:!body_started,
+                automatic_no_body_started_at:(!body_started).then_some(base),
+                endpoint_timeout_ms:EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS,
+                wall_clock_timeout_ms:EMBEDDED_SETTLED_TARGET_WALL_CLOCK_MS,
+                stop_reason:"target_speaker_inactive_3000ms"};
+            let update=if body_started {asr.endpoint_update_with_local_speech_evidence_snapshot(raw,evidence)}else{raw};
+            for (clock,is_native) in [(&mut native,true),(&mut legacy,false)] {
+                clock.note_local_vad_evidence_at(evidence,now);
+                clock.refresh_pending_body_delivery(Some(PendingBodyDelivery {
+                    key:"Synthetic provisional final clause".into(),recognition_pending:true,updated_at:now,
+                }),now);
+                let due=clock.reduce_session_policy_with_local_vad_revision(now,policy,&update,false,body_started.then_some(evidence.revision));
+                if due.is_some() {
+                    assert!(is_native,"legacy controller unexpectedly escaped the saved recognition hold");
+                    assert_eq!(evidence.state,VadState::NonSpeech);
+                    let silence=evidence.analyzed_through_ms-evidence.last_detected_speech_end_ms.unwrap();
+                    assert!(silence>=3000);
+                    first_due.get_or_insert(end/16);
+                }
+            }
+            last_speech=evidence.last_detected_speech_end_ms.unwrap_or(last_speech);
+        }
+        let due=first_due.expect("the actual native controller must request STOP even while final recognition needs EOF");
+        assert!(due>=last_speech+3000 && due<=last_speech+3800,"last_speech={last_speech} stop={due}");
+        let evidence=asr.local_speech_activity_snapshot();
+        let session=admission.ticket.session_id;
+        admission.endpoint_clock=Arc::new(Mutex::new(native));
+        admission.stop_state=Arc::new(Mutex::new(EndpointStopDispatchState::default()));
+        admission.ticket=admission.stop_state.lock().propose(session,admission.endpoint_clock.lock().generation,
+            evidence.revision,evidence.activity_epoch,true,false).unwrap();
+        assert!(begin_microphone_endpoint_stop(&coordinator.inner,&admission).is_some(),"controller proposal must reach the matching native Recorder stop");
+        assert_eq!(coordinator.inner.state.lock().phase,SessionPhase::Processing);
     }
 
     #[test]

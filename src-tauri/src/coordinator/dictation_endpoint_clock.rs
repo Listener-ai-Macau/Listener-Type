@@ -173,6 +173,9 @@ struct SettledTargetEndpointClock {
     /// body-stage policy (the bounded open-clause continuation) can tell
     /// automatic wake sessions apart from manual hotkey sessions.
     automatic_wake_session: bool,
+    /// Native wake owns a Recorder EOF, rather than an identity-tracked BLE
+    /// segment. Its untracked body uses the existing confirmed-silence reducer.
+    native_capture_endpoint: bool,
     /// Wall-clock moment of the last POSITIVE owner-dictation evidence: a
     /// local qualified/Target watermark advance, visible preview growth, or
     /// the session's first arm.  See EMBEDDED_OWNER_POSITIVE_EVIDENCE_BUDGET_MS.
@@ -2136,6 +2139,12 @@ impl SettledTargetEndpointClock {
         if self.pending_body_dispatch.is_some() || !self.pending_body_receipts.is_empty() {
             self.note_due_hold_diagnostic(self.generation, "body_receipt_pending");
             return false;
+        }
+        #[cfg(target_os = "windows")]
+        if self.native_capture_endpoint && self.manual_vad_guard && !self.automatic_no_body_armed {
+            let due = self.native_microphone_quiet_stop_due(now, timeout_ms);
+            if !due { self.note_due_hold_diagnostic(self.generation, "native_local_speech_pending"); }
+            return due;
         }
         if self.pending_owner_delivery_active(now) {
             let captured_ms = self.latest_update.as_ref()

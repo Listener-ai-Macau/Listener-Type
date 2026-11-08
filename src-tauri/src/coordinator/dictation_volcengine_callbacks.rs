@@ -7,6 +7,8 @@ fn set_volcengine_preview_callbacks(
     let stop_completed = Arc::new(AtomicBool::new(false));
     let stop_state = Arc::new(Mutex::new(EndpointStopDispatchState::default()));
     let endpoint_clock = Arc::new(Mutex::new(SettledTargetEndpointClock::default()));
+    #[cfg(target_os = "windows")]
+    { endpoint_clock.lock().native_capture_endpoint = inner.microphone_wake.owns_dictation_session(session_id); }
     #[cfg(test)]
     tests::track_question_endpoint_clock(&endpoint_clock);
     log::info!(
