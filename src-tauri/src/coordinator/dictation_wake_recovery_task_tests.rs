@@ -127,6 +127,7 @@ fn wake_recovery_background_evaluation_still_requires_phrase_and_owner() {
                 phrase_matched,
                 evidence: ExtractedOwnerWakeEvidence {
                     wake_match: crate::wake_phrase::Match {
+                        keyword_token_start_seconds: None,
                         start_seconds: None, end_seconds: 1.8, matched_keyword: None,
                         origin: crate::wake_phrase::KeywordEvidenceOrigin::PrimaryDetector,
                         audio_end_seconds: None,

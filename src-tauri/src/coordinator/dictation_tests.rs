@@ -12022,6 +12022,7 @@ fn long_ambient_wake_candidate_rotates_with_overlap_until_phrase_hit() {
 #[test]
 fn rolling_wake_match_keeps_absolute_candidate_boundary() {
     let found = crate::wake_phrase::Match {
+        keyword_token_start_seconds: Some(0.25),
         start_seconds: Some(0.10),
         end_seconds: 0.75,
         matched_keyword: Some("开始录音".into()),

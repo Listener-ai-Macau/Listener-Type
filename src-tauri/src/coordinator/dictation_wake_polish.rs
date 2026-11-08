@@ -3497,6 +3497,7 @@ fn offset_streaming_wake_match(
     found.map(|mut found| {
         let origin_seconds = stream_origin_bytes as f32 / 32_000.0;
         found.start_seconds = found.start_seconds.map(|start| start + origin_seconds);
+        found.keyword_token_start_seconds = found.keyword_token_start_seconds.map(|start| start + origin_seconds);
         found.end_seconds += origin_seconds;
         found.audio_end_seconds = found.audio_end_seconds.map(|end| end + origin_seconds);
         found

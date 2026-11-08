@@ -38,7 +38,7 @@ fn candidate(pcm: Vec<u8>) -> BufferedSpeakerCandidate {
     }
 }
 fn primary() -> crate::wake_phrase::Match {
-    crate::wake_phrase::Match { start_seconds: Some(0.0), end_seconds: 1.76,
+    crate::wake_phrase::Match { keyword_token_start_seconds: None, start_seconds: Some(0.0), end_seconds: 1.76,
         audio_end_seconds: Some(1.76), matched_keyword: Some("开始录音".into()),
         origin: crate::wake_phrase::KeywordEvidenceOrigin::PrimaryDetector }
 }

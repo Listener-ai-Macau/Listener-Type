@@ -154,11 +154,28 @@ impl Decoder {
         Ok(found.map(|mut result| {
             let offset = self.origin as f32 / PCM_BYTES_PER_SECOND as f32;
             result.start_seconds = result.start_seconds.map(|time| time + offset);
+            result.keyword_token_start_seconds = result.keyword_token_start_seconds.map(|time| time + offset);
             result.end_seconds += offset;
             result.audio_end_seconds = result.audio_end_seconds.map(|time| time + offset);
             result
         }))
     }
+}
+
+#[cfg(test)]
+pub(crate) fn diagnostic_first_keyword_source(
+    pcm: &[u8],
+    phrase: &str,
+) -> Result<Option<(Match, u64)>, String> {
+    let buffer = Mutex::new(WakeBuffer::default());
+    let mut decoder = Decoder::new(StreamingDetector::new_strict(phrase)?, phrase.to_string());
+    for part in pcm.chunks(5120) {
+        let (start, end) = buffer.lock().append(part);
+        if let Some(found) = decoder.accept(Chunk { start, end, pcm: part.to_vec() }, &buffer)? {
+            return Ok(Some((found, end)));
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(test)]

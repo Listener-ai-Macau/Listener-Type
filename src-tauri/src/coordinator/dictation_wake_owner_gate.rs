@@ -800,6 +800,7 @@ async fn evaluate_target_wake_extraction(
     );
     let separated_owner_match = verification.enrolled_owner_matched();
     let wake_match = crate::wake_phrase::Match {
+        keyword_token_start_seconds: None,
         start_seconds: None,
         end_seconds: refined_wake_end_seconds(
             0.0,

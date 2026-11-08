@@ -1787,6 +1787,7 @@ impl EmbeddedStreamingDictation {
                                     );
                                     candidate.retain_complete_local_wake_intent(&result);
                                     Some(crate::wake_phrase::Match {
+                                        keyword_token_start_seconds: None,
                                         start_seconds: None,
                                         end_seconds: refined_end,
                                         matched_keyword: None,
@@ -2070,6 +2071,7 @@ impl EmbeddedStreamingDictation {
                                                 ) + origin_bytes as f32
                                                     / 32_000.0;
                                                 Some(crate::wake_phrase::Match {
+                                                    keyword_token_start_seconds: None,
                                                     start_seconds: None,
                                                     end_seconds,
                                                     matched_keyword: None,
@@ -3720,6 +3722,7 @@ impl EmbeddedStreamingDictation {
                                             // gate below must accept first.
                                         }
                                         Some(crate::wake_phrase::Match {
+                                            keyword_token_start_seconds: kws_hit.as_ref().and_then(|found| found.keyword_token_start_seconds),
                                             audio_end_seconds: kws_hit
                                                 .as_ref()
                                                 .and_then(|found| found.audio_end_seconds),

@@ -79,10 +79,18 @@ mod microphone_wake;
 mod microphone_wake_buffer;
 #[cfg(target_os = "windows")]
 mod microphone_wake_decoder;
+#[cfg(all(test, target_os = "windows"))]
+pub(crate) use microphone_wake_decoder::diagnostic_first_keyword_source;
+#[cfg(all(test, target_os = "windows"))]
+pub(crate) use microphone_wake::diagnostic_owner_admission;
+#[cfg(all(test, target_os = "windows"))]
+pub(crate) use microphone_wake::diagnostic_source_owner_admission;
 #[cfg(target_os = "windows")]
 mod microphone_wake_confirmation;
 #[cfg(target_os = "windows")]
 mod microphone_wake_onset;
+#[cfg(target_os = "windows")]
+mod microphone_wake_identity;
 #[cfg(target_os = "windows")]
 mod onboard_key_sync;
 mod source_integrity;
