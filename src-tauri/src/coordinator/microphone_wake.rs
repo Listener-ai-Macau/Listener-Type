@@ -463,6 +463,62 @@ impl Runtime {
     }
 }
 
+fn owner_snapshot(ingress: &Ingress, cancel: &AtomicBool, start: u64, end: u64) -> Option<Vec<u8>> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if cancel.load(Ordering::SeqCst) {
+            return None;
+        }
+        {
+            let buffer = ingress.buffer.lock();
+            if start < buffer.start {
+                return None;
+            }
+            if buffer.end >= end {
+                return buffer.range(start, end).ok();
+            }
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn verify_confirmed_owner(
+    ingress: &Ingress,
+    cancel: &AtomicBool,
+    start: u64,
+    mut pcm: Vec<u8>,
+    local_relation: Option<crate::wake_phrase::LocalPhraseRelation>,
+    mut verify: impl FnMut(&[u8]) -> Result<crate::speaker_verification::VerificationResult, String>,
+) -> bool {
+    loop {
+        if cancel.load(Ordering::SeqCst) {
+            return false;
+        }
+        let result = verify(&pcm);
+        if cancel.load(Ordering::SeqCst) {
+            return false;
+        }
+        if super::dictation::microphone_wake_owner_allowed(
+            true,
+            local_relation,
+            pcm.len() / 32,
+            &result,
+        ) {
+            return true;
+        }
+        let Some(next_ms) = super::dictation::microphone_wake_owner_retry_ms(pcm.len() / 32) else {
+            return false;
+        };
+        let Some(next) = owner_snapshot(ingress, cancel, start, start + next_ms as u64 * 32) else {
+            return false;
+        };
+        pcm = next;
+    }
+}
+
 fn run_detector(
     inner: Weak<Inner>,
     runtime: Arc<Runtime>,
@@ -544,19 +600,22 @@ fn run_detector(
         if cancel.load(Ordering::SeqCst) {
             break;
         }
-        let verified = crate::speaker_verification::verify(&candidate, &phrase);
+        let candidate_start = keyword_end - candidate.len() as u64;
+        let owner_allowed = verify_confirmed_owner(
+            &ingress,
+            &cancel,
+            candidate_start,
+            candidate,
+            local_relation,
+            |pcm| crate::speaker_verification::verify(pcm, &phrase),
+        );
         if cancel.load(Ordering::SeqCst) {
             break;
         }
         let Some(inner) = inner.upgrade() else {
             break;
         };
-        if !super::dictation::microphone_wake_owner_allowed(
-            true,
-            local_relation,
-            candidate.len() / 32,
-            &verified,
-        ) {
+        if !owner_allowed {
             log::info!(
                 "[microphone-wake] keyword rejected by existing voiceprint gate generation={token}"
             );
@@ -709,5 +768,83 @@ mod tests {
         let enabled: crate::types::UserPreferences = serde_json::from_value(saved.clone()).unwrap();
         assert!(enabled.microphone_wake_enabled);
         assert_eq!(serde_json::to_value(enabled).unwrap(), saved);
+    }
+
+    #[test]
+    fn microphone_wake_short_owner_input_retries_without_consuming_body() {
+        use crate::speaker_verification::{VerificationPolicy, VerificationResult};
+        let (sender, _) = mpsc::sync_channel(1);
+        let ingress = Ingress {
+            buffer: Mutex::new(WakeBuffer::default()),
+            pending: Mutex::new(Vec::new()),
+            sender,
+        };
+        let prefix = vec![0; 400 * 32];
+        let keyword = vec![1; 880 * 32];
+        let body = vec![2; 2_000 * 32];
+        ingress
+            .buffer
+            .lock()
+            .append(&[prefix.clone(), keyword.clone(), body.clone()].concat());
+        let mut windows = Vec::new();
+        assert!(verify_confirmed_owner(
+            &ingress,
+            &AtomicBool::new(false),
+            prefix.len() as u64,
+            keyword.clone(),
+            Some(crate::wake_phrase::LocalPhraseRelation::ExactStart),
+            |pcm| {
+                let ms = pcm.len() / 32;
+                windows.push(ms);
+                if ms < 1_000 {
+                    Err("short verified input".into())
+                } else {
+                    Ok(VerificationResult {
+                        matched: false,
+                        owner_matched: false,
+                        score: 0.313291,
+                        policy: VerificationPolicy::Enrolled,
+                    })
+                }
+            }
+        ));
+        assert_eq!(windows.first(), Some(&880));
+        assert_eq!(windows.last(), Some(&1800));
+        assert!(windows.len() <= 3 && windows.windows(2).all(|pair| pair[0] < pair[1]));
+        assert_eq!(
+            ingress
+                .buffer
+                .lock()
+                .body_after((prefix.len() + keyword.len()) as u64)
+                .unwrap(),
+            body
+        );
+    }
+
+    #[test]
+    fn microphone_wake_owner_retry_cancellation_prevents_verification() {
+        let (sender, _) = mpsc::sync_channel(1);
+        let ingress = Arc::new(Ingress {
+            buffer: Mutex::new(WakeBuffer::default()),
+            pending: Mutex::new(Vec::new()),
+            sender,
+        });
+        let cancel = Arc::new(AtomicBool::new(true));
+        assert!(!verify_confirmed_owner(
+            &ingress,
+            &cancel,
+            0,
+            vec![0; 880 * 32],
+            Some(crate::wake_phrase::LocalPhraseRelation::ExactStart),
+            |_| panic!("cancelled input must not run verifier")
+        ));
+        cancel.store(false, Ordering::SeqCst);
+        let stop = cancel.clone();
+        let worker = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            stop.store(true, Ordering::SeqCst);
+        });
+        assert!(owner_snapshot(&ingress, &cancel, 0, 1800 * 32).is_none());
+        worker.join().unwrap();
     }
 }

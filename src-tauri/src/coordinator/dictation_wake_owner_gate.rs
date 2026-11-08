@@ -468,6 +468,11 @@ pub(super) fn microphone_wake_owner_allowed(
     result.decision == GateDecision::Accept
 }
 
+#[cfg(target_os = "windows")]
+pub(super) fn microphone_wake_owner_retry_ms(pcm_ms: usize) -> Option<usize> {
+    next_owner_verification_retry_ms(pcm_ms)
+}
+
 fn evaluate_candidate_owner_gate(
     candidate: &mut BufferedSpeakerCandidate,
     phrase_signal: denzic_voice_activation_v1_core::PhraseSignal,
