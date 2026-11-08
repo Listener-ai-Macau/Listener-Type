@@ -1,11 +1,21 @@
-# Listener v1.0.6-rc1 · Type build271 / Firmware38
+# Listener v1.0.6-rc1 · Type build272 / Firmware38
 
 | Download | File |
 | --- | --- |
-| **Windows app** | **[Download MSI · build271](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · build272](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | Firmware · USB flashing or Bluetooth OTA | [Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip) |
 
-## What’s changed since build270
+## What’s changed since build271
+
+- **Confirm an unchanged new prefix while later words keep arriving.** The pending-fragment worker now uses the existing rolling revision ledger to plan complete, mature words after the submitted source boundary. Appended live words no longer restart the age of that earlier prefix or block an already-confirmed same-source result. The existing one-second maturity/context, sixty-second clip bound, single in-flight request and cumulative two-times-PCM replay budget remain in force.
+- **Accept a new-only decoder result at the correct audio occurrence.** A cropped decoder can legitimately omit the old, already-submitted context. For admitted ordinary capture, its first word must start after the submitted interval and match the first unsubmitted parent occurrence using the existing unique whole-token/retained-PCM midpoint matcher. A later repetition, unknown timing or overlapping old interval cannot skip words or repeat a submitted prefix. New words retain the child decoder’s own confirmation and coordinates and must match the current parent prefix. A conflicting child rendering stays pending. Identity-projected sources keep their existing strict seam/ownership checks.
+- **Keep confirmation observable and source-bound.** Admitted capture uses the existing same-response native rendering certificate only when the rendering exactly maps to that decoder’s timed words. A rejected worker reports a reason and numeric lengths, never transcript content. Normal incremental paste, native quiet ending, history and final-copy-only behavior are retained.
+
+The complete real-service synthetic replay produced an eligible new fragment at 6.330 seconds while the parent was still changing; the next parent batch arrived at 10.039 seconds, and the 42-character final was retained. This compares the same synthetic input against the first unreleased candidate’s blocked path, not a fixed build271 or whole-app performance claim. Captured synthetic dropped-context responses, later-repeat/unknown-source counterexamples and the native automatic-ending/receipt guards are covered. Existing configured recognition usage can increase through bounded fragment requests. In one installed build272 natural dictation, the user reported more timely trailing words and automatic ending. Numeric logs show three ordinary paste dispatches totaling 54 display characters before native STOP, followed by a 54-character full-copy Stored result and standby restoration, with no final-remainder paste. The editor and clipboard contents were not independently read, and this single use does not establish all intermittent cases resolved.
+
+## Included from build271
+
+### Complete native endpoint repair since build270
 
 - **Close native input without waiting for the final recognition that requires its EOF.** The first build270 physical trial still required a checkmark: native speech detection was working, but provisional body and owner-continuation holds from the device controller prevented a normal stop. Build270 was not promoted to the public MSI download. Accepted native wake sessions without a body speaker tracker now explicitly reuse the existing continuously confirmed-silence reducer before these owner-only waits. The shared speech interval, analysis coverage, freshness and active-speech protections remain unchanged. This is source capability routing, not permission to treat a pending transcript as silence.
 - **Preserve delivery and finalization.** The ordinary streaming delivery pass still precedes the endpoint decision. In-flight editor dispatch and receipts retain their common stop guard. A qualified native stop enters normal recorder drain and ASR finalization, so pending words can finish and the complete history text is copied without another paste.
@@ -79,15 +89,19 @@ US$49 is the hardware price. Type is free and open source. No ready-to-use offic
 
 ## File identity
 
-- Windows runtime source: `eb8fd5cb0f08eb209d42f054062d8e7f0c17d34f` · build271.
-- Windows MSI: 305713152 bytes · SHA256 `485604e7999193d019f67e3eaac67d8e5d8b54f8ebf8d42d0768d7ae9e1faf69`.
+- Windows runtime source: `3aa74d5e22894f1c1e10b531b8aeba9b3c032ebf` · build272.
+- Windows MSI: 305717248 bytes · SHA256 `e4ad7090a10dd1aeb11d65e4db1dadff05929458c48b91eba4abd34efb562823`.
 - The release tag includes a documentation-only follow-up that aligns the download pages; application/build inputs match the runtime source above.
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`.
 - Firmware ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`.
 
 ## 中文说明
 
-本次发布已在本机安装验证的 Type271。270真实回传仍需点勾，未提升为公开MSI；当时已经接通电脑VAD和停止出口，却仍被设备控制器的正文待确认／机主续句义务挡住。271明确电脑原生录音能力：先给尾句普通流式交付机会，再复用已有连续安静确认器关闭输入，让需要结束输入才能完成的末句继续进入正常识别与历史保存。正在进行的输入提交／回执、VAD完整静音／覆盖／新讲话、会话与录音归属保护保持，不增设静音时长、不把文字等待当作安静证据。已新增真实模型＋合成音频从共用控制器到native Stop的完整回放，并用旧分支对照证明原等待问题；安装后一次本人真实电脑唤醒听写，日志确认连续安静约3秒后自动停止、完整终稿复制及恢复待机，Owner回传“看着好像没啥问题”。此结论覆盖本次实际使用，不外推全部噪声及长期间歇表现。以下270接入及既有修复包含在本版。
+本次发布已在本机安装验证的 Type272。尾句补确认改为复用原滚动稳定记录，先处理已提交源边界之后的完整稳定新词，后续加字不再把前面稳定部分一起重等；同源child已确认结果也不再被父候选的新增长挡住。裁片识别若省略已上屏旧上下文，只有其第一个新词确实对应父流第一个未提交音频发生，才沿原whole-token／PCM midpoint匹配接续；不能跳到后面的重复词、借用父词时间或覆盖已提交内容。子结果与当前父文本冲突的部分继续待确认。保留原成熟／上下文时长、60秒单片／累计2倍PCM、单请求、防过期与身份边界，严格身份投影路径保持。
+
+完整非私人合成语音实测中，父流仍在加字时，新片段在6.330秒可交付，较等待下一主批10.039秒约早3.709秒，42字完整终稿保留。该对照是本批首个未发布候选的受阻路径，不是所有输入、271或整机CPU的固定降幅；本机272实际听写中，Owner回传“尾句更及时，也能自动结束”；数字记录为20／13／21字三次普通流式分批，全部54字在自动STOP前约2.88秒已派发，随后54字完整复制Stored、恢复待机，无收尾补粘贴。未独立读取输入框或剪贴板正文，单次正常不外推全部间歇场景。片段确认使用已配置识别服务，可能增加有界用量。当前自动结束、原流式粘贴、历史以及完成后仅完整复制保持。
+
+包含已验证的Type271电脑自动收尾修复。270真实回传仍需点勾，未提升为公开MSI；当时已经接通电脑VAD和停止出口，却仍被设备控制器的正文待确认／机主续句义务挡住。271明确电脑原生录音能力：先给尾句普通流式交付机会，再复用已有连续安静确认器关闭输入，让需要结束输入才能完成的末句继续进入正常识别与历史保存。正在进行的输入提交／回执、VAD完整静音／覆盖／新讲话、会话与录音归属保护保持，不增设静音时长、不把文字等待当作安静证据。已新增真实模型＋合成音频从共用控制器到native Stop的完整回放，并用旧分支对照证明原等待问题；安装后一次本人真实电脑唤醒听写，日志确认连续安静约3秒后自动停止、完整终稿复制及恢复待机，Owner回传“看着好像没啥问题”。此结论覆盖本次实际使用，不外推全部噪声及长期间歇表现。以下270接入及既有修复包含在本版。
 
 269真实回传已能唤醒录音，但停止请求仍被只接受板子的分发挡回；电脑PCM也未接入原本地说话检测。270把已接受的电脑唤醒会话接到同一VAD、源采样时钟及自动正文／无正文规则，匹配当前会话和录音后停止电脑采集，再进入普通收尾。没有新增静音时长；讲话、待定／落后检测、新会话或旧停止请求不能越过保护。该自动结束目前适用于火山识别，其它识别方式继续快捷键／勾号结束。尾句先正常流式，收尾后保存历史并只复制完整终稿，不再额外粘贴；完成后恢复待机。定向离线真VAD与合成音频、停止归属、原板子事务和尾句检查通过，实际房间的新自动结束表现继续按自然使用记录。
 
