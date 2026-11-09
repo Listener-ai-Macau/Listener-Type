@@ -23,6 +23,7 @@ import { styleEditorMessages, vocabPresetMessages } from './styleEditor';
 import { qaPreparationMessages } from './qaPreparation';
 import { sourceFactMessages } from './sourceFacts';
 import { settingsOrganizationMessages } from './settingsOrganization';
+import { simpleTextWorkflowMessages } from './simpleTextWorkflow';
 
 export const SUPPORTED_LOCALES = ['zh-CN', 'zh-TW', 'en', 'ja', 'ko'] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
@@ -98,6 +99,13 @@ for (const [locale, qaPreparation] of Object.entries(qaPreparationMessages)) {
 }
 for (const [locale, sourceFacts] of Object.entries(sourceFactMessages)) {
   i18n.addResourceBundle(locale, 'translation', { sourceFacts }, true, true);
+}
+for (const [locale, simpleTextWorkflow] of Object.entries(simpleTextWorkflowMessages)) {
+  i18n.addResourceBundle(locale, 'translation', {
+    simpleTextWorkflow,
+    textWorkspace: { title: simpleTextWorkflow.workspace },
+    style: { trial: { styleLabel: simpleTextWorkflow.styleLabel } },
+  }, true, true);
 }
 
 /**

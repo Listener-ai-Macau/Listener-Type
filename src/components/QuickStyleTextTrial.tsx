@@ -3,12 +3,13 @@ import { useTranslation } from 'react-i18next';
 import { createStylePackFromTemplate, listStylePacks } from '../lib/ipc';
 import { everydayListStyle, isEverydayListStyle } from '../lib/everydayListStyle';
 import { conciseDraftStyle, isConciseDraftStyle } from '../lib/conciseDraftStyle';
-import { emailDraftStyle, isCurrentEmailDraftStyle, isMessageBodyDraftStyle, isMessageDraftStyle, messageDraftStyle } from '../lib/messageDraftStyle';
+import { emailDraftStyle, isCurrentEmailDraftStyle, isEmailDraftStyle, isMessageBodyDraftStyle, isMessageDraftStyle, messageDraftStyle } from '../lib/messageDraftStyle';
 import type { StylePack } from '../lib/types';
 import { Btn } from '../pages/_atoms';
 import { StyleTextTrial } from './StyleTextTrial';
 import { translationTrialPack } from '../lib/translationTrial';
 import { SavedTextDraftsDialog } from './SavedTextDraftsDialog';
+import type { TextWorkspaceTaskId } from './TextWorkspaceTask';
 
 /** A text workspace, not a style activation or a shortcut to pack management. */
 export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTranslationTarget = '', inputOriginName, inputOriginal }: {
@@ -50,6 +51,14 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTran
     return () => { current = false; };
   }, [attempt]);
   const selected = packs.find(pack => pack.id === selectedId);
+  const lastTextStyle = useRef('builtin.raw');
+  const lastTranslationTarget = useRef(initialTranslationTarget || 'English');
+  useEffect(() => {
+    if (selected && !isMessageDraftStyle(selected)) lastTextStyle.current = selected.id;
+  }, [selected]);
+  useEffect(() => {
+    if (translationTarget) lastTranslationTarget.current = translationTarget;
+  }, [translationTarget]);
   const savedEverydayList = packs.find(isEverydayListStyle);
   const savedConcise = packs.find(isConciseDraftStyle);
   const savedMessageDraft = packs.find(isMessageBodyDraftStyle);
@@ -122,6 +131,16 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTran
       if (mounted.current) setAdding(null);
     }
   };
+  const chooseTask = (task: TextWorkspaceTaskId) => {
+    if (addingRef.current) return;
+    setAddFailed(null);
+    if (task === 'translate') { setTranslationTarget(lastTranslationTarget.current); return; }
+    setTranslationTarget('');
+    if (task === 'draft') { void chooseMessageDraft(); return; }
+    const previous = packs.find(pack => pack.id === lastTextStyle.current && !isMessageDraftStyle(pack));
+    const fallback = packs.find(pack => pack.id === 'builtin.raw') ?? packs.find(pack => !isMessageDraftStyle(pack));
+    if (previous ?? fallback) setSelectedId((previous ?? fallback)!.id);
+  };
   const displayed = translationTarget ? translationTrialPack(translationTarget,
     t('translation.trialName', { language: translationTarget }), t('translation.tryTextHint')) : selected;
   return <>{displayed ? <StyleTextTrial key={workspaceRevision} pack={displayed} packs={translationTarget ? undefined : packs}
@@ -133,16 +152,14 @@ export function QuickStyleTextTrial({ draft, onDraftChange, onClose, initialTran
       const refinement = packs.find(pack => pack.id === 'builtin.light');
       if (refinement) setSelectedId(refinement.id);
     } : undefined}
-    draftingChoice={!translationTarget && selected && !isMessageBodyDraftStyle(selected) ? {
-      label: t(savedMessageDraft ? 'messageDraft.choose' : 'messageDraft.add'),
-      hint: t('messageDraft.hint'), pending: adding !== null,
-      error: addFailed === 'draft' ? t('messageDraft.failed') : '', onChoose: () => void chooseMessageDraft(),
-    } : undefined}
-    emailDraftingChoice={!translationTarget && selected && !isCurrentEmailDraftStyle(selected) ? {
-      label: t(savedEmailDraft ? 'messageDraft.emailChoose' : 'messageDraft.emailAdd'),
-      hint: t('messageDraft.emailHint'), pending: adding !== null,
-      error: addFailed === 'email' ? t('messageDraft.emailFailed') : '', onChoose: () => void chooseEmailDraft(),
-    } : undefined}
+    taskControl={{
+      task: translationTarget ? 'translate' : selected && isMessageDraftStyle(selected) ? 'draft' : 'text',
+      draftFormat: selected && isEmailDraftStyle(selected) ? 'email' : 'body',
+      pending: adding !== null,
+      error: addFailed === 'draft' ? t('messageDraft.failed') : addFailed === 'email' ? t('messageDraft.emailFailed') : '',
+      onChoose: chooseTask,
+      onDraftFormatChange: format => { if (format === 'email') void chooseEmailDraft(); else void chooseMessageDraft(); },
+    }}
     extraStyleChoice={!translationTarget && selected?.id === 'builtin.structured' ? {
       label: t(savedEverydayList ? 'style.everydayList.choose' : 'style.everydayList.add'),
       hint: t('style.everydayList.hint'), pending: adding !== null,

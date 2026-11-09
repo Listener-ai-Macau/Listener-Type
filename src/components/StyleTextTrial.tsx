@@ -20,6 +20,7 @@ import { BufferedSourceFactError, preserveBufferedSourceFacts, preserveTranslate
 import { isEmailDraftStyle, isMessageDraftStyle, removeUnrequestedEmailSignaturePlaceholder } from '../lib/messageDraftStyle';
 import { protectTranslationTerms } from '../lib/protectedTranslation';
 import { textProcessingNotice } from '../lib/textProcessingNotice';
+import { TextWorkspaceTask, type TextWorkspaceTaskControl } from './TextWorkspaceTask';
 
 function withDraftOriginName(origin: string, suffix: string): string {
   const room = Math.max(0, 80 - Array.from(suffix).length - 3);
@@ -27,13 +28,12 @@ function withDraftOriginName(origin: string, suffix: string): string {
   return prefix ? `${prefix} · ${suffix}` : suffix;
 }
 
-export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, draftingChoice, emailDraftingChoice, prepareShorter, translationTarget, onTranslationTargetChange, onRefineTranslation, initialTranslationEngine, initialTranslationSource, initialTranslationQuality, inputOriginName, inputOriginal, suspended = false, onOpenSavedDraft, draft, onDraftChange, onClose }: {
+export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, taskControl, prepareShorter, translationTarget, onTranslationTargetChange, onRefineTranslation, initialTranslationEngine, initialTranslationSource, initialTranslationQuality, inputOriginName, inputOriginal, suspended = false, onOpenSavedDraft, draft, onDraftChange, onClose }: {
   pack: StylePack;
   packs?: StylePack[];
   onSelectPack?: (id: string) => void;
   extraStyleChoice?: { label: string; hint: string; pending: boolean; error: string; onChoose: () => void };
-  draftingChoice?: { label: string; hint: string; pending: boolean; error: string; onChoose: () => void };
-  emailDraftingChoice?: { label: string; hint: string; pending: boolean; error: string; onChoose: () => void };
+  taskControl?: TextWorkspaceTaskControl;
   prepareShorter?: () => Promise<StylePack>;
   translationTarget?: string;
   onTranslationTargetChange?: (language: string) => void;
@@ -60,15 +60,16 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
   const [translationQuality, setTranslationQuality] = useState<LocalTranslationQuality>(initialTranslationQuality ?? 'standard');
   const [protectedTerms, setProtectedTerms] = useState('');
   const localRequest = useRef<string | null>(null);
-  const [optionsOpen, setOptionsOpen] = useState(true);
+  const [optionsOpen, setOptionsOpen] = useState(!taskControl || !!translationTarget);
   const lastTranslationTarget = useRef(translationTarget || 'English');
   useEffect(() => { if (translationTarget) lastTranslationTarget.current = translationTarget; }, [translationTarget]);
+  useEffect(() => { if (translationTarget) setOptionsOpen(true); }, [translationTarget]);
   const [translationPreparing, setTranslationPreparing] = useState(false);
   const [offlineReadiness, setOfflineReadiness] = useState<LocalTranslationReadiness | null>(null);
   const offline = !!translationTarget && translationEngine === 'local';
   const offlineReady = offlineReadiness?.key === localTranslationKey(translationSource, translationTarget ?? '', translationQuality) && offlineReadiness.ready;
   const cacheKey = (id: string) => translationTarget ? JSON.stringify([id, translationEngine, translationSource, translationQuality]) : id;
-  const styleChangePending = extraStyleChoice?.pending || draftingChoice?.pending || emailDraftingChoice?.pending;
+  const styleChangePending = extraStyleChoice?.pending || taskControl?.pending;
   const presentation = stylePackPresentation(pack, t);
   const savedExamples = pack.examples
     .filter(example => example.input.trim() && example.output.trim())
@@ -528,18 +529,8 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         <p className="ol-style-trial-hint">{t('textDraft.retention')}</p>
       </details>
       </div>
-      {draftingChoice && <div className="ol-style-trial-drafting-choice" data-drafting-entry>
-        <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || draftSaving || translationPreparing || styleChangePending}
-          onClick={draftingChoice.onChoose}>{draftingChoice.label}</Btn>
-        <p className="ol-style-trial-hint">{draftingChoice.hint}</p>
-        {draftingChoice.error && <p role="alert" className="ol-style-trial-hint">{draftingChoice.error}</p>}
-      </div>}
-      {emailDraftingChoice && <div className="ol-style-trial-drafting-choice" data-email-drafting-entry>
-        <Btn size="sm" variant="ghost" disabled={pending || copying || delivering || draftSaving || translationPreparing || styleChangePending}
-          onClick={emailDraftingChoice.onChoose}>{emailDraftingChoice.label}</Btn>
-        <p className="ol-style-trial-hint">{emailDraftingChoice.hint}</p>
-        {emailDraftingChoice.error && <p role="alert" className="ol-style-trial-hint">{emailDraftingChoice.error}</p>}
-      </div>}
+      {taskControl && <TextWorkspaceTask control={taskControl}
+        disabled={pending || copying || delivering || draftSaving || translationPreparing || !!styleChangePending} />}
       {inputOriginName && <p role="note" className="ol-style-trial-hint" data-saved-draft-origin>{t('textWorkspace.savedDraftInput', { name: inputOriginName })}</p>}
       {!translationTarget && previousStep?.translated && <p role="note" className="ol-style-trial-hint" data-translation-refine-hint>{t('textWorkspace.refineTranslationHint')}</p>}
       {!translationTarget && translationReference && onTranslationTargetChange && <div className="ol-style-trial-hint" data-refinement-original-translation>
@@ -552,7 +543,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         <p className="ol-style-trial-hint">{t('textWorkspace.workflowOriginalHint')}</p>
         <pre>{workflowOriginal}</pre>
       </details>}
-      <details className="ol-style-trial-options-panel" data-text-options-panel open={optionsOpen}
+      {(translationTarget || taskControl?.task !== 'draft') && <details className="ol-style-trial-options-panel" data-text-options-panel open={optionsOpen}
         onToggle={event => setOptionsOpen(event.currentTarget.open)}>
         <summary>{translationTarget ? t(offline ? 'textWorkspace.translationOptions' : 'textDraft.cloudTranslationOptions', {
           source: translationSource ? translationLanguageLabel(translationSource, i18n.resolvedLanguage ?? i18n.language) : t('offlineTranslation.chooseSource'),
@@ -560,7 +551,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
           engine: offline ? `${t('offlineTranslation.local')} · ${t(`offlineTranslation.${translationQuality}`)}` : t('offlineTranslation.cloud'),
         }) : t('textWorkspace.styleOptions', { style: presentation.name })}</summary>
       <div className="ol-style-trial-options">
-      {onTranslationTargetChange && <label className="ol-style-trial-picker" data-text-task-choice>
+      {onTranslationTargetChange && !taskControl && <label className="ol-style-trial-picker" data-text-task-choice>
         <span>{t('textWorkspace.task')}</span>
         <select aria-label={t('textWorkspace.task')} value={translationTarget ? 'translate' : 'text'}
           disabled={pending || copying || delivering || draftSaving || styleChangePending || translationPreparing}
@@ -607,11 +598,11 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
         <span>{t('style.trial.styleLabel')}</span>
         <select aria-label={t('style.trial.styleLabel')} value={pack.id} disabled={pending || copying || delivering || draftSaving || styleChangePending}
           onChange={event => onSelectPack(event.target.value)}>
-          {packs.map(option => <option key={option.id} value={option.id}>{stylePackPresentation(option, t).name}</option>)}
+          {packs.filter(option => !taskControl || !isMessageDraftStyle(option)).map(option => <option key={option.id} value={option.id}>{stylePackPresentation(option, t).name}</option>)}
         </select>
       </label>}
       </div>
-      </details>
+      </details>}
       {translationTarget && <p className="ol-style-trial-hint" data-translation-trial-scope>{t('offlineTranslation.trialOnly')}</p>}
       {!translationTarget && <p className="ol-style-trial-hint ol-style-trial-purpose" data-style-trial-purpose>{presentation.description}</p>}
       {(!readiness || !readiness.available || (readiness.requiresTextService && !readiness.textServiceConfigured) || readinessError) && <div className="ol-style-trial-availability">
