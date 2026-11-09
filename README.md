@@ -8,7 +8,7 @@ A microphone, a recording knob and four customizable keys. Speak a message, emai
 
 | Purpose | Direct download |
 | --- | --- |
-| **Windows app** | **[Download MSI · Type build276](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · Type build272](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **Firmware: USB flashing / Bluetooth OTA** | **[Download firmware ZIP · both methods](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 <!-- listener-local-text-entry -->
@@ -39,7 +39,7 @@ Firmware: **ESP32-S3 N16R8**, build `094f5a60049f59f4`. Select the same ZIP for 
 Type defaults to **USB wired flashing**, with the flasher included in the MSI. No Python, ESP-IDF or separate flashing software is required.
 Device settings are independent: select one USB/Bluetooth device and read its settings. Explicit edits save automatically when editing finishes; reading or switching devices does not write computer defaults. Names, lights, power, keys and knob settings stay on the selected board. Use this paired MSI and firmware ZIP.
 
-Type build276 repairs **computer-microphone wake source and identity checks**. Voiceprint comparison for a sufficiently long, reliably timed keyword now uses that keyword’s nearby audio, reducing interference from surrounding speech. A longer keyword can no longer bypass a low owner score merely because of its duration. Recovery after silence and brief local-confirmation failures is included. Short-keyword compatibility remains; this does not guarantee rejection of all TV, replay or other-speaker cases. Build272 trailing-word streaming, normal incremental insertion and completion-only full copying are retained. Computer wake and automatic ending with Volcengine are available in Settings → Recording; other recognition providers use manual ending. The optional wake switch is off by default. Existing voiceprints are retained; Firmware38 is unchanged.
+Type build272 improves **trailing-word streaming with Volcengine**. Stable new words can appear while you continue speaking, instead of waiting for the whole sentence to settle. Incremental insertion and completion-only full copying keep their existing behavior. Bounded fragment confirmation uses your configured recognition service and may add service usage. Computer microphone wake and automatic ending with Volcengine remain available in Settings → Recording; other recognition providers use manual ending. The optional wake switch is off by default. Saved voiceprints and clipboard handoff protection are retained. Firmware38 is unchanged.
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 

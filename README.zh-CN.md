@@ -10,7 +10,7 @@
 
 | 用途 | 直接下载 |
 | --- | --- |
-| **Windows 软件** | **[下载 MSI · Type build276](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows 软件** | **[下载 MSI · Type build272](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **固件：USB 烧写 / 蓝牙 OTA** | **[下载固件 ZIP · 两种方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 <!-- listener-local-text-entry -->
@@ -41,7 +41,7 @@
 Type 默认使用 **USB 有线刷机**，刷机能力已内置；客户无需另装 Python、ESP-IDF 或其它刷机软件。
 设备设置各自独立：选择一台有线／蓝牙设备并读取；完成编辑后自动保存明确修改，读取或切换设备不会写入电脑默认值。名称、灯光、电源、按键和旋钮设置保存在所选设备中。请配套使用本页 MSI 与固件 ZIP。
 
-Type build276 修复**电脑麦克风唤醒的取样与身份检查**：对时间坐标可靠、长度足够的口令，声纹比对改用该口令附近的声音，减少前后讲话干扰；口令较长也不能仅凭时长放行较低的本人分数。同时包含安静后关键词定位恢复和短暂本地确认失败恢复。短口令兼容路径仍保留，不承诺拦住所有电视、录音回放或旁人声音。保留272尾句流式修复、分段上屏和完成后仅复制完整终稿。电脑唤醒与火山识别下的自动结束可在「设置 → 录音」使用，其它识别方式手动结束；唤醒开关默认关闭，已有声纹保留，固件仍为 Firmware38。
+Type build272 改善**火山识别的尾句流式交付**：后面还在继续说时，前面已经稳定的新增内容可以先上屏，减少尾句等整段结束才出现。保留分段上屏、完成后仅复制完整终稿的方式。有界片段确认复用已配置的识别服务，可能增加识别用量。电脑麦克风唤醒与火山识别下的自动结束仍可在「设置 → 录音」使用，其它识别方式手动结束，唤醒开关默认关闭；已有声纹和剪贴板交接保护保留，固件仍为 Firmware38。
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 

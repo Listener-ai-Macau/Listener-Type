@@ -1,25 +1,11 @@
-# Listener v1.0.6-rc1 · Type build276 / Firmware38
+# Listener v1.0.6-rc1 · Type build272 / Firmware38
 
 | Download | File |
 | --- | --- |
-| **Windows app** | **[Download MSI · build276](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · build272](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | Firmware · USB flashing or Bluetooth OTA | [Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip) |
 
-## What’s changed since build272
-
-- **Use the current keyword’s source for computer-wake identity.** With reliable native first/last-token coordinates and at least one second of real source, owner verification uses the keyword window with 200 ms of preceding context and at most 250 ms after the keyword. Earlier speech in the native segment and later dictation no longer supply identity for this path. Original keyword-end body handoff is unchanged. Missing, expired or invalid coordinates cannot authorize an unrelated crop. Genuine short keywords retain the established short-input compatibility path.
-- **Keep keyword length separate from speaker identity.** For this source-bound path, an enrolled owner’s unmatched score below the existing 0.40 fast-local owner floor is rejected even when the complete phrase spans 1.8 seconds or more. The older duration-based full-phrase fallback cannot override that rejection. Existing strict voiceprint matching, independent phrase confirmation, cancellation and session ownership remain required; saved voiceprints, model assets, global thresholds and device owner policy are unchanged.
-- **Recover a reset keyword clock using measured speech.** Included from local build274, an unproven keyword clock can use the existing VAD’s measured source onset to propose a strict native re-decode. Only native word coordinates within actual retained PCM prove the keyword end. VAD does not choose that end or stop dictation; no new permanent standby inference loop or model download is added.
-- **Recover confirmation within the same capture.** Included from local build273, temporary confirmation-helper readiness and one changed-context retry share the original four-second budget and retained-source limits. Complete-phrase-at-start, generation, cancellation and one-time recorder handoff protections remain; the first positive confirmation adds no wait.
-- **Retain the delivered dictation behavior.** Build272 trailing-word streaming, the native Volcengine quiet-ending path, normal incremental paste and completion-only full copying remain. This update does not change firmware or board wake policy.
-
-The old segment-wide input admitted the wrong synthetic voice in a two-voice native test. With the focused source and production admission, the keyword’s voice was accepted and the earlier voice rejected. A separate slower-phrase control exposed a remaining duration fallback in candidate275: its 2.370-second focused input scored 0.3676 for the wrong voice yet was still admitted. That completed candidate was withheld from installation and publication; build276 rejects that control and accepts its correct speaker. These are controlled synthetic source-mixing cases, not a measured population false-accept rate or replay/liveness test.
-
-In one explicitly started, in-memory real microphone comparison, the same phrase’s old segment score was 0.3221 and its focused-source score was 0.4226, passing the existing strict 0.42 verifier. The old loose policy would also have admitted that particular trial; it did not reproduce the earlier rejected owner attempt. No diagnostic recording, transcript or voiceprint feature was saved. Build276 has been installed locally with its selected input, preferences and history preserved, and real microphone PCM/listening readiness checked. In the shared normal-use feedback popup, the user subsequently selected “Normal” for first-attempt capsule appearance and automatic ending. This is a user report, without an independent editor/clipboard read; all short-keyword cases, other rooms/speakers and long-term intermittent reliability remain open.
-
-## Included from build272
-
-### Trailing-word streaming since build271
+## What’s changed since build271
 
 - **Confirm an unchanged new prefix while later words keep arriving.** The pending-fragment worker now uses the existing rolling revision ledger to plan complete, mature words after the submitted source boundary. Appended live words no longer restart the age of that earlier prefix or block an already-confirmed same-source result. The existing one-second maturity/context, sixty-second clip bound, single in-flight request and cumulative two-times-PCM replay budget remain in force.
 - **Accept a new-only decoder result at the correct audio occurrence.** A cropped decoder can legitimately omit the old, already-submitted context. For admitted ordinary capture, its first word must start after the submitted interval and match the first unsubmitted parent occurrence using the existing unique whole-token/retained-PCM midpoint matcher. A later repetition, unknown timing or overlapping old interval cannot skip words or repeat a submitted prefix. New words retain the child decoder’s own confirmation and coordinates and must match the current parent prefix. A conflicting child rendering stays pending. Identity-projected sources keep their existing strict seam/ownership checks.
@@ -103,21 +89,15 @@ US$49 is the hardware price. Type is free and open source. No ready-to-use offic
 
 ## File identity
 
-- Windows runtime source: `c8dd8a5d590770980a4ec31c73416da977a6da82` · build276.
-- Windows MSI: 305733632 bytes · SHA256 `55ba0499cd7a4bc81801efa72cb1c153bd5993668ca37b08731bf30f395dddc2`.
+- Windows runtime source: `3aa74d5e22894f1c1e10b531b8aeba9b3c032ebf` · build272.
+- Windows MSI: 305717248 bytes · SHA256 `e4ad7090a10dd1aeb11d65e4db1dadff05929458c48b91eba4abd34efb562823`.
 - The release tag includes a documentation-only follow-up that aligns the download pages; application/build inputs match the runtime source above.
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`.
 - Firmware ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`.
 
 ## 中文说明
 
-本次发布已在本机安装并核对启动的 Type276，集中修复电脑麦克风唤醒的源时间恢复、同次确认恢复与身份取样。原生segment起点可能包含唤醒词之前的讲话，旧补窗也可能引入后面正文。对有可靠首末token坐标且真实长度足够的口令，本版只取当前词附近前200ms／后最多250ms做声纹比对，正文仍按原词尾交接。缺失、过期、未来或损坏坐标不能借其它片段授权；真实不足模型1秒输入的短口令保留既有兼容路径，该范围未冒称全部修复。新source-bound路径中，已登记本人未匹配且低于现有0.40快速本人底线时，即使完整词达到1.8秒也不得由旧时长回退放行；未改已有声纹、模型、全局门限或板子判定。
-
-受控双声音真实模型对照中，原宽输入会接受前面错误声音，新生产入口拒绝错误者、接受当前词说话人。较慢口令另暴露候选275仍被旧时长回退放行：2.370秒窗口错误者0.3676仍通过；275虽已打包，但未安装／未公开，失败保留。276补齐源身份拒绝，慢口令错误者被拒、真正说话人通过。一次经明确开始的真人同源内存对照，旧窗口0.3221、新窗口0.4226通过原严格0.42；该次旧宽松策略本来也会放行，不能称复现或根治了此前0.18拒绝。未保存诊断音频、文字或声纹特征。已验证276安装文件、实际电脑源PCM／待机启动、偏好和历史保留。随后Owner在原共用正常使用反馈弹窗，对“第一遍出现胶囊并正常自动结束”选择“正常”；这是本人使用回传，未独立读取编辑框或剪贴板，未把启动就绪冒充实际验收。电视、本人录音回放、所有短口令及长期／跨房间表现仍待实际使用判断。
-
-包含273同次采集的本地词确认短暂失败恢复和274安静后词时间恢复：仍受原4秒预算、真实保留音频、完整词开头确认与取消／一次交接保护；可靠词尾由原生KWS提供，VAD只建议裁片，不决定词尾或自动结束，不新增常驻模型。273、274本机仍有漏唤醒的旧反馈继续保留，两者未单独公开。原3秒安静收尾、272尾句普通流式、历史和完成后仅复制完整终稿保持；固件仍为38。
-
-包含已交付的Type272尾句流式修复：尾句补确认改为复用原滚动稳定记录，先处理已提交源边界之后的完整稳定新词，后续加字不再把前面稳定部分一起重等；同源child已确认结果也不再被父候选的新增长挡住。裁片识别若省略已上屏旧上下文，只有其第一个新词确实对应父流第一个未提交音频发生，才沿原whole-token／PCM midpoint匹配接续；不能跳到后面的重复词、借用父词时间或覆盖已提交内容。子结果与当前父文本冲突的部分继续待确认。保留原成熟／上下文时长、60秒单片／累计2倍PCM、单请求、防过期与身份边界，严格身份投影路径保持。
+本次发布已在本机安装验证的 Type272。尾句补确认改为复用原滚动稳定记录，先处理已提交源边界之后的完整稳定新词，后续加字不再把前面稳定部分一起重等；同源child已确认结果也不再被父候选的新增长挡住。裁片识别若省略已上屏旧上下文，只有其第一个新词确实对应父流第一个未提交音频发生，才沿原whole-token／PCM midpoint匹配接续；不能跳到后面的重复词、借用父词时间或覆盖已提交内容。子结果与当前父文本冲突的部分继续待确认。保留原成熟／上下文时长、60秒单片／累计2倍PCM、单请求、防过期与身份边界，严格身份投影路径保持。
 
 完整非私人合成语音实测中，父流仍在加字时，新片段在6.330秒可交付，较等待下一主批10.039秒约早3.709秒，42字完整终稿保留。该对照是本批首个未发布候选的受阻路径，不是所有输入、271或整机CPU的固定降幅；本机272实际听写中，Owner回传“尾句更及时，也能自动结束”；数字记录为20／13／21字三次普通流式分批，全部54字在自动STOP前约2.88秒已派发，随后54字完整复制Stored、恢复待机，无收尾补粘贴。未独立读取输入框或剪贴板正文，单次正常不外推全部间歇场景。片段确认使用已配置识别服务，可能增加有界用量。当前自动结束、原流式粘贴、历史以及完成后仅完整复制保持。
 
