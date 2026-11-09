@@ -14,7 +14,7 @@ type Group = typeof layoutGestures[number];
 const primaryKeys = ['RightControl','LeftControl','RightShift','LeftShift','RightAlt','LeftAlt', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', 'Enter','Tab','Space','Escape','Backspace','Delete','Insert','Home','End','PageUp','PageDown','ArrowUp','ArrowDown','ArrowLeft','ArrowRight', ...Array.from({length:12},(_,i)=>`F${i+1}`)];
 const overviewLayoutKey = 'ol.overviewLastDeviceLayout';
 
-export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPractice = false, initialPhrases = false, rememberSelection = false, incomingText, phraseOrigin = 'trial', onUseLayout, onLeaveForPage, onClose }: {
+export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPractice = false, initialPhrases = false, rememberSelection = false, incomingText, phraseOrigin = 'trial', returnLabel, onUseLayout, onLeaveForPage, onClose }: {
   initialProfile?: DeviceKeyProfile;
   initialKnob?: DeviceKnobRotationAction;
   initialPractice?: boolean;
@@ -22,6 +22,7 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
   rememberSelection?: boolean;
   incomingText?: string;
   phraseOrigin?: 'trial' | 'savedDraft';
+  returnLabel?: string;
   onUseLayout?: (layout: DeviceLayout) => void;
   onLeaveForPage?: () => void;
   onClose: () => void;
@@ -30,6 +31,8 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
   const openPage = useContext(DevicePageNavigationContext);
   const dialog = useRef<HTMLDialogElement>(null);
   const actionDetails = useRef<HTMLDivElement>(null);
+  const actionEditor = useRef<HTMLDivElement>(null);
+  const phraseEditor = useRef<HTMLElement>(null);
   const revealActionDetails = useRef(false);
   const alive = useRef(true);
   const initialRestore = useRef(true);
@@ -49,6 +52,8 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
   const [usePhrases, setUsePhrases] = useState(initialPhrases);
   const [practiceRevision, setPracticeRevision] = useState(0);
   const [phrase, setPhrase] = useState(incomingText ?? '');
+  const [useIncomingPhrase, setUseIncomingPhrase] = useState(incomingText !== undefined);
+  const phraseMode = incomingText !== undefined && useIncomingPhrase;
   const phraseCheckpoint = useRef(incomingText ?? '');
   const [message, setMessage] = useState('');
   const [confirmation, setConfirmation] = useState<{ text: string; action: () => void } | null>(null);
@@ -59,9 +64,10 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
     if (!revealActionDetails.current) return;
     revealActionDetails.current = false;
     const container = dialog.current;
-    const details = actionDetails.current;
+    const parameters = actionDetails.current;
+    const details = phraseMode ? phraseEditor.current : parameters?.offsetHeight ? parameters : actionEditor.current;
     if (!container || !details || !details.offsetHeight) return;
-    // Reveal parameters only after an explicit action selection. Scrolling the
+    // Reveal editing only after an explicit action or purpose selection. Scrolling the
     // dialog itself keeps keyboard focus and the rest of the page unchanged.
     const bounds = container.getBoundingClientRect();
     const scale = bounds.height / container.offsetHeight || 1;
@@ -74,7 +80,7 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
     const delta = field.height > bottom - top || field.top < top ? field.top - top
       : field.bottom > bottom ? field.bottom - bottom : 0;
     container.scrollTop += delta / scale;
-  }, [mapping.action]);
+  }, [mapping.action, phraseMode]);
   const gestureSelect = key !== 'knob' && <label>{t('deviceLayouts.gesture')}<select aria-label={t('deviceLayouts.gesture')} value={group} onChange={event => setGroup(event.target.value as Group)}>
     {layoutGestures.map((value, i) => <option key={value} value={value}>{t(`settings.deviceKeys.gestures.${['singleClick','doubleClick','longPress'][i]}`)}</option>)}
   </select></label>;
@@ -155,11 +161,11 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
     onCancel={event => { event.preventDefault(); event.stopPropagation(); if (!busy) closeAttempt(); }}>
     <div className="ol-device-layout-nav">
     <div className="ol-device-layout-heading">
-      <h2 id="device-layout-title">{t('deviceLayouts.title')}</h2>
-      <Btn size="sm" variant="ghost" disabled={busy} onClick={closeAttempt}>{t('common.close')}</Btn>
+      <h2 id="device-layout-title">{t(usePhrases ? 'savedPhrases.title' : practice ? 'guidedSetup.practiceTitle' : 'deviceLayouts.title')}</h2>
+      <Btn size="sm" variant="ghost" disabled={busy} onClick={closeAttempt}>{returnLabel ?? t('common.close')}</Btn>
     </div>
     <div className="ol-device-layout-mode" role="group" aria-label={t('devicePractice.mode')}>
-      <button type="button" aria-pressed={!practice && !usePhrases} disabled={busy} onClick={() => { setUsePhrases(false); setPractice(false); }}>{t('devicePractice.configure')}</button>
+      <button type="button" aria-pressed={!practice && !usePhrases} disabled={busy} onClick={() => { setUsePhrases(false); setPractice(false); }}>{t('guidedSetup.editLayout')}</button>
       <button type="button" aria-pressed={practice && !usePhrases} disabled={busy} onClick={() => { setUsePhrases(false); setPractice(true); }}>{t('devicePractice.practice')}</button>
       <button type="button" aria-pressed={usePhrases} disabled={busy} onClick={() => { setUsePhrases(true); setPractice(false); }}>{t('savedPhrases.title')}</button>
     </div>
@@ -188,9 +194,16 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
       </div>
       <label className="ol-device-layout-name">{t('deviceLayouts.name')}<input aria-label={t('deviceLayouts.name')} maxLength={80} value={name}
         placeholder={t('deviceLayouts.namePlaceholder')} onChange={event => { setName(event.target.value); markDirty(); }} /></label>
+      {incomingText !== undefined && <div data-layout-purpose>
+        <div role="group" aria-label={t('guidedSetup.layoutPurpose')} className="ol-device-layout-mode">
+          <button type="button" aria-pressed={useIncomingPhrase} onClick={() => { if (!useIncomingPhrase) { revealActionDetails.current = true; setUseIncomingPhrase(true); } }}>{t('guidedSetup.useFixedText')}</button>
+          <button type="button" aria-pressed={!useIncomingPhrase} onClick={() => { if (useIncomingPhrase) { revealActionDetails.current = true; setUseIncomingPhrase(false); } }}>{t('guidedSetup.otherKeyAction')}</button>
+        </div>
+        {!useIncomingPhrase && <p className="ol-device-layout-hint">{t('guidedSetup.otherKeyHint')}</p>}
+      </div>}
       <p className="ol-device-layout-hint">{t('deviceLayouts.pickKey')}</p>
       <DeviceLayoutMap profile={profile} group={group} selected={key} onSelect={setKey}>
-      {incomingText !== undefined && <section className="ol-device-layout-editor" aria-label={t('keyPhrase.title')}>
+      {phraseMode && <section ref={phraseEditor} className="ol-device-layout-editor" aria-label={t('keyPhrase.title')}>
         {gestureSelect}
         <label>{t('keyPhrase.text')}<textarea aria-label={t('keyPhrase.text')} rows={3} maxLength={2000} value={phrase} onChange={event => setPhrase(event.target.value)} /></label>
         <p className="ol-device-layout-hint">{t(phraseOrigin==='savedDraft'?'textDraft.keyPhraseHint':'keyPhrase.hint')}</p>
@@ -199,11 +212,10 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
           {t('keyPhrase.use', {key:key === 'knob' ? t('settings.deviceKeys.knob.title') : t('deviceLayouts.key', {number:key.slice(3)}), gesture:t(`settings.deviceKeys.gestures.${key === 'knob' ? 'singleClick' : ['singleClick','doubleClick','longPress'][layoutGestures.indexOf(group)]}`)})}
         </Btn>
       </section>}
-      <details className="ol-device-key-options" open={incomingText === undefined ? true : undefined}>
-      <summary hidden={incomingText === undefined}>{t('keyActionHelp.moreOptions')}</summary>
-      <div className="ol-device-layout-editor">
+      {!phraseMode && <div className="ol-device-key-options">
+      <div ref={actionEditor} className="ol-device-layout-editor">
         <h3>{key === 'knob' ? t('settings.deviceKeys.knob.title') : t('deviceLayouts.key', { number: key.slice(3) })}</h3>
-        {incomingText === undefined && gestureSelect}
+        {gestureSelect}
         <label>{t('deviceLayouts.action')}<select aria-label={t('deviceLayouts.action')} value={mapping.action} onChange={event => {
           const action = event.target.value as DeviceCustomKeyMapping['action'];
           revealActionDetails.current = true;
@@ -232,7 +244,7 @@ export function DeviceLayoutsDialog({ initialProfile, initialKnob, initialPracti
         </>}
         </div>
       </div>
-      </details>
+      </div>}
       </DeviceLayoutMap>
       <p className="ol-device-layout-hint">{t('deviceLayouts.requirements')}</p>
       {message && <p role="status">{message}</p>}

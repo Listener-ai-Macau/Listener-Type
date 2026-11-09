@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../../components/Icon';
 import { ProviderSetupGuide } from '../../components/ProviderSetupGuide';
+import { ProviderPurposePanels } from '../../components/ProviderPurposePanels';
 import { detectOS } from '../../components/WindowChrome';
 import {
   listProviderModels,
@@ -535,7 +536,8 @@ export function ProvidersSection({ onOpenLocalAsr, prioritizeTextService = false
       <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.6, marginBottom: 10 }}>
         {t('settings.providers.credentialStorageNotice')}
       </div>
-      {textOnly ? llmCard : speechOnly ? asrCard : prioritizeTextService ? [llmCard, asrCard] : [asrCard, llmCard]}
+      <ProviderPurposePanels speech={asrCard} text={llmCard} prioritizeText={prioritizeTextService}
+        textOnly={textOnly} speechOnly={speechOnly} />
     </>
   );
 }
@@ -931,6 +933,7 @@ function CredentialField({ label, account, placeholder, mono, mask, defaultValue
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', width: '100%', maxWidth: 420 }}>
         <input
           type={inputType}
+          aria-label={label}
           value={value}
           placeholder={loaded ? placeholder : t('common.loading')}
           onChange={handleChange}

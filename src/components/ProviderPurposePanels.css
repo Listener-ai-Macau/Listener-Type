@@ -1,0 +1,4 @@
+.ol-provider-purpose { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+.ol-provider-purpose button { border: 1px solid var(--ol-line-strong); border-radius: 8px; padding: 9px 14px; background: var(--ol-surface); color: var(--ol-ink-2); font: inherit; font-size: 13px; cursor: pointer; }
+.ol-provider-purpose button[aria-pressed=true] { border-color: var(--ol-blue); background: var(--ol-blue-soft); color: var(--ol-ink); }
+.ol-provider-purpose button:focus-visible { outline: 2px solid var(--ol-blue); outline-offset: 2px; }

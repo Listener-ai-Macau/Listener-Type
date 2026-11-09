@@ -24,6 +24,7 @@ import { qaPreparationMessages } from './qaPreparation';
 import { sourceFactMessages } from './sourceFacts';
 import { settingsOrganizationMessages } from './settingsOrganization';
 import { simpleTextWorkflowMessages } from './simpleTextWorkflow';
+import { guidedSetupMessages } from './guidedSetup';
 
 export const SUPPORTED_LOCALES = ['zh-CN', 'zh-TW', 'en', 'ja', 'ko'] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
@@ -105,6 +106,14 @@ for (const [locale, simpleTextWorkflow] of Object.entries(simpleTextWorkflowMess
     simpleTextWorkflow,
     textWorkspace: { title: simpleTextWorkflow.workspace },
     style: { trial: { styleLabel: simpleTextWorkflow.styleLabel } },
+  }, true, true);
+}
+for (const [locale, guidedSetup] of Object.entries(guidedSetupMessages)) {
+  i18n.addResourceBundle(locale, 'translation', {
+    guidedSetup,
+    keyPhrase: { open: guidedSetup.fixedTextEntry },
+    textWorkspace: { styleOptions: guidedSetup.styleSummary },
+    settings: { providers: { asrTitle: guidedSetup.speechTitle, llmTitle: guidedSetup.textTitle, llmDesc: guidedSetup.textDescription } },
   }, true, true);
 }
 

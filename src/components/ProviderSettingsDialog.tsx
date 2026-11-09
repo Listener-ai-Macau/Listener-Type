@@ -35,7 +35,7 @@ export function ProviderSettingsDialog({ kind, onClose }: { kind: 'text' | 'spee
     onCancel={event => { event.preventDefault(); void close(); }}>
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
       <h2>{title}</h2>
-      <Btn variant="ghost" disabled={saving} onClick={() => void close()}>{t(saving ? 'common.saving' : 'common.close')}</Btn>
+      <Btn variant="ghost" disabled={saving} onClick={() => void close()}>{t(saving ? 'common.saving' : kind === 'text' ? 'guidedSetup.backToText' : 'guidedSetup.backToAudio')}</Btn>
     </div>
     <p className="ol-style-trial-hint">{t(`${copy}.setupReturn`)}</p>
     <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>

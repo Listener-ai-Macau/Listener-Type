@@ -29,6 +29,7 @@ export function SavedTextDraftsDialog({onClose,initialDraftId,onUnavailable,onCo
     leaveConfirmation.current?.querySelector('button')?.focus({preventScroll:true});
   },[leaveTarget]);
   const [keyPhrase,setKeyPhrase]=useState<string|null>(null);
+  const childOpen=workspaceOpen||keyPhrase!==null;
   const [nameEdit,setNameEdit]=useState(''),[nameError,setNameError]=useState(''),[namedId,setNamedId]=useState('');
   const selected=items.find(d=>d.id===selectedId);
   const nameDirty=!!selected&&!editing&&nameEdit!==selected.name;
@@ -65,9 +66,9 @@ export function SavedTextDraftsDialog({onClose,initialDraftId,onUnavailable,onCo
   useEffect(()=>{alive.current=true;void refresh();return()=>{alive.current=false;};},[]);
   useEffect(()=>{
     const element=dialog.current;
-    if(!workspaceOpen){element?.showModal();if(element)element.scrollTop=dialogScroll.current;}
+    if(!childOpen){element?.showModal();if(element)element.scrollTop=dialogScroll.current;}
     return()=>{if(element?.open)dialogScroll.current=element.scrollTop;element?.close();};
-  },[workspaceOpen]);
+  },[childOpen]);
   const copy=async()=>{if(!selected||running.current)return;const value=selected;running.current=true;setBusy(true);setError('');setCopied('');try{await copyExplicitText(value.text,detectOS()==='win');if(alive.current)setCopied(value.id);}catch{if(alive.current)setError(t('textDraft.copyFailed'));}finally{running.current=false;if(alive.current)setBusy(false);}};
   const remove=async()=>{if(!selected||running.current)return;const id=selected.id;running.current=true;setBusy(true);setError('');try{await deleteSavedTextDraft(id);if(alive.current){setItems(current=>current.filter(d=>d.id!==id));setSelected(items.find(d=>d.id!==id)?.id??'');setConfirm(false);setCopied('');onUnavailable?.(id);}}catch{if(alive.current)setError(t('textDraft.deleteFailed'));}finally{running.current=false;if(alive.current)setBusy(false);}};
   const rename=async()=>{
@@ -136,7 +137,7 @@ export function SavedTextDraftsDialog({onClose,initialDraftId,onUnavailable,onCo
     {error&&<p role="alert">{error}</p>}
     <details className="ol-style-trial-details"><summary>{t('textWorkspace.draftsDetails')}</summary><p className="ol-device-layout-hint">{t('textDraft.intro')}</p></details>
   </dialog>{keyPhrase!==null&&<DeviceLayoutsDialog rememberSelection initialProfile={writingDeviceKeyProfile()}
-    incomingText={keyPhrase} phraseOrigin="savedDraft" onLeaveForPage={onClose} onClose={()=>setKeyPhrase(null)}/>}
+    incomingText={keyPhrase} phraseOrigin="savedDraft" returnLabel={t('guidedSetup.backToSaved')} onLeaveForPage={onClose} onClose={()=>setKeyPhrase(null)}/>}
     {workspace&&<QuickStyleTextTrial inputOriginName={workspace.name} inputOriginal={workspace.original} draft={workspace.text}
       onDraftChange={text=>setWorkspace(current=>current?{...current,text}:null)}
       onClose={()=>{setWorkspace(null);void refresh();}}/>}</>;

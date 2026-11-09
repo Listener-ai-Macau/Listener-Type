@@ -53,7 +53,9 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, ta
   const workspaceId = useId();
   const [draftNameEdit, setDraftNameEdit] = useState<string | null>(null);
   const [localLibrary, setLocalLibrary] = useState<{ id: string; onUnavailable: (id: string) => void } | null>(null);
-  const modalSuspended = suspended || localLibrary !== null;
+  const [keyPhrase, setKeyPhrase] = useState<string | null>(null);
+  const [providersOpen, setProvidersOpen] = useState(false);
+  const modalSuspended = suspended || localLibrary !== null || keyPhrase !== null || providersOpen;
   const [translationOriginName, setTranslationOriginName] = useState(inputOriginName ?? '');
   const [translationEngine, setTranslationEngine] = useState<TranslationEngine>(initialTranslationEngine ?? 'local');
   const [translationSource, setTranslationSource] = useState(initialTranslationSource ?? '');
@@ -87,7 +89,6 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, ta
   const [shortening, setShortening] = useState(false);
   const [draftSaving, setDraftSaving] = useState(false);
   const [savedDraftSignature, setSavedDraftSignature] = useState('');
-  const [keyPhrase, setKeyPhrase] = useState<string | null>(null);
   const [storedResult, setResult] = useState<StyleTextTrialResult | null>(null);
   const [resultSignature, setResultSignature] = useState('');
   const [editedOutput, setEditedOutput] = useState<string | null>(null);
@@ -136,7 +137,6 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, ta
   const readinessError = currentReadiness?.failed ?? false;
   // All entry points keep this workspace mounted during service setup. A host
   // navigation callback must not discard paid results, edits, or pending work.
-  const [providersOpen, setProvidersOpen] = useState(false);
   const deliveryRequest = useRef<string | null>(null);
   const [deliveryStarted, setDeliveryStarted] = useState<number | null>(null);
   const [deliverySeconds, setDeliverySeconds] = useState(5);
@@ -632,7 +632,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, ta
         }}
       />
       <div className="ol-style-trial-input-save" data-workspace-input-save>
-        <SaveTextDraft kind="input" name={withDraftOriginName(presentation.name, t('textWorkspace.inputDraft'))}
+        <SaveTextDraft kind="input" name={withDraftOriginName(inputOriginName ?? '', t('textWorkspace.inputDraft'))}
           original={originalForSave} text={draft}
           disabled={pending || copying || delivering || draftSaving || translationPreparing || !!styleChangePending}
           onBusy={setDraftSaving} onOpenSaved={(id, onUnavailable) => {
@@ -793,8 +793,9 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, ta
         </p>}
         {error && <p role="alert" className="ol-style-trial-submit-error">{error}</p>}
       </div>
-      {keyPhrase !== null && <DeviceLayoutsDialog rememberSelection initialProfile={writingDeviceKeyProfile()} incomingText={keyPhrase} onLeaveForPage={onClose} onClose={() => setKeyPhrase(null)} />}
     </dialog>
+    {keyPhrase !== null && <DeviceLayoutsDialog rememberSelection initialProfile={writingDeviceKeyProfile()} incomingText={keyPhrase}
+      returnLabel={t('guidedSetup.backToText')} onLeaveForPage={onClose} onClose={() => setKeyPhrase(null)} />}
     {providersOpen && <ProviderSettingsDialog kind="text" onClose={() => {
       setProvidersOpen(false); setReadinessAttempt(value => value + 1);
     }} />}
