@@ -1,9 +1,19 @@
-# Listener v1.0.6-rc1 · Type build282 / Firmware38
+# Listener v1.0.6-rc1 · Type build283 / Firmware38
 
 | Download | File |
 | --- | --- |
-| **Windows app** | **[Download MSI · build282](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · build283](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | Firmware · USB flashing or Bluetooth OTA | [Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip) |
+
+## What’s changed since build282
+
+- **Keep the tray menu for everyday use.** Removed the internal acceptance-checklist entry and its window-opening handler. Existing style, theme, input source, microphone and quit actions keep their IDs and selection behavior.
+- **Native menus follow your interface language.** Simplified Chinese, Traditional Chinese, English, Japanese and Korean now cover tray headings, styles, microphone status and network tooltips. The main window synchronizes the UI language through a separate display-only preference, retained across restarts; Follow system uses the system language. Secondary windows do not overwrite it, and queued older language changes cannot replace a later main-window choice. Native-menu synchronization writes only its display preference; the existing language-selection behavior is retained.
+- **Complete device-maintenance translations.** Added the missing device-read/save and USB/Bluetooth maintenance messages in all four non-English locales. All five effective resource bundles have matching keys and interpolation variables. Common settings and maintenance pages, the actual language picker and narrow navigation were exercised in each locale. No firmware update or device write was performed by these checks.
+
+Controlled native checks covered locale persistence/system resolution and the existing menu IDs and selection. Isolated frontend transport checks covered main-window synchronization, rapid choices and secondary-window exclusion. Recording, wake thresholds, automatic ending, streaming/final-copy implementation, providers, dependencies and Firmware38 are unchanged. These checks do not close the original intermittent wake or other real-use limits.
+
+## Included from build282
 
 ## What’s changed since build281
 
@@ -159,15 +169,17 @@ US$49 is the hardware price. Type is free and open source. No ready-to-use offic
 
 ## File identity
 
-- Windows runtime source: `14c99b45b2245ac764cfc7bcc66062c2be866db2` · build282.
-- Windows MSI: 305717248 bytes · SHA256 `849dbdb070962de1b92619abd926fbb1a80d7f234912177bb36602aaffa61ed6`.
+- Windows runtime source: `67034b7af82d481cebea772022191e290173ac63` · build283.
+- Windows MSI: 305762304 bytes · SHA256 `6cc6796ebbff19a5ba66215a18879dddd6740586395c1d29ac0f7cec0a2a0191`.
 - The release tag includes a documentation-only follow-up that aligns the download pages; application/build inputs match the runtime source above.
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`.
 - Firmware ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`.
 
 ## 中文说明
 
-本次Type282：设备移到快捷键上方；去掉流式输入开关，旧配置里已经迁移过的关闭值也统一启用并持久化。录音逐段上屏、润色流式与原平台/提供方兼容保护保留；结束后复制完整终稿、自动发送等独立选项不变，不重新粘贴整稿。录音/收尾/粘贴实现、声纹门限、模型和FW38未改，旧间歇唤醒仍开放。
+本次Type283：托盘移除内部验收清单入口，日常菜单与网络悬停提示跟随简中／繁中／英文／日文／韩文；界面语言独立保存，主窗口串行同步，其它窗口不覆盖。补齐设备和固件维护页漏译，五套资源键及插值变量一致。录音、声纹、结束、流式、完整复制、设备写入实现及FW38不变，原真实使用范围继续保留。
+
+此前Type282：设备移到快捷键上方；去掉流式输入开关，旧配置里已经迁移过的关闭值也统一启用并持久化。录音逐段上屏、润色流式与原平台/提供方兼容保护保留；结束后复制完整终稿、自动发送等独立选项不变，不重新粘贴整稿。录音/收尾/粘贴实现、声纹门限、模型和FW38未改，旧间歇唤醒仍开放。
 
 此前Type281：服务按声音转文字／文字处理分开查看，隐藏时仍保留表单和保存状态；文字工作区、已保存文字进入子设置／按键布局时暂停父窗口显示，返回保留原内容，凭据待保存完成再返回。固定短语和其它按键动作分开选择，窄窗主动切换会显示编辑区；输入草稿不以尚未应用的风格命名，风格摘要明确可更改。保存格式、原文、布局权限、真实提供商、录音、唤醒、流式／完整复制及FW38不变；原间歇唤醒仍开放。
 
