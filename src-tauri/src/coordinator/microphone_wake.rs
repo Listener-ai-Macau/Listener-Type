@@ -535,7 +535,7 @@ fn verify_keyword_owner(
     let result=verify(&pcm);
     if cancel.load(Ordering::SeqCst) { return false; }
     log::info!("[microphone-wake] owner input source=keyword_tokens start_ms={} end_ms={} pcm_ms={} legacy_pcm_ms={}",start/32,end/32,pcm.len()/32,candidate.len()/32);
-    super::dictation::microphone_wake_owner_allowed(true,local_relation,pcm.len()/32,&result)
+    super::dictation::microphone_keyword_owner_allowed(true,local_relation,pcm.len()/32,&result)
 }
 
 fn run_detector(

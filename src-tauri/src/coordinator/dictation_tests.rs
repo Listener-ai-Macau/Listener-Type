@@ -12036,6 +12036,25 @@ fn rolling_wake_match_keeps_absolute_candidate_boundary() {
     assert!((adjusted.audio_end_seconds.expect("proven keyword end") - 2.25).abs() < f32::EPSILON);
 }
 
+#[cfg(target_os = "windows")]
+#[test]
+fn source_bound_microphone_owner_does_not_gain_identity_from_keyword_duration() {
+    use crate::speaker_verification::{VerificationPolicy,VerificationResult};
+    let relation=Some(crate::wake_phrase::LocalPhraseRelation::ExactStart);
+    let foreign=Ok(VerificationResult {matched:false,owner_matched:false,score:0.36758468,policy:VerificationPolicy::Enrolled});
+    assert!(super::microphone_wake_owner_allowed(true,relation,2370,&foreign),"retain evidence of the old duration-based false admission");
+    for pcm_ms in [1090,1690,1800,2370,6000] {
+        assert!(!super::microphone_keyword_owner_allowed(true,relation,pcm_ms,&foreign));
+    }
+    let owner=Ok(VerificationResult {matched:true,owner_matched:true,score:0.42257184,policy:VerificationPolicy::Enrolled});
+    assert!(super::microphone_keyword_owner_allowed(true,relation,1170,&owner));
+    assert!(!super::microphone_keyword_owner_allowed(false,relation,1170,&owner));
+    assert!(!super::microphone_keyword_owner_allowed(true,None,1170,&owner));
+    assert!(!super::microphone_keyword_owner_allowed(true,relation,2370,&Err("unavailable".into())));
+    let open=Ok(VerificationResult {matched:true,owner_matched:false,score:0.0,policy:VerificationPolicy::OpenUnenrolled});
+    assert!(super::microphone_keyword_owner_allowed(true,relation,1170,&open));
+}
+
 #[test]
 fn rolling_local_confirmation_restarts_the_800ms_ladder_per_window() {
     let origin = 1_000 * 32;

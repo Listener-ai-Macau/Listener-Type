@@ -4362,15 +4362,17 @@ mod platform {
             assert!(old_wrong_speaker > focused_wrong_speaker,"exclude earlier different-speaker source");
             assert!(focused_correct_speaker >= VERIFICATION_THRESHOLD,"keep the actual keyword speaker");
             assert!(allowed(old_pcm,old_wrong_speaker),"reproduce actual old admission of the earlier speaker");
-            assert!(!allowed(focused_pcm,focused_wrong_speaker),"the current keyword cannot inherit the earlier speaker's identity");
             assert!(allowed(focused_pcm,focused_correct_speaker));
+            let mut actual_admissions=Vec::new();
             for (reference,expected) in [(&prefix_reference,false),(&keyword_reference,true)] {
                 let actual=crate::coordinator::diagnostic_source_owner_admission(&pcm,&found,|input| {
                     let value=score(reference,input);
                     Ok(super::super::VerificationResult { matched:value>=VERIFICATION_THRESHOLD,owner_matched:value>=VERIFICATION_THRESHOLD,score:value,policy:super::super::VerificationPolicy::Enrolled })
                 });
+                actual_admissions.push(actual);
                 assert_eq!(actual,expected,"actual native owner admission must use the keyword source");
             }
+            eprintln!("identity-source-admission actual_wrong_allowed={} actual_correct_allowed={}",actual_admissions[0],actual_admissions[1]);
             assert_eq!(pcm[old_end..], [&keyword[old_end-prefix_ms*32..], &vec![0;500*32]].concat());
         }
 
