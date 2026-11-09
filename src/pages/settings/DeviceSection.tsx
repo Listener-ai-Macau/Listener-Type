@@ -30,12 +30,11 @@ import type {
   DeviceSettingsUpdateRequest,
   SettingsDevice,
   InstalledApplication,
-  PostDictationKey,
   ShortcutBinding,
   VoiceprintStatus,
 } from '../../lib/types';
 import { useHotkeySettings } from '../../state/HotkeySettingsContext';
-import { Btn, Card } from '../_atoms';
+import { Btn, Card, Collapsible } from '../_atoms';
 import { FirmwareOtaPanel } from './FirmwareOtaPanel';
 import { VoiceprintEnrollmentWizard } from './VoiceprintEnrollmentWizard';
 import { inputStyle, SettingRow, Toggle } from './shared';
@@ -177,12 +176,15 @@ function isDeviceFallbackReservedPrimary(primary: string): boolean {
 }
 
 export function DeviceSection() {
+  const { t } = useTranslation();
   const [selectedDevice, setSelectedDevice] = useState<SettingsDevice | null>(null);
   const [selectedValue, setSelectedValue] = useState<SelectedDeviceSettings | null>(null);
   return <>
     <DeviceFirmwareSettingsCard onSelectedChange={device => { setSelectedDevice(device); setSelectedValue(null); }} onRead={setSelectedValue} />
     <SelectedDeviceKeysCard key={selectedDevice?.id ?? 'none'} device={selectedDevice} value={selectedValue} onRead={setSelectedValue} />
-    <FirmwareOtaPanel supported={detectOS() === 'win'} />
+    <Collapsible title={t('settingsOrganization.deviceMaintenance')} desc={t('settingsOrganization.deviceMaintenanceDesc')} deferMount>
+      <FirmwareOtaPanel supported={detectOS() === 'win'} />
+    </Collapsible>
   </>;
 }
 const emptyDeviceKeyProfile = defaultDeviceKeyProfile;
@@ -873,65 +875,6 @@ function DeviceFirmwareSettingsCard({onSelectedChange,onRead}:{onSelectedChange:
                   saveVoiceAutomation({ voiceAutoStopEnabled })}
                 disabled={controlsDisabled}
               />
-            </SettingRow>
-            <SettingRow
-              label={t('settings.recording.removeFillerWordsLabel')}
-              desc={t('settings.recording.removeFillerWordsDesc')}
-            >
-              <Toggle
-                on={prefs.removeFillerWords}
-                onToggle={removeFillerWords =>
-                  savePrefs(current => ({ ...current, removeFillerWords }))}
-              />
-            </SettingRow>
-            <SettingRow
-              label={t('settings.recording.copyDictationToClipboardLabel')}
-              desc={t('settings.recording.copyDictationToClipboardDesc')}
-            >
-              <Toggle
-                on={prefs.copyDictationToClipboard}
-                onToggle={copyDictationToClipboard =>
-                  savePrefs(current => ({ ...current, copyDictationToClipboard }))}
-              />
-            </SettingRow>
-            {detectOS() === 'win' && prefs.copyDictationToClipboard && (
-              <SettingRow
-                label={t('settings.recording.copyFinalImmediatelyLabel')}
-                desc={t('settings.recording.copyFinalImmediatelyDesc')}
-              >
-                <Toggle
-                  on={prefs.copyFinalTextWithoutPasteConfirmation}
-                  onToggle={copyFinalTextWithoutPasteConfirmation =>
-                    savePrefs(current => ({ ...current, copyFinalTextWithoutPasteConfirmation }))}
-                />
-              </SettingRow>
-            )}
-            <SettingRow
-              label={t('settings.recording.sendKeyAfterDictationLabel')}
-              desc={t('settings.recording.sendKeyAfterDictationDesc')}
-            >
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <Toggle
-                  on={prefs.sendKeyAfterDictation}
-                  onToggle={sendKeyAfterDictation =>
-                    savePrefs(current => ({ ...current, sendKeyAfterDictation }))}
-                />
-                <SelectLite
-                  value={prefs.postDictationKey}
-                  onChange={postDictationKey =>
-                    savePrefs(current => ({
-                      ...current,
-                      postDictationKey: postDictationKey as PostDictationKey,
-                    }))}
-                  options={[
-                    { value: 'enter', label: t('settings.recording.postDictationKeyEnter') },
-                    { value: 'ctrlEnter', label: t('settings.recording.postDictationKeyCtrlEnter') },
-                  ]}
-                  ariaLabel={t('settings.recording.postDictationKeyLabel')}
-                  style={{ ...inputStyle, width: 132 }}
-                  disabled={!prefs.sendKeyAfterDictation}
-                />
-              </div>
             </SettingRow>
           </div>
         </DeviceSettingsPanel>

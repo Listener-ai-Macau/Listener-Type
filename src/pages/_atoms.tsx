@@ -164,6 +164,8 @@ interface CollapsibleProps {
   desc?: ReactNode;
   /// 默认是否展开。默认 false（折叠，符合"默认只显示标题 + 右箭头"语义）。
   defaultOpen?: boolean;
+  /** Mount maintenance controls only on first open; later folding keeps work alive. */
+  deferMount?: boolean;
   /// 嵌在 Card padding=0 容器里时设为 true：移除上下 margin，仅靠 Card 的 borderBottom 分割。
   embedded?: boolean;
   children: ReactNode;
@@ -178,8 +180,9 @@ interface CollapsibleProps {
 /// `embedded=true`：嵌在 `<Card padding={0}>` 里、与其他 Collapsible 共享一张 Card 时使用，
 /// 底部加一道 0.5px 分隔。
 /// `embedded=false`：独立 block，自带 Card 同款外观（border / radius / shadow）。
-export function Collapsible({ title, desc, defaultOpen = false, embedded = false, children }: CollapsibleProps) {
+export function Collapsible({ title, desc, defaultOpen = false, deferMount = false, embedded = false, children }: CollapsibleProps) {
   const [open, setOpen] = useState(defaultOpen);
+  const [hasOpened, setHasOpened] = useState(defaultOpen);
   return (
     <div
       style={{
@@ -196,7 +199,7 @@ export function Collapsible({ title, desc, defaultOpen = false, embedded = false
     >
       <button
         type="button"
-        onClick={() => setOpen(o => !o)}
+        onClick={() => { if (!open) setHasOpened(true); setOpen(o => !o); }}
         aria-expanded={open}
         // 让屏幕阅读器朗读折叠状态；键盘 focus 保留浏览器默认 outline 而不是
         // outline: 'none'，避免 Tab 切换时丢失视觉焦点指示（pr-agent #407 反馈）。
@@ -254,7 +257,7 @@ export function Collapsible({ title, desc, defaultOpen = false, embedded = false
         {/* minHeight: 0 必填：默认 grid item 不允许收缩到小于内容固有高度，
             没这条 trick 不生效，行高动画也跟着失败。 */}
         <div style={{ overflow: 'hidden', minHeight: 0 }}>
-          <div style={{ padding: '0 18px 18px' }}>{children}</div>
+          <div style={{ padding: '0 18px 18px' }}>{(!deferMount || hasOpened) && children}</div>
         </div>
       </div>
     </div>

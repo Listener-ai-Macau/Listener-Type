@@ -35,6 +35,7 @@ import { Card, Collapsible } from '../_atoms';
 import { SettingRow, Toggle, inputStyle } from './shared';
 import { currentPlatform } from '../../lib/hotkey';
 import { MicrophoneWakeSettings } from './MicrophoneWakeSettings';
+import { DictationOutputSettings } from './DictationOutputSettings';
 
 // ─── autostart helpers（OS 持有状态，不存 prefs）──────────────────────
 
@@ -1093,7 +1094,7 @@ export function RecordingSection({ onSetupListener }: { onSetupListener?: () => 
         </div>
       </SettingRow>
       <SettingRow label={t('settings.recording.microphoneLabel')} desc={t('settings.recording.microphoneDesc')}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%', minWidth: 0 }}>
           <button
             type="button"
             aria-label={t('settings.recording.microphoneLabel')}
@@ -1111,7 +1112,7 @@ export function RecordingSection({ onSetupListener }: { onSetupListener?: () => 
               ...inputStyle,
               flex: '0 0 auto',
               width: 200,
-              maxWidth: 200,
+              maxWidth: '100%',
               height: 32,
               minWidth: 0,
               alignSelf: 'flex-start',
@@ -1154,22 +1155,12 @@ export function RecordingSection({ onSetupListener }: { onSetupListener?: () => 
         />
       )}
       {currentPlatform().isWindows && selectedInputSource === 'microphone' && <MicrophoneWakeSettings />}
-      <SettingRow label={t('settings.recording.capsuleLabel')} desc={t('settings.recording.capsuleDesc')}>
-        <Toggle on={prefs.showCapsule} onToggle={onShowCapsuleChange} />
-      </SettingRow>
-      <SettingRow label={t('settings.recording.capsulePositionLabel')} desc={t('settings.recording.capsulePositionDesc')}>
-        <CapsulePositionReset />
-      </SettingRow>
-      <SettingRow
-        label={t('settings.recording.muteDuringRecordingLabel')}
-        desc={t('settings.recording.muteDuringRecordingDesc')}
-      >
-        <Toggle on={prefs.muteDuringRecording} onToggle={onMuteDuringRecordingChange} />
-      </SettingRow>
     </Card>
 
     {/* ─── 插入与剪贴板（折叠） ──────────────────────────────────── */}
-    <Collapsible title={t('settings.recording.insertGroupTitle')}>
+    <Collapsible title={t('settings.recording.insertGroupTitle')} defaultOpen>
+      <DictationOutputSettings />
+      <Collapsible title={t('settingsOrganization.insertionCompatibility')} embedded>
       <SettingRow
         label={t('settings.recording.restoreClipboardLabel')}
         desc={t('settings.recording.restoreClipboardDesc')}
@@ -1205,6 +1196,22 @@ export function RecordingSection({ onSetupListener }: { onSetupListener?: () => 
           />
         </SettingRow>
       )}
+      </Collapsible>
+    </Collapsible>
+
+    <Collapsible title={t('settingsOrganization.capsuleAndSound')}>
+      <SettingRow label={t('settings.recording.capsuleLabel')} desc={t('settings.recording.capsuleDesc')}>
+        <Toggle on={prefs.showCapsule} onToggle={onShowCapsuleChange} />
+      </SettingRow>
+      <SettingRow label={t('settings.recording.capsulePositionLabel')} desc={t('settings.recording.capsulePositionDesc')}>
+        <CapsulePositionReset />
+      </SettingRow>
+      <SettingRow
+        label={t('settings.recording.muteDuringRecordingLabel')}
+        desc={t('settings.recording.muteDuringRecordingDesc')}
+      >
+        <Toggle on={prefs.muteDuringRecording} onToggle={onMuteDuringRecordingChange} />
+      </SettingRow>
     </Collapsible>
 
     {/* ─── 历史与上下文（折叠） ────────────────────────────────── */}
@@ -1249,27 +1256,6 @@ export function RecordingSection({ onSetupListener }: { onSetupListener?: () => 
           style={{ ...inputStyle, width: 80, textAlign: 'right' }}
         />
       </SettingRow>
-      <SettingRow
-        label={t('settings.recording.recordAudioForDebugLabel')}
-        desc={t('settings.recording.recordAudioForDebugDesc')}
-      >
-        <Toggle on={prefs.recordAudioForDebug} onToggle={onRecordAudioForDebugChange} />
-      </SettingRow>
-      <SettingRow
-        label={t('settings.recording.audioRecordingMaxEntriesLabel')}
-        desc={t('settings.recording.audioRecordingMaxEntriesDesc')}
-      >
-        <input
-          type="number"
-          min={1}
-          max={200}
-          placeholder="200"
-          value={prefs.audioRecordingMaxEntries ?? ''}
-          onChange={e => onAudioRecordingMaxEntriesChange(e.target.value)}
-          style={{ ...inputStyle, width: 80, textAlign: 'right' }}
-          disabled={!prefs.recordAudioForDebug}
-        />
-      </SettingRow>
     </Collapsible>
 
     {/* ─── 启动（折叠） ──────────────────────────────────────────── */}
@@ -1296,7 +1282,28 @@ export function RecordingSection({ onSetupListener }: { onSetupListener?: () => 
 
     {/* ─── 风格市场（折叠） ────────────────────────────────────────── */}
     {/* Listener Type 后端未上线前，远端市场默认禁用；本地风格包导入/导出继续可用。 */}
-    <Collapsible title={t('settings.recording.marketplaceGroupTitle')}>
+    <Collapsible title={t('settingsOrganization.diagnostics')}>
+      <SettingRow
+        label={t('settings.recording.recordAudioForDebugLabel')}
+        desc={t('settings.recording.recordAudioForDebugDesc')}
+      >
+        <Toggle on={prefs.recordAudioForDebug} onToggle={onRecordAudioForDebugChange} />
+      </SettingRow>
+      <SettingRow
+        label={t('settings.recording.audioRecordingMaxEntriesLabel')}
+        desc={t('settings.recording.audioRecordingMaxEntriesDesc')}
+      >
+        <input
+          type="number"
+          min={1}
+          max={200}
+          placeholder="200"
+          value={prefs.audioRecordingMaxEntries ?? ''}
+          onChange={e => onAudioRecordingMaxEntriesChange(e.target.value)}
+          style={{ ...inputStyle, width: 80, textAlign: 'right' }}
+          disabled={!prefs.recordAudioForDebug}
+        />
+      </SettingRow>
       <SettingRow
         label={t('settings.recording.marketplaceDevLoginLabel')}
         desc={t('settings.recording.marketplaceDevLoginDesc')}

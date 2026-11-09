@@ -22,6 +22,7 @@ import { savedDraftCopyMessages } from './savedDraftCopy';
 import { styleEditorMessages, vocabPresetMessages } from './styleEditor';
 import { qaPreparationMessages } from './qaPreparation';
 import { sourceFactMessages } from './sourceFacts';
+import { settingsOrganizationMessages } from './settingsOrganization';
 
 export const SUPPORTED_LOCALES = ['zh-CN', 'zh-TW', 'en', 'ja', 'ko'] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
@@ -87,6 +88,10 @@ for (const [locale, styleEditor] of Object.entries(styleEditorMessages)) {
 }
 
 export default i18n;
+
+for (const [locale, settingsOrganization] of Object.entries(settingsOrganizationMessages)) {
+  i18n.addResourceBundle(locale, 'translation', { settingsOrganization }, true, true);
+}
 
 for (const [locale, qaPreparation] of Object.entries(qaPreparationMessages)) {
   i18n.addResourceBundle(locale, 'translation', { qaPreparation }, true, true);

@@ -10,13 +10,12 @@ import { useHotkeySettings } from '../../state/HotkeySettingsContext';
 import { Btn, Card } from '../_atoms';
 import { SettingRow, Toggle, type AsrPresetId } from './shared';
 
-export function AdvancedSection() {
+export function AdvancedSection({ onOpenRecording }: { onOpenRecording?: () => void }) {
   const { t } = useTranslation();
   const { prefs, updatePrefs } = useHotkeySettings();
   const os = detectOS();
   const isMac = os === 'mac';
   const isWin = os === 'win';
-  const isLinux = os === 'linux';
   const platformSupported = isMac || isWin;
   const switchSeqRef = useRef(0);
   const [busy, setBusy] = useState(false);
@@ -124,30 +123,9 @@ export function AdvancedSection() {
           - 密码框 / 1Password / SSH prompt 等 Secure Input 框拒绝合成按键 → 失败回落
           每个平台用各自的 hint key，互相不显示对方平台的细节。 */}
       <Card>
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
-          {t(isLinux
-            ? 'settings.advanced.streamingInsertTitleLinux'
-            : 'settings.advanced.streamingInsertTitle')}
-        </div>
-        <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginBottom: 10 }}>
-          {t('settings.advanced.streamingInsertDesc')}
-        </div>
-        <SettingRow
-          label={t('settings.advanced.streamingInsertLabel')}
-          desc={t(
-            isMac
-              ? 'settings.advanced.streamingInsertHintMac'
-              : isWin
-                ? 'settings.advanced.streamingInsertHintWindows'
-                : 'settings.advanced.streamingInsertHintLinux'
-          )}>
-          <Toggle
-            on={!!prefs?.streamingInsert}
-            onToggle={(next) => {
-              if (prefs) void updatePrefs({ ...prefs, streamingInsert: next });
-            }}
-          />
-        </SettingRow>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>{t('settingsOrganization.outputMoved')}</div>
+        <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', margin: '6px 0 10px', lineHeight: 1.5 }}>{t('settingsOrganization.outputMovedDesc')}</div>
+        <Btn variant="soft" size="sm" onClick={onOpenRecording}>{t('settingsOrganization.openRecording')}</Btn>
       </Card>
 
       <Card>

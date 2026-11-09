@@ -27,7 +27,7 @@ interface SettingsProps {
 export type SettingsSectionId = 'recording' | 'device' | 'providers' | 'localAsr' | 'shortcuts' | 'permissions' | 'language' | 'advanced';
 
 // Local preparation has its own destination; opening it does not activate a model.
-const SECTION_ORDER: SettingsSectionId[] = ['recording', 'providers', 'localAsr', 'device', 'shortcuts', 'permissions', 'language', 'advanced'];
+const SECTION_ORDER: SettingsSectionId[] = ['recording', 'shortcuts', 'device', 'providers', 'localAsr', 'language', 'permissions', 'advanced'];
 
 export function Settings({ embedded = false, initialSection = 'recording', initialProviderFocus, onSetupListener }: SettingsProps) {
   const { t } = useTranslation();
@@ -43,13 +43,21 @@ export function Settings({ embedded = false, initialSection = 'recording', initi
   // → 用 absolute pill 平滑滑过去；--ol-motion-spring 是项目里的 Apple 风格 ease-out-quint。
   const sectionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    contentRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+  }, [section, providerFocus]);
   const [pillRect, setPillRect] = useState<{ top: number; height: number } | null>(null);
   useLayoutEffect(() => {
     const idx = SECTION_ORDER.indexOf(section);
     const el = sectionRefs.current[idx];
     if (!el) return;
-    setPillRect({ top: el.offsetTop, height: el.offsetHeight });
-  }, [section]);
+    const measure = () => setPillRect({ top: el.offsetTop, height: el.offsetHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    if (el.parentElement) observer.observe(el.parentElement);
+    return () => observer.disconnect();
+  }, [section, t]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -150,7 +158,7 @@ export function Settings({ embedded = false, initialSection = 'recording', initi
           {section === 'shortcuts' && <ShortcutsSection />}
           {section === 'permissions' && <PermissionsSection />}
           {section === 'language' && <LanguageSection />}
-          {section === 'advanced' && <AdvancedSection />}
+          {section === 'advanced' && <AdvancedSection onOpenRecording={() => setSection('recording')} />}
         </div>
       </div>
     </>
