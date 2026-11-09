@@ -1,9 +1,20 @@
-# Listener v1.0.6-rc1 · Type build278 / Firmware38
+# Listener v1.0.6-rc1 · Type build279 / Firmware38
 
 | Download | File |
 | --- | --- |
-| **Windows app** | **[Download MSI · build278](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · build279](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | Firmware · USB flashing or Bluetooth OTA | [Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip) |
+
+## What’s changed since build278
+
+- **Keep everyday settings first.** The settings sidebar now follows Recording, Shortcuts, Device, Providers, Local recognition, Language, Permissions and Advanced. Recording opens with input and recording controls, followed by an expanded insertion-and-clipboard group. Capsule appearance/sound, history/context, startup and diagnostics are below; insertion compatibility stays folded.
+- **One place for dictation output.** Streaming insertion moves from Advanced, while final-text copying, filler removal and the optional send key move from Device to Recording. These are the same saved preferences and handlers, available independently of a connected device. Advanced retains a direct link to their new location; moving a control does not alter its setting. The Windows streaming explanation now describes the user-visible behavior.
+- **Open maintenance only when needed.** Device firmware/maintenance stays folded and its uploader is first mounted when explicitly opened. Folding it afterward retains the mounted operation. Device settings, key autosave, firmware protocols and firmware itself are unchanged.
+- **Start each settings section at the top.** Changing categories or following the old Advanced link resets the content scroll. The active sidebar marker follows layout/language changes, and the microphone picker fits a narrow window.
+
+The matching frontend was exercised in isolated browser conditions: unchanged preferences when opening settings, the moved copy toggle and its retained value, section navigation, deferred maintenance without flashing, and narrow-window access. Independent AI assumed-post-purchase use is recorded separately; no real microphone, device, clipboard or cloud-service result is claimed. The recording backend, wake/voiceprint thresholds, automatic endpoint, streaming finalizer, saved data/schema and Firmware38 are unchanged. The previously reported intermittent wake sensitivity remains open and is not fixed by this settings reorganization.
+
+## Included from build278
 
 ## What’s changed since build277
 
@@ -117,15 +128,17 @@ US$49 is the hardware price. Type is free and open source. No ready-to-use offic
 
 ## File identity
 
-- Windows runtime source: `94e0407d3cc0718e65f3f0414a2cb09b270dfd4a` · build278.
-- Windows MSI: 305741824 bytes · SHA256 `d1e21a93003fbb682a44cb78a459eb74aafd582833e32aa1294888375e163e1f`.
+- Windows runtime source: `8705ca0413522b770da8abcbc930e4a004cf6462` · build279.
+- Windows MSI: 305729536 bytes · SHA256 `ee243e51f9fc1d3c7ce868fbc68b32d56996c546a21ae8e7481d1596d6144a65`.
 - The release tag includes a documentation-only follow-up that aligns the download pages; application/build inputs match the runtime source above.
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`.
 - Firmware ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`.
 
 ## 中文说明
 
-本次Type278集中整理日用文字流程：文字尚未处理、服务尚未配置时，也可明确保存输入草稿，再从「历史 → 已保存成稿」找回；后续修改另存副本，不覆盖旧保存。历史详情新增「编辑副本」，在文字工作区修改、另存，原历史完整保留，打开不自动发送／处理／复制／粘贴；超出现有4,000字符上限时明确说明，不截断。成稿库和听写历史仍分别存放，预览仅当前页面会话，安装版沿原本机保存。
+本次Type279按日用频率整理设置：录音、快捷键和设备在前，服务准备与语言权限在后；流式输入、完成后复制、去语气词和发送按键集中到录音页，原设置值与实际行为不变。胶囊/声音、历史、启动与诊断下移；固件维护默认收起，首次展开才加载，之后折叠不销毁进行中的操作。切换分类从顶部阅读，窄窗麦克风选择器与选中标记跟随布局。没有更改录音后端、声纹/唤醒门限、自动结束、最终复制、数据格式或Firmware38；唤醒不灵敏的原间歇问题仍开放。界面工程核验与隔离AI模拟使用不冒充真实语音、实物或长期通过。
+
+此前Type278：文字尚未处理、服务尚未配置时，也可明确保存输入草稿，再从「历史 → 已保存成稿」找回；后续修改另存副本，不覆盖旧保存。历史详情新增「编辑副本」，在文字工作区修改、另存，原历史完整保留，打开不自动发送／处理／复制／粘贴；超出现有4,000字符上限时明确说明，不截断。成稿库和听写历史仍分别存放，预览仅当前页面会话，安装版沿原本机保存。
 
 同时修正处理位置的误导：预览／不可用／未确认不再显示成已确认本机处理，原本机风格、服务风格及可选缩短动作各有相应说明，真实提交仍由用户明确点击。设置默认先打开录音，服务／本地识别在设备定制前，设备／提供商深链保持，不修改输入源和已有偏好。本批实际React保存／找回／原件保持／计数／窄窗／输入来源检查与独立AI模拟反馈分开记录；未把预览当真人、真实语音、硬件或全部兼容验收。录音后端／尾句finalizer／完成完整复制／模型声纹／数据schema及Firmware38均未改；原间歇范围继续开放。
 
