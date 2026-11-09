@@ -1,9 +1,20 @@
-# Listener v1.0.6-rc1 · Type build279 / Firmware38
+# Listener v1.0.6-rc1 · Type build280 / Firmware38
 
 | Download | File |
 | --- | --- |
-| **Windows app** | **[Download MSI · build279](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · build280](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | Firmware · USB flashing or Bluetooth OTA | [Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip) |
+
+## What’s changed since build279
+
+- **Start with the task.** Tools opens with direct entries for text work and saved writing, followed by existing audio-file transcription and voice questions. Dictation styles, vocabulary and translation settings are grouped below; device keys and phrases stay folded. The three main navigation entries remain.
+- **Choose a text task once.** The workspace has one visible choice for editing existing text, drafting from instructions or translating. Message versus email is a subordinate drafting choice. Writing-style options stay folded initially; translation reveals its existing language and engine controls. The previous duplicate drafting buttons and task/style choices are consolidated.
+- **Keep the writing while changing tasks.** The existing input, exact-input result cache and edited results remain available when returning to a task. Choosing a task can prepare an existing trial-only style but does not activate a dictation style or submit a model request. Processing and any service costs still require explicit submission.
+- **Find drafts and finished writing together.** The library is named Saved text, with corresponding Chinese labels and help links, since it includes both unprocessed input and completed writing. Continuing in the workspace and editing a separately saved copy retain the original storage rules.
+
+The exact final packaging frontend was checked through normal isolated browser controls in all five UI languages, including task/format changes, retained input, explicit save/reopen/continue and narrow-window access. Separate controlled React checks exercised edited-result caching without real services. The independent customer report is separately scoped; no real audio, model output, system clipboard or hardware acceptance is claimed. Recording, wake thresholds, automatic ending, streaming/final-copy logic, storage schema and Firmware38 are unchanged. The original intermittent wake issue remains open.
+
+## Included from build279
 
 ## What’s changed since build278
 
@@ -128,15 +139,17 @@ US$49 is the hardware price. Type is free and open source. No ready-to-use offic
 
 ## File identity
 
-- Windows runtime source: `8705ca0413522b770da8abcbc930e4a004cf6462` · build279.
-- Windows MSI: 305729536 bytes · SHA256 `ee243e51f9fc1d3c7ce868fbc68b32d56996c546a21ae8e7481d1596d6144a65`.
+- Windows runtime source: `d9fac6b876928b236f7747265e34100ebdc77577` · build280.
+- Windows MSI: 305733632 bytes · SHA256 `0f12bd3e0aa7cb09f9ce3f8f5fe9442d3a5349b922367bfe7203a58bdc522539`.
 - The release tag includes a documentation-only follow-up that aligns the download pages; application/build inputs match the runtime source above.
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`.
 - Firmware ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`.
 
 ## 中文说明
 
-本次Type279按日用频率整理设置：录音、快捷键和设备在前，服务准备与语言权限在后；流式输入、完成后复制、去语气词和发送按键集中到录音页，原设置值与实际行为不变。胶囊/声音、历史、启动与诊断下移；固件维护默认收起，首次展开才加载，之后折叠不销毁进行中的操作。切换分类从顶部阅读，窄窗麦克风选择器与选中标记跟随布局。没有更改录音后端、声纹/唤醒门限、自动结束、最终复制、数据格式或Firmware38；唤醒不灵敏的原间歇问题仍开放。界面工程核验与隔离AI模拟使用不冒充真实语音、实物或长期通过。
+本次Type280简化文字使用流程：工具页前置文字处理和已保存文字；一处选择整理／起草／翻译，邮件类型在起草下选择，风格选项默认收起、翻译才展开语言与方式。输入和已有编辑结果保留，切换不自动处理、不激活日常听写风格；已保存文字同时容纳输入草稿及处理结果，保存格式和原件规则不变。本机／公开／桌面同步同包；录音后端、唤醒门限、自动结束、流式／完整复制与Firmware38未改，原间歇唤醒仍开放。
+
+此前Type279：录音、快捷键和设备在前，服务准备与语言权限在后；流式输入、完成后复制、去语气词和发送按键集中到录音页，原设置值与实际行为不变。胶囊/声音、历史、启动与诊断下移；固件维护默认收起，首次展开才加载，之后折叠不销毁进行中的操作。切换分类从顶部阅读，窄窗麦克风选择器与选中标记跟随布局。没有更改录音后端、声纹/唤醒门限、自动结束、最终复制、数据格式或Firmware38；唤醒不灵敏的原间歇问题仍开放。界面工程核验与隔离AI模拟使用不冒充真实语音、实物或长期通过。
 
 此前Type278：文字尚未处理、服务尚未配置时，也可明确保存输入草稿，再从「历史 → 已保存成稿」找回；后续修改另存副本，不覆盖旧保存。历史详情新增「编辑副本」，在文字工作区修改、另存，原历史完整保留，打开不自动发送／处理／复制／粘贴；超出现有4,000字符上限时明确说明，不截断。成稿库和听写历史仍分别存放，预览仅当前页面会话，安装版沿原本机保存。
 
