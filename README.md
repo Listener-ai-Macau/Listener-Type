@@ -39,7 +39,7 @@ Firmware: **ESP32-S3 N16R8**, build `094f5a60049f59f4`. Select the same ZIP for 
 Type defaults to **USB wired flashing**, with the flasher included in the MSI. No Python, ESP-IDF or separate flashing software is required.
 Device settings are independent: select one USB/Bluetooth device and read its settings. Explicit edits save automatically when editing finishes; reading or switching devices does not write computer defaults. Names, lights, power, keys and knob settings stay on the selected board. Use this paired MSI and firmware ZIP.
 
-Type build282 adds **automatic input selection**: use a ready Listener device first, then the computer microphone when the device disconnects. Active dictation and question recordings finish with their original source. Choose Automatic, Microphone or Listener BLE in Settings → Recording or the tray; saved fixed-source choices are respected. Computer wake still uses its separate optional switch, off by default. Build276 was withdrawn after real owner wake rejections; this release restores build274’s keyword/owner path and retains its known intermittent-wake limits. Includes trailing-word streaming, Volcengine automatic ending and completion-only full copying. Firmware38 is unchanged.
+Type build282 includes **automatic input selection**: use a ready Listener device first, then the computer microphone when the device disconnects. Active dictation and question recordings finish with their original source. Choose Automatic, Microphone or Listener BLE in Settings → Recording or the tray; saved fixed-source choices are respected. Computer wake still uses its separate optional switch, off by default. Build276 was withdrawn after real owner wake rejections; this release restores build274’s keyword/owner path and retains its known intermittent-wake limits. Includes trailing-word streaming, Volcengine automatic ending and completion-only full copying. Firmware38 is unchanged.
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
@@ -102,7 +102,7 @@ The app is free; cloud costs are set by each provider. Without an API key, prepa
 | Ask about a passage | Set a question shortcut in Settings → Shortcuts, select text, then use that shortcut to open QA and ask |
 | Recover previous text | History, copy, delete and retention controls |
 
-Streaming insertion is enabled in preferences by default; actual incremental insertion depends on the platform, mode and provider. Text in the recording capsule is a preview, not confirmation that it has been inserted into the target field.
+Streaming output stays enabled without a separate off switch; actual incremental insertion depends on the platform, mode and provider. Text in the recording capsule is a preview, not confirmation that it has been inserted into the target field.
 
 **QA setup:** Voice questions currently use Volcengine streaming ASR. Configure its App Key / Access Key and a text provider; another ASR provider or local model selected for dictation does not replace this requirement.
 
