@@ -957,8 +957,11 @@ export function RecordingSection({ onSetupListener }: { onSetupListener?: () => 
     savePrefs({ ...prefs, muteDuringRecording });
   const onMicrophoneDeviceChange = (microphoneDeviceName: string) =>
     savePrefs({ ...prefs, microphoneDeviceName });
-  const onDictationInputSourceChange = (dictationInputSource: DictationInputSource) =>
-    savePrefs({ ...prefs, dictationInputSource, dictationInputSourceUserOverridden: true });
+  const onDictationInputSourceChange = (source: DictationInputSource | 'automatic') =>
+    savePrefs({ ...prefs,
+      dictationInputSource: source === 'automatic' ? prefs.dictationInputSource : source,
+      dictationInputSourceUserOverridden: source !== 'automatic',
+    });
   const onRestoreClipboardChange = (restoreClipboardAfterPaste: boolean) =>
     savePrefs({ ...prefs, restoreClipboardAfterPaste });
   const onPasteShortcutChange = (pasteShortcut: PasteShortcut) =>
@@ -1042,19 +1045,22 @@ export function RecordingSection({ onSetupListener }: { onSetupListener?: () => 
       </SettingRow>
       <SettingRow label={t('settings.recording.inputSourceLabel')} desc={t('settings.recording.inputSourceDesc')}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 430 }}>
-          <div style={{ display: 'inline-flex', alignSelf: 'flex-start', padding: 2, borderRadius: 8, background: 'var(--ol-control-track)' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignSelf: 'stretch', gap: 2, padding: 2, borderRadius: 8, background: 'var(--ol-control-track)' }}>
             {([
+              ['automatic', t('settings.recording.inputSourceAutomatic'), 'bolt'],
               ['microphone', t('settings.recording.inputSourceMicrophone'), 'mic'],
               ['embeddedBle', t('settings.recording.inputSourceEmbeddedBle'), 'bolt'],
             ] as const).map(([value, label, icon]) => {
-              const active = selectedInputSource === value;
+              const active = prefs.dictationInputSourceUserOverridden
+                ? selectedInputSource === value : value === 'automatic';
               return (
                 <button
                   key={value}
                   aria-pressed={active}
                   onClick={() => onDictationInputSourceChange(value)}
                   style={{
-                    minWidth: 112,
+                    minWidth: 0,
+                    flex: value === 'automatic' ? '1 0 100%' : '1 1 100px',
                     height: 28,
                     padding: '0 10px',
                     fontSize: 12,

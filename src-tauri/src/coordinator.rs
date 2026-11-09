@@ -73,24 +73,17 @@ mod qa_asr_finalization;
 mod qa_question_context;
 mod recording_gate;
 mod resources;
+mod input_source;
 #[cfg(target_os = "windows")]
 mod microphone_wake;
 #[cfg(target_os = "windows")]
 mod microphone_wake_buffer;
 #[cfg(target_os = "windows")]
 mod microphone_wake_decoder;
-#[cfg(all(test, target_os = "windows"))]
-pub(crate) use microphone_wake_decoder::diagnostic_first_keyword_source;
-#[cfg(all(test, target_os = "windows"))]
-pub(crate) use microphone_wake::diagnostic_owner_admission;
-#[cfg(all(test, target_os = "windows"))]
-pub(crate) use microphone_wake::diagnostic_source_owner_admission;
 #[cfg(target_os = "windows")]
 mod microphone_wake_confirmation;
 #[cfg(target_os = "windows")]
 mod microphone_wake_onset;
-#[cfg(target_os = "windows")]
-mod microphone_wake_identity;
 #[cfg(target_os = "windows")]
 mod onboard_key_sync;
 mod source_integrity;
@@ -326,6 +319,7 @@ struct Inner {
     #[cfg(target_os = "windows")]
     early_tsf_stop_signal: Mutex<Option<(SessionId, Arc<crate::windows_ime_ipc::EarlyTsfStopSignal>)>>,
     state: Mutex<SessionState>,
+    input_source: Arc<input_source::Runtime>,
     /// Single product recording lifecycle shared by BLE actor and ASR endpoint
     /// callbacks. Evidence paths may be concurrent; transitions are not.
     recording_lifecycle: Mutex<crate::speech_decision_kernel::RecordingLifecycleController>,
@@ -1152,6 +1146,7 @@ impl Coordinator {
                     correction_rules,
                     inserter: TextInserter::new(),
                     state: Mutex::new(SessionState::default()),
+                input_source: Arc::new(Default::default()),
                     recording_lifecycle: Mutex::new(Default::default()),
                     asr: Mutex::new(None),
                     recorder: Mutex::new(None),
@@ -1251,6 +1246,7 @@ impl Coordinator {
                 windows_ime: WindowsImeSessionController::new(),
                 prepared_windows_ime_session: Arc::new(Mutex::new(Vec::new())),
                 state: Mutex::new(SessionState::default()),
+                input_source: Arc::new(Default::default()),
                 recording_lifecycle: Mutex::new(Default::default()),
                 asr: Mutex::new(None),
                 recorder: Mutex::new(None),
@@ -1504,6 +1500,7 @@ impl Coordinator {
         });
         *self.inner.app.lock() = Some(handle);
         self.refresh_microphone_wake();
+        self.refresh_input_source();
     }
 
     pub fn refresh_microphone_wake(&self) {
@@ -1514,6 +1511,11 @@ impl Coordinator {
             }
             self.inner.microphone_wake.refresh();
         }
+    }
+
+    pub fn refresh_input_source(&self) {
+        self.inner.input_source.start(Arc::downgrade(&self.inner));
+        self.inner.input_source.refresh();
     }
 
     pub fn microphone_wake_status(&self) -> serde_json::Value {
@@ -1538,7 +1540,7 @@ impl Coordinator {
             return;
         }
         let prefs = self.inner.prefs.get();
-        if prefs.dictation_input_source == DictationInputSource::EmbeddedBle {
+        if input_source::wants_device_listener(&prefs) {
             let inner = Arc::clone(&self.inner);
             log::info!(
                 "[embedded-ble] startup BLE reconnect fast-path for existing embedded BLE source user_overridden={}",
@@ -1587,6 +1589,7 @@ impl Coordinator {
     #[allow(dead_code)]
     pub fn request_shutdown(&self) {
         let first_shutdown = !self.inner.shutdown.swap(true, Ordering::SeqCst);
+        self.inner.input_source.refresh();
         #[cfg(target_os = "windows")]
         { self.inner.microphone_wake.stop_idle(); self.inner.microphone_wake.refresh(); }
         if first_shutdown {
@@ -2519,6 +2522,15 @@ impl Coordinator {
     }
 
     pub fn refresh_embedded_ble_listener(&self) {
+        refresh_embedded_ble_listener(&self.inner);
+    }
+
+    pub fn refresh_input_source_device_listener(&self) {
+        if input_source::wants_device_listener(&self.inner.prefs.get())
+            && embedded_ble_listener_capture_active(&self.inner)
+        {
+            return;
+        }
         refresh_embedded_ble_listener(&self.inner);
     }
 

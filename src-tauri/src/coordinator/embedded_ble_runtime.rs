@@ -527,7 +527,7 @@ async fn embedded_ble_pairing_recovery_link_reachable_with_timeout(
     preferred_address: Option<u64>,
 ) -> bool {
     if inner.shutdown.load(Ordering::SeqCst)
-        || inner.prefs.get().dictation_input_source != DictationInputSource::EmbeddedBle
+        || !input_source::wants_device_listener(&inner.prefs.get())
     {
         return false;
     }
@@ -573,7 +573,7 @@ fn start_embedded_ble_passive_local_reattach_watch(
     reason: &'static str,
 ) {
     if inner.shutdown.load(Ordering::SeqCst)
-        || inner.prefs.get().dictation_input_source != DictationInputSource::EmbeddedBle
+        || !input_source::wants_device_listener(&inner.prefs.get())
     {
         return;
     }
@@ -625,7 +625,7 @@ fn start_embedded_ble_passive_local_reattach_watch(
         );
         loop {
             if inner.shutdown.load(Ordering::SeqCst)
-                || inner.prefs.get().dictation_input_source != DictationInputSource::EmbeddedBle
+                || !input_source::wants_device_listener(&inner.prefs.get())
             {
                 clear_embedded_ble_passive_local_reattach(&inner, reason);
                 log::info!(
@@ -887,7 +887,7 @@ fn start_embedded_ble_pairing_confirmation_watch(
         );
         loop {
             if inner.shutdown.load(Ordering::SeqCst)
-                || inner.prefs.get().dictation_input_source != DictationInputSource::EmbeddedBle
+                || !input_source::wants_device_listener(&inner.prefs.get())
             {
                 log::info!(
                     "[embedded-ble] Windows pairing confirmation watch stopped reason={reason}"
@@ -1300,8 +1300,9 @@ fn refresh_embedded_ble_listener_with_options(
         clear_embedded_ble_listener_last_error(inner);
         return;
     }
-    let source = inner.prefs.get().dictation_input_source;
-    if source != DictationInputSource::EmbeddedBle {
+    let prefs = inner.prefs.get();
+    let source = prefs.dictation_input_source;
+    if !input_source::wants_device_listener(&prefs) {
         log::info!("[embedded-ble] background listener disabled (source={source:?})");
         clear_embedded_ble_listener_last_error(inner);
         return;
@@ -1711,7 +1712,7 @@ fn embedded_ble_listener_generation_is_current(inner: &Arc<Inner>, generation: u
             == generation
         && recording_gate::admit_arc(inner, recording_gate::RecordIntent::BackgroundListener)
             .is_allow()
-        && inner.prefs.get().dictation_input_source == DictationInputSource::EmbeddedBle
+        && input_source::wants_device_listener(&inner.prefs.get())
 }
 
 fn take_embedded_ble_device_key_wake_preflight_bypass(inner: &Arc<Inner>, generation: u64) -> bool {
@@ -1809,7 +1810,7 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                         recording_gate::RecordIntent::BackgroundListener,
                     )
                     .is_deny()
-                    || inner.prefs.get().dictation_input_source != DictationInputSource::EmbeddedBle
+                    || !input_source::wants_device_listener(&inner.prefs.get())
                 {
                     break;
                 }
@@ -3555,7 +3556,7 @@ fn embedded_ble_background_listener_expected(inner: &Arc<Inner>) -> bool {
         .ok()
         .as_deref()
         != Some("1")
-        && inner.prefs.get().dictation_input_source == DictationInputSource::EmbeddedBle
+        && input_source::wants_device_listener(&inner.prefs.get())
 }
 
 async fn wait_for_embedded_ble_listener_ready(
@@ -3710,6 +3711,7 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
         let first_notify_ready = !inner
             .embedded_ble_listener_ready
             .swap(true, Ordering::SeqCst);
+        inner.input_source.refresh();
         inner
             .embedded_ble_listener_ready_notification
             .notify_waiters();
@@ -3933,6 +3935,7 @@ fn install_embedded_ble_listener_cancel(inner: &Arc<Inner>, generation: u64) -> 
     inner
         .embedded_ble_listener_ready
         .store(false, Ordering::SeqCst);
+    inner.input_source.refresh();
     let previous = {
         let mut slot = inner.embedded_ble_listener_cancel.lock();
         slot.replace(Arc::clone(&cancel))
@@ -3992,6 +3995,7 @@ fn clear_embedded_ble_listener_cancel(inner: &Arc<Inner>, cancel: &Arc<AtomicBoo
         inner
             .embedded_ble_listener_ready
             .store(false, Ordering::SeqCst);
+        inner.input_source.refresh();
         log::info!("[embedded-ble] background capture cancel flag cleared");
     }
 }
@@ -4004,6 +4008,7 @@ fn cancel_embedded_ble_listener_capture(
     inner
         .embedded_ble_listener_ready
         .store(false, Ordering::SeqCst);
+    inner.input_source.refresh();
     let previous = inner.embedded_ble_listener_cancel.lock().take();
     if let Some(cancel) = previous {
         if leave_notify_cccd_enabled_on_cancel {

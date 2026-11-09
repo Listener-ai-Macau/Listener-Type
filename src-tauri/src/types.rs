@@ -1603,7 +1603,7 @@ struct UserPreferencesWire {
     #[serde(default)]
     dictation_input_source: DictationInputSource,
     #[serde(default)]
-    dictation_input_source_user_overridden: bool,
+    dictation_input_source_user_overridden: Option<bool>,
     active_asr_provider: String,
     #[serde(default)]
     cloud_owner_voiceprint: Option<crate::asr::cloud_voiceprint::CloudOwnerVoiceprint>,
@@ -1749,7 +1749,7 @@ impl Default for UserPreferencesWire {
             microphone_device_name: prefs.microphone_device_name,
             microphone_wake_enabled: prefs.microphone_wake_enabled,
             dictation_input_source: prefs.dictation_input_source,
-            dictation_input_source_user_overridden: prefs.dictation_input_source_user_overridden,
+            dictation_input_source_user_overridden: Some(prefs.dictation_input_source_user_overridden),
             active_asr_provider: prefs.active_asr_provider,
             cloud_owner_voiceprint: prefs.cloud_owner_voiceprint,
             owner_activity_only: prefs.owner_activity_only,
@@ -1851,7 +1851,7 @@ impl<'de> Deserialize<'de> for UserPreferences {
         } else {
             false
         };
-        let dictation_input_source = if wire.dictation_input_source_user_overridden {
+        let dictation_input_source = if wire.dictation_input_source_user_overridden.is_some() {
             wire.dictation_input_source
         } else {
             DictationInputSource::EmbeddedBle
@@ -1949,7 +1949,7 @@ impl<'de> Deserialize<'de> for UserPreferences {
             microphone_device_name: wire.microphone_device_name,
             microphone_wake_enabled: wire.microphone_wake_enabled,
             dictation_input_source,
-            dictation_input_source_user_overridden: wire.dictation_input_source_user_overridden,
+            dictation_input_source_user_overridden: wire.dictation_input_source_user_overridden.unwrap_or(false),
             active_asr_provider: wire.active_asr_provider,
             cloud_owner_voiceprint: wire.cloud_owner_voiceprint,
             owner_activity_only: wire.owner_activity_only,
@@ -3365,6 +3365,14 @@ mod tests {
             DictationInputSource::Microphone
         );
         assert!(from_manual_microphone.dictation_input_source_user_overridden);
+        let automatic_microphone: UserPreferences = serde_json::from_str(
+            r#"{"dictationInputSource":"microphone","dictationInputSourceUserOverridden":false}"#,
+        ).unwrap();
+        assert_eq!(automatic_microphone.dictation_input_source, DictationInputSource::Microphone);
+        assert!(!automatic_microphone.dictation_input_source_user_overridden);
+        let round_trip: UserPreferences = serde_json::from_value(serde_json::to_value(automatic_microphone).unwrap()).unwrap();
+        assert_eq!(round_trip.dictation_input_source, DictationInputSource::Microphone);
+        assert!(!round_trip.dictation_input_source_user_overridden);
     }
 
     #[test]

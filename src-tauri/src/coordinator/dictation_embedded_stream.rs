@@ -356,6 +356,14 @@ impl EmbeddedStreamingDictation {
         source_admission_context: Option<CaptureAdmissionSourceContext>,
     ) -> Result<bool, String> {
         self.last_actor_pcm_consumed = false;
+        if self.keep_listening_after_pipeline_errors && self.session.is_none() && self.speaker_candidate.is_none() {
+            // A newly ready board may select the next idle capture immediately.
+            // It must not inject a candidate or PCM into computer dictation/QA.
+            input_source::reconcile(inner);
+            if inner.prefs.get().dictation_input_source != DictationInputSource::EmbeddedBle {
+                return Ok(false);
+            }
+        }
         match event {
             crate::embedded_audio::StreamingSessionEvent::Started { session_id, origin } => {
                 // A failed orphan-tail recovery is quarantined by session id.
@@ -1787,7 +1795,6 @@ impl EmbeddedStreamingDictation {
                                     );
                                     candidate.retain_complete_local_wake_intent(&result);
                                     Some(crate::wake_phrase::Match {
-                                        keyword_token_start_seconds: None,
                                         start_seconds: None,
                                         end_seconds: refined_end,
                                         matched_keyword: None,
@@ -2071,7 +2078,6 @@ impl EmbeddedStreamingDictation {
                                                 ) + origin_bytes as f32
                                                     / 32_000.0;
                                                 Some(crate::wake_phrase::Match {
-                                                    keyword_token_start_seconds: None,
                                                     start_seconds: None,
                                                     end_seconds,
                                                     matched_keyword: None,
@@ -3722,7 +3728,6 @@ impl EmbeddedStreamingDictation {
                                             // gate below must accept first.
                                         }
                                         Some(crate::wake_phrase::Match {
-                                            keyword_token_start_seconds: kws_hit.as_ref().and_then(|found| found.keyword_token_start_seconds),
                                             audio_end_seconds: kws_hit
                                                 .as_ref()
                                                 .and_then(|found| found.audio_end_seconds),

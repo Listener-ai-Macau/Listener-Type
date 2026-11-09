@@ -788,7 +788,7 @@ fn embedded_ble_startup_syncs_firmware_name_before_listener_refresh() {
         .expect("startup BLE helper boundary should exist");
     let body = &source[start..end];
     let existing_source_start = body
-        .find("if prefs.dictation_input_source == DictationInputSource::EmbeddedBle")
+        .find("if input_source::wants_device_listener(&prefs)")
         .expect("existing embedded BLE source branch should exist");
     let existing_source_end = body[existing_source_start..]
         .find("return;")

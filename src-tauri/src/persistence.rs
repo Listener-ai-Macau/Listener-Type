@@ -1444,12 +1444,31 @@ impl PreferencesStore {
         *self.state.lock() = prefs;
     }
 
-    pub fn set(&self, prefs: UserPreferences) -> Result<()> {
+    pub fn set(&self, mut prefs: UserPreferences) -> Result<()> {
+        let mut guard = self.state.lock();
+        if !prefs.dictation_input_source_user_overridden {
+            // UI/tray saves may carry an older automatic route. Only the
+            // readiness router may change that route; other fields still save.
+            prefs.dictation_input_source = guard.dictation_input_source;
+        }
         let json = serde_json::to_vec_pretty(&prefs).context("encode prefs failed")?;
         atomic_write(&self.path, &json)?;
-        let mut guard = self.state.lock();
         *guard = prefs;
         Ok(())
+    }
+
+    pub(crate) fn set_automatic_input_source(
+        &self, source: crate::types::DictationInputSource,
+    ) -> Result<Option<UserPreferences>> {
+        let mut guard = self.state.lock();
+        if guard.dictation_input_source_user_overridden || guard.dictation_input_source == source {
+            return Ok(None);
+        }
+        let mut prefs = guard.clone();
+        prefs.dictation_input_source = source;
+        atomic_write(&self.path, &serde_json::to_vec_pretty(&prefs)?)?;
+        *guard = prefs.clone();
+        Ok(Some(prefs))
     }
 }
 

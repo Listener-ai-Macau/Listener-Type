@@ -12,10 +12,6 @@ pub struct Match {
     /// model provides one. Local-transcript recovery deliberately leaves this
     /// unset because it cannot distinguish pre-wake speech from the phrase.
     pub start_seconds: Option<f32>,
-    /// Native first keyword-token timestamp, in the same PCM clock. Unlike
-    /// start_seconds this does not include earlier speech in the segment.
-    /// It is an identity-input anchor, not a phonetic boundary or body cut.
-    pub keyword_token_start_seconds: Option<f32>,
     pub end_seconds: f32,
     /// Proven keyword token end in the same PCM clock. Transport and local
     /// fallback estimates cannot authorize transcript removal or identity reuse.
@@ -25,38 +21,6 @@ pub struct Match {
 }
 
 impl Match {
-    /// Bound identity work to this keyword rather than the whole decoder
-    /// segment. Token emission time is not a phonetic start, so retain 200 ms
-    /// of real preceding context and the existing 250 ms post-keyword context.
-    /// This range never changes the transcription/body handoff boundary.
-    pub(crate) fn keyword_identity_source_range(
-        &self,
-        retained_start: u64,
-        through: u64,
-    ) -> Option<std::ops::Range<u64>> {
-        if retained_start % 2 != 0 || through % 2 != 0 || retained_start > through {
-            return None;
-        }
-        let first = self.keyword_token_start_seconds?;
-        let last = self.audio_end_seconds?;
-        let segment = self.start_seconds?;
-        if !first.is_finite() || !last.is_finite() || !segment.is_finite()
-            || segment < 0.0 || first < segment || first > last
-        {
-            return None;
-        }
-        let to_bytes = |seconds: f32| (seconds as f64 * 16_000.0).round() as u64 * 2;
-        let token_start = to_bytes(first);
-        let keyword_end = to_bytes(last);
-        if keyword_end > through || token_start < retained_start {
-            return None;
-        }
-        let start = token_start.saturating_sub(200 * 32).max(to_bytes(segment)).max(retained_start);
-        let end = keyword_end.saturating_add(250 * 32).min(through);
-        let length = end.checked_sub(start)?;
-        (length >= 32_000 && length <= 6 * 32_000).then_some(start..end)
-    }
-
     pub(crate) fn phrase_evidence_for(
         &self,
         phrase: &str,
@@ -130,28 +94,6 @@ pub fn normalize_configured_phrase(phrase: &str) -> Result<String, String> {
         return Err("当前唤醒词仅支持中文汉字".to_string());
     }
     Ok(normalized)
-}
-
-#[cfg(test)]
-mod keyword_identity_source_tests {
-    use super::*;
-    #[test]
-    fn keyword_identity_range_excludes_earlier_segment_and_later_body() {
-        let mut found=Match { start_seconds:Some(0.0),keyword_token_start_seconds:Some(1.36),end_seconds:2.0,audio_end_seconds:Some(2.0),matched_keyword:Some("开始录音".into()),origin:KeywordEvidenceOrigin::PrimaryDetector };
-        assert_eq!(found.keyword_identity_source_range(0,3000*32),Some(1160*32..2250*32));
-        assert_eq!(found.keyword_identity_source_range(0,2100*32),None,"short incomplete context is not padded");
-        found.keyword_token_start_seconds=None;
-        assert!(found.keyword_identity_source_range(0,3000*32).is_none());
-        found.keyword_token_start_seconds=Some(2.1);
-        assert!(found.keyword_identity_source_range(0,3000*32).is_none());
-        found.keyword_token_start_seconds=Some(f32::NAN);
-        assert!(found.keyword_identity_source_range(0,3000*32).is_none());
-        found.keyword_token_start_seconds=Some(1.36);
-        assert!(found.keyword_identity_source_range(0,1900*32).is_none());
-        assert!(found.keyword_identity_source_range(1400*32,3000*32).is_none());
-        found.audio_end_seconds=None;
-        assert!(found.keyword_identity_source_range(0,3000*32).is_none());
-    }
 }
 
 const MAX_KEYWORD_DETECTION_LOOKBACK_SECONDS: f32 = 0.8;
@@ -234,7 +176,6 @@ mod audio_boundary_tests {
             (None, KeywordPhraseEvidence::Unobserved),
         ] {
             let found = super::Match {
-                keyword_token_start_seconds: None,
                 start_seconds: Some(0.0),
                 end_seconds: 0.8,
                 audio_end_seconds: None,
@@ -252,7 +193,6 @@ mod audio_boundary_tests {
     #[test]
     fn recorded_recall_full_label_keeps_its_hypothesis_grade_and_exact_input() {
         let found = super::Match {
-            keyword_token_start_seconds: None,
             start_seconds: Some(0.0), end_seconds: 5.1, audio_end_seconds: None,
             matched_keyword: Some("开始录音".into()),
             origin: super::KeywordEvidenceOrigin::RecallCascade { start_bytes: 2, end_bytes: 8 },
@@ -1383,15 +1323,6 @@ mod platform {
                         }
                         log::info!("[wake-phrase] matched keyword label={matched_keyword}");
                         self.found = Some(Match {
-                            keyword_token_start_seconds: if value.count > 0
-                                && !value.timestamps.is_null()
-                                && super::proven_keyword_audio_end_seconds(value.start_time, token_end_seconds, accepted_seconds).is_some()
-                            {
-                                let first = *value.timestamps;
-                                (first.is_finite() && first >= 0.0
-                                    && token_end_seconds.is_some_and(|last| first <= last))
-                                    .then_some(value.start_time + first)
-                            } else { None },
                             start_seconds: value
                                 .start_time
                                 .is_finite()
@@ -1522,7 +1453,6 @@ mod platform {
                             pcm.len() / 32
                         );
                         return Ok(Some(Match {
-                            keyword_token_start_seconds: found.keyword_token_start_seconds.map(|start| start + offset_s),
                             start_seconds: found.start_seconds.map(|start| start + offset_s),
                             end_seconds,
                             audio_end_seconds: found.audio_end_seconds.map(|end| end + offset_s),

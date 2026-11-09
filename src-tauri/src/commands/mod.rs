@@ -546,9 +546,6 @@ fn persist_settings<T: SettingsWriter>(
     coord: &T,
     mut prefs: UserPreferences,
 ) -> Result<(), String> {
-    if !prefs.dictation_input_source_user_overridden {
-        prefs.dictation_input_source = DictationInputSource::EmbeddedBle;
-    }
     sync_dictation_hotkey_legacy_fields(&mut prefs);
     prefs.active_asr_provider_default_migrated = true;
     prefs.device_custom_keys_default_migrated = true;
@@ -595,29 +592,28 @@ pub fn set_settings(
             &next_wake_phrase,
         )?;
     }
-    if prefs.dictation_input_source != previous_prefs.dictation_input_source {
-        prefs.dictation_input_source_user_overridden = true;
-    }
     if !prefs.dictation_input_source_user_overridden {
-        prefs.dictation_input_source = DictationInputSource::EmbeddedBle;
+        prefs.dictation_input_source = previous_prefs.dictation_input_source;
     }
     // Keep the retired streaming-only field synchronized for downgrade compatibility.
     prefs.streaming_insert_save_clipboard = prefs.copy_dictation_to_clipboard;
     let next_input_source = prefs.dictation_input_source;
-    let input_source_changed = next_input_source != previous_prefs.dictation_input_source;
+    let input_source_changed = next_input_source != previous_prefs.dictation_input_source
+        || prefs.dictation_input_source_user_overridden != previous_prefs.dictation_input_source_user_overridden;
     // Hardware settings are written only through an explicitly selected device.
     // 广播给所有 webview。issue #205：QaPanel 跑在独立 webview，
     // 没有 HotkeySettingsContext，必须靠事件感知录音键变化，否则面板可见时
     // 用户改键会让浮窗里的 "{recordHotkey}" 文案一直停留在旧值。
     persist_settings(&*coord, prefs.clone())?;
     coord.refresh_microphone_wake();
+    coord.refresh_input_source();
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     crate::asr::content_recovery_assets::prepare_in_background(&prefs.owner_content_recovery_locale);
     if prefs.show_capsule != previous_prefs.show_capsule {
         coord.refresh_capsule_visibility();
     }
     if input_source_changed {
-        coord.refresh_embedded_ble_listener();
+        coord.refresh_input_source_device_listener();
     }
     // Device NVS is authoritative. A computer preference save must never
     // push another board's cached knob/key settings to the current Listener.
@@ -641,7 +637,7 @@ pub fn set_settings(
     // 抑制 unused 警告：tray_microphones 现在改在闭包里通过 app.state 取，
     // 但函数签名保留 State 入参，以便 Tauri 在调用前注入。
     let _ = tray_microphones;
-    let _ = app.emit("prefs:changed", &prefs);
+    let _ = app.emit("prefs:changed", coord.prefs().get());
     Ok(())
 }
 

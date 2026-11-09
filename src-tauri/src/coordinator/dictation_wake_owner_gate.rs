@@ -445,8 +445,9 @@ fn evaluate_owner_gate_evidence(
     }
 }
 
-/// Legacy short-keyword input retains the existing owner/phrase compatibility
-/// policy. Complete per-keyword inputs also require the source-bound veto below.
+/// Desktop microphone wake must use the same owner/phrase policy as BLE,
+/// rather than interpreting the embedding verifier's standalone flag as the
+/// final wake decision. Both independent phrase stages remain mandatory here.
 #[cfg(target_os = "windows")]
 pub(super) fn microphone_wake_owner_allowed(
     complete_keyword: bool,
@@ -470,27 +471,6 @@ pub(super) fn microphone_wake_owner_allowed(
 #[cfg(target_os = "windows")]
 pub(super) fn microphone_wake_owner_retry_ms(pcm_ms: usize) -> Option<usize> {
     next_owner_verification_retry_ms(pcm_ms)
-}
-
-/// A complete keyword identity window must pass the existing owner match or
-/// fast local-phrase owner floor. The legacy duration-based 0.20 recovery can
-/// otherwise turn a longer foreign keyword into an enrolled-owner match.
-#[cfg(target_os = "windows")]
-pub(super) fn microphone_keyword_owner_allowed(
-    complete_keyword: bool,
-    local_relation: Option<crate::wake_phrase::LocalPhraseRelation>,
-    pcm_ms: usize,
-    verification: &Result<crate::speaker_verification::VerificationResult,String>,
-) -> bool {
-    if let Ok(result)=verification {
-        if matches!(result.policy,crate::speaker_verification::VerificationPolicy::Enrolled)
-            && !result.matched && result.score<OWNER_FAST_LOCAL_PHRASE_MIN_SCORE
-        {
-            log::info!("[microphone-wake] owner source-bound veto pcm_ms={pcm_ms} score={}",result.score);
-            return false;
-        }
-    }
-    microphone_wake_owner_allowed(complete_keyword,local_relation,pcm_ms,verification)
 }
 
 fn evaluate_candidate_owner_gate(
@@ -820,7 +800,6 @@ async fn evaluate_target_wake_extraction(
     );
     let separated_owner_match = verification.enrolled_owner_matched();
     let wake_match = crate::wake_phrase::Match {
-        keyword_token_start_seconds: None,
         start_seconds: None,
         end_seconds: refined_wake_end_seconds(
             0.0,

@@ -384,6 +384,25 @@ struct DeferredBridgeTestConsumer {
     intervals: Mutex<Vec<Option<crate::observability::PcmRange>>>,
 }
 
+#[tokio::test]
+async fn automatic_device_start_cannot_replace_an_active_computer_capture() {
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let mut prefs = UserPreferences::default();
+    prefs.dictation_input_source = DictationInputSource::Microphone;
+    prefs.microphone_wake_enabled = false;
+    inner.prefs.replace_for_tests(prefs);
+    inner.state.lock().phase = SessionPhase::Listening;
+    let owner = inner.state.lock().session_id;
+    inner.embedded_ble_listener_ready.store(true, Ordering::SeqCst);
+    let mut actor = EmbeddedStreamingDictation::background_listener();
+    actor.handle_notification(inner, &build_session_start_notification(777)).await.unwrap();
+    assert!(actor.session.is_none() && actor.speaker_candidate.is_none());
+    assert_eq!(inner.state.lock().session_id, owner);
+    assert_eq!(inner.state.lock().phase, SessionPhase::Listening);
+    assert_eq!(inner.prefs.get().dictation_input_source, DictationInputSource::Microphone);
+}
+
 #[test]
 fn terminal_candidate_rejection_does_not_stop_the_next_unobserved_device_segment() {
     use super::{reject_hidden_automatic_candidate, HiddenCandidateTransportState};
@@ -12022,7 +12041,6 @@ fn long_ambient_wake_candidate_rotates_with_overlap_until_phrase_hit() {
 #[test]
 fn rolling_wake_match_keeps_absolute_candidate_boundary() {
     let found = crate::wake_phrase::Match {
-        keyword_token_start_seconds: Some(0.25),
         start_seconds: Some(0.10),
         end_seconds: 0.75,
         matched_keyword: Some("开始录音".into()),
@@ -12034,25 +12052,6 @@ fn rolling_wake_match_keeps_absolute_candidate_boundary() {
     assert!((adjusted.start_seconds.expect("keyword start") - 1.60).abs() < f32::EPSILON);
     assert!((adjusted.end_seconds - 2.25).abs() < f32::EPSILON);
     assert!((adjusted.audio_end_seconds.expect("proven keyword end") - 2.25).abs() < f32::EPSILON);
-}
-
-#[cfg(target_os = "windows")]
-#[test]
-fn source_bound_microphone_owner_does_not_gain_identity_from_keyword_duration() {
-    use crate::speaker_verification::{VerificationPolicy,VerificationResult};
-    let relation=Some(crate::wake_phrase::LocalPhraseRelation::ExactStart);
-    let foreign=Ok(VerificationResult {matched:false,owner_matched:false,score:0.36758468,policy:VerificationPolicy::Enrolled});
-    assert!(super::microphone_wake_owner_allowed(true,relation,2370,&foreign),"retain evidence of the old duration-based false admission");
-    for pcm_ms in [1090,1690,1800,2370,6000] {
-        assert!(!super::microphone_keyword_owner_allowed(true,relation,pcm_ms,&foreign));
-    }
-    let owner=Ok(VerificationResult {matched:true,owner_matched:true,score:0.42257184,policy:VerificationPolicy::Enrolled});
-    assert!(super::microphone_keyword_owner_allowed(true,relation,1170,&owner));
-    assert!(!super::microphone_keyword_owner_allowed(false,relation,1170,&owner));
-    assert!(!super::microphone_keyword_owner_allowed(true,None,1170,&owner));
-    assert!(!super::microphone_keyword_owner_allowed(true,relation,2370,&Err("unavailable".into())));
-    let open=Ok(VerificationResult {matched:true,owner_matched:false,score:0.0,policy:VerificationPolicy::OpenUnenrolled});
-    assert!(super::microphone_keyword_owner_allowed(true,relation,1170,&open));
 }
 
 #[test]

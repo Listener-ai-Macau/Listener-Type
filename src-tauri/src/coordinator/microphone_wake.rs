@@ -476,7 +476,25 @@ impl Runtime {
 }
 
 fn owner_snapshot(ingress: &Ingress, cancel: &AtomicBool, start: u64, end: u64) -> Option<Vec<u8>> {
-    super::microphone_wake_identity::snapshot(&ingress.buffer,cancel,start,end)
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if cancel.load(Ordering::SeqCst) {
+            return None;
+        }
+        {
+            let buffer = ingress.buffer.lock();
+            if start < buffer.start {
+                return None;
+            }
+            if buffer.end >= end {
+                return buffer.range(start, end).ok();
+            }
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 fn verify_confirmed_owner(
@@ -511,31 +529,6 @@ fn verify_confirmed_owner(
         };
         pcm = next;
     }
-}
-
-fn verify_keyword_owner(
-    ingress: &Ingress,
-    cancel: &AtomicBool,
-    found: &crate::wake_phrase::Match,
-    candidate_start: u64,
-    candidate: Vec<u8>,
-    local_relation: Option<crate::wake_phrase::LocalPhraseRelation>,
-    mut verify: impl FnMut(&[u8]) -> Result<crate::speaker_verification::VerificationResult, String>,
-) -> bool {
-    use super::microphone_wake_identity::{keyword_owner_input,KeywordOwnerInput};
-    let (start,end,pcm)=match keyword_owner_input(&ingress.buffer,cancel,found) {
-        KeywordOwnerInput::Unavailable=>return false,
-        KeywordOwnerInput::LegacyShort=> {
-            log::info!("[microphone-wake] owner input source=legacy_short_keyword pcm_ms={}",candidate.len()/32);
-            return verify_confirmed_owner(ingress,cancel,candidate_start,candidate,local_relation,verify);
-        }
-        KeywordOwnerInput::Focused {start,end,pcm}=>(start,end,pcm),
-    };
-    if cancel.load(Ordering::SeqCst) { return false; }
-    let result=verify(&pcm);
-    if cancel.load(Ordering::SeqCst) { return false; }
-    log::info!("[microphone-wake] owner input source=keyword_tokens start_ms={} end_ms={} pcm_ms={} legacy_pcm_ms={}",start/32,end/32,pcm.len()/32,candidate.len()/32);
-    super::dictation::microphone_keyword_owner_allowed(true,local_relation,pcm.len()/32,&result)
 }
 
 fn run_detector(
@@ -613,10 +606,9 @@ fn run_detector(
         if cancel.load(Ordering::SeqCst) {
             break;
         }
-        let owner_allowed = verify_keyword_owner(
+        let owner_allowed = verify_confirmed_owner(
             &ingress,
             &cancel,
-            &found,
             candidate_start,
             candidate,
             local_relation,
@@ -657,31 +649,6 @@ fn run_detector(
         }
         break;
     }
-}
-
-#[cfg(test)]
-pub(crate) fn diagnostic_source_owner_admission(
-    pcm: &[u8], found: &crate::wake_phrase::Match,
-    verify: impl FnMut(&[u8]) -> Result<crate::speaker_verification::VerificationResult,String>,
-) -> bool {
-    let (sender,_receiver)=mpsc::sync_channel(1);
-    let ingress=Ingress { buffer:Mutex::new(WakeBuffer::default()),pending:Mutex::new(Vec::new()),sender };
-    ingress.buffer.lock().append(pcm);
-    let start=(found.start_seconds.unwrap() as f64*16000.0).round() as u64*2;
-    let end=(found.audio_end_seconds.unwrap() as f64*16000.0).round() as u64*2;
-    let candidate=ingress.buffer.lock().range(start,end).unwrap();
-    verify_keyword_owner(&ingress,&AtomicBool::new(false),found,start,candidate,
-        Some(crate::wake_phrase::LocalPhraseRelation::ExactStart),verify)
-}
-
-#[cfg(test)]
-pub(crate) fn diagnostic_owner_admission(pcm_ms: usize, score: f32, matched: bool) -> bool {
-    super::dictation::microphone_wake_owner_allowed(true,
-        Some(crate::wake_phrase::LocalPhraseRelation::ExactStart), pcm_ms,
-        &Ok(crate::speaker_verification::VerificationResult {
-            matched, owner_matched: matched, score,
-            policy: crate::speaker_verification::VerificationPolicy::Enrolled,
-        }))
 }
 
 #[cfg(test)]
@@ -857,48 +824,6 @@ mod tests {
                 .unwrap(),
             body
         );
-    }
-
-    #[test]
-    fn microphone_keyword_owner_does_not_inherit_earlier_or_later_body_owner() {
-        use crate::speaker_verification::{VerificationPolicy,VerificationResult};
-        for earlier_owner in [false,true] {
-            let prefix=vec![if earlier_owner {77}else{0};800*32];
-            let word=vec![11;1200*32];
-            let body=[vec![0;300*32],vec![77;2000*32]].concat();
-            let pcm=[prefix,word,body.clone()].concat();
-            let (sender,_receiver)=mpsc::sync_channel(1);
-            let ingress=Ingress {buffer:Mutex::new(WakeBuffer::default()),pending:Mutex::new(Vec::new()),sender};
-            ingress.buffer.lock().append(&pcm);
-            let found=crate::wake_phrase::Match {start_seconds:Some(0.0),keyword_token_start_seconds:Some(1.0),end_seconds:2.0,audio_end_seconds:Some(2.0),matched_keyword:Some("开始录音".into()),origin:crate::wake_phrase::KeywordEvidenceOrigin::PrimaryDetector};
-            let verify=|input:&[u8]| {
-                let owner=input.contains(&77);
-                Ok(VerificationResult {matched:owner,owner_matched:owner,score:if owner {0.9}else{0.1},policy:VerificationPolicy::Enrolled})
-            };
-            let relation=Some(crate::wake_phrase::LocalPhraseRelation::ExactStart);
-            assert!(verify_confirmed_owner(&ingress,&AtomicBool::new(false),0,pcm[..2000*32].to_vec(),relation,verify),"old broad input can inherit earlier speech or a later owner retry");
-            assert!(!verify_keyword_owner(&ingress,&AtomicBool::new(false),&found,0,pcm[..2000*32].to_vec(),relation,verify));
-            assert_eq!(ingress.buffer.lock().body_after(2000*32).unwrap(),body);
-            assert!(verify_keyword_owner(&ingress,&AtomicBool::new(false),&found,0,pcm[..2000*32].to_vec(),relation,|input| {
-                assert!(input.contains(&11) && !input.contains(&77));
-                Ok(VerificationResult {matched:true,owner_matched:true,score:0.9,policy:VerificationPolicy::Enrolled})
-            }));
-        }
-    }
-
-    #[test]
-    fn microphone_keyword_owner_cancellation_cannot_release_after_verification() {
-        let (sender,_receiver)=mpsc::sync_channel(1);
-        let ingress=Ingress {buffer:Mutex::new(WakeBuffer::default()),pending:Mutex::new(Vec::new()),sender};
-        ingress.buffer.lock().append(&vec![0;3000*32]);
-        let found=crate::wake_phrase::Match {start_seconds:Some(0.0),keyword_token_start_seconds:Some(1.0),end_seconds:2.0,audio_end_seconds:Some(2.0),matched_keyword:Some("开始录音".into()),origin:crate::wake_phrase::KeywordEvidenceOrigin::PrimaryDetector};
-        let cancel=AtomicBool::new(true);
-        assert!(!verify_keyword_owner(&ingress,&cancel,&found,0,vec![0;2000*32],Some(crate::wake_phrase::LocalPhraseRelation::ExactStart),|_|panic!("cancelled input must not infer")));
-        cancel.store(false,Ordering::SeqCst);
-        assert!(!verify_keyword_owner(&ingress,&cancel,&found,0,vec![0;2000*32],Some(crate::wake_phrase::LocalPhraseRelation::ExactStart),|_| {
-            cancel.store(true,Ordering::SeqCst);
-            Ok(crate::speaker_verification::VerificationResult {matched:true,owner_matched:true,score:0.9,policy:crate::speaker_verification::VerificationPolicy::Enrolled})
-        }));
     }
 
     #[test]

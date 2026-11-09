@@ -1348,15 +1348,20 @@ fn build_input_source_tray_menu<M: Manager<tauri::Wry>>(
     app: &M,
     coordinator: &Arc<coordinator::Coordinator>,
 ) -> tauri::Result<InputSourceTrayMenu> {
-    let selected = coordinator.prefs().get().dictation_input_source;
+    let prefs = coordinator.prefs().get();
+    let selected = prefs.dictation_input_source;
+    let manual = prefs.dictation_input_source_user_overridden;
+    let automatic = CheckMenuItemBuilder::with_id("input-source-auto", "自动（设备优先）")
+        .checked(!manual)
+        .build(app)?;
     let microphone = CheckMenuItemBuilder::with_id("input-source-microphone", "麦克风")
-        .checked(selected == DictationInputSource::Microphone)
+        .checked(manual && selected == DictationInputSource::Microphone)
         .build(app)?;
     let embedded_ble = CheckMenuItemBuilder::with_id("input-source-embedded-ble", "Listener BLE")
-        .checked(selected == DictationInputSource::EmbeddedBle)
+        .checked(manual && selected == DictationInputSource::EmbeddedBle)
         .build(app)?;
     let submenu = SubmenuBuilder::with_id(app, "input-source", "输入源")
-        .items(&[&microphone, &embedded_ble])
+        .items(&[&automatic, &microphone, &embedded_ble])
         .build()?;
     Ok(InputSourceTrayMenu { submenu })
 }
@@ -1583,20 +1588,24 @@ fn handle_microphone_tray_menu_event(app: &AppHandle, id: &str) {
 }
 
 fn handle_input_source_tray_menu_event(app: &AppHandle, id: &str) -> bool {
-    let Some(source) = parse_tray_input_source_id(id) else {
+    let automatic = id == "input-source-auto";
+    let source = parse_tray_input_source_id(id);
+    if !automatic && source.is_none() {
         return false;
-    };
+    }
 
     let coord = app.state::<Arc<coordinator::Coordinator>>();
     let mut prefs = coord.prefs().get();
-    prefs.dictation_input_source = source;
-    prefs.dictation_input_source_user_overridden = true;
+    if let Some(source) = source { prefs.dictation_input_source = source; }
+    prefs.dictation_input_source_user_overridden = !automatic;
     if let Err(err) = coord.prefs().set(prefs.clone()) {
         log::warn!("[tray] save input source preference failed: {err}");
         return true;
     }
     let _ = app.emit("prefs:changed", &prefs);
-    coord.refresh_embedded_ble_listener();
+    coord.refresh_input_source();
+    coord.refresh_microphone_wake();
+    coord.refresh_input_source_device_listener();
     if let Err(err) = refresh_tray_microphone_menu(app) {
         log::warn!("[tray] refresh after input source change failed: {err}");
     }
