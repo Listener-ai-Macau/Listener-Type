@@ -53,11 +53,13 @@ impl Runtime {
 
 /// Returns true only when a changed source must wait for existing work to finish.
 pub(super) fn reconcile(inner: &Arc<Inner>) -> bool {
-    let capture = inner.state.lock();
-    let question = inner.qa_state.lock();
     let prefs = inner.prefs.get();
     let desired = desired_source(&prefs, inner.embedded_ble_listener_ready.load(Ordering::SeqCst));
     if desired == prefs.dictation_input_source { return false; }
+    // QA idle cleanup may hold QA while observing dictation. Never wait for
+    // either lifecycle lock while holding the other one.
+    let Some(capture) = inner.state.try_lock() else { return true; };
+    let Some(question) = inner.qa_state.try_lock() else { return true; };
     if capture.phase != SessionPhase::Idle || question.phase != qa::QaPhase::Idle
         || inner.embedded_ble_ota_active.load(Ordering::SeqCst)
         || inner.shutdown.load(Ordering::SeqCst)

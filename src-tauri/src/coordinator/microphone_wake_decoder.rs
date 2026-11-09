@@ -39,6 +39,29 @@ pub(super) struct Chunk {
     pub pcm: Vec<u8>,
 }
 
+/// Queue entries wake the decoder; the retained ring is the audio source.
+/// Consume through the current capture edge instead of replaying a slow FIFO
+/// of notifications. Every still-retained intervening sample remains included.
+pub(super) fn newest_source_chunk(
+    first: Chunk,
+    receiver: &std::sync::mpsc::Receiver<Chunk>,
+    buffer: &Mutex<WakeBuffer>,
+) -> Result<Chunk, String> {
+    let mut queued = 0;
+    for _ in 0..8 {
+        if receiver.try_recv().is_ok() { queued += 1; } else { break; }
+    }
+    let b = buffer.lock();
+    let start = first.start.max(b.start);
+    let end = b.end;
+    let pcm = b.range(start, end)?;
+    if queued > 0 {
+        log::info!("[microphone-wake] coalesced queued capture notifications queued={} queued_edge_ms={} source_edge_ms={} retained_ms={}",
+            queued, first.end / 32, end / 32, pcm.len() / 32);
+    }
+    Ok(Chunk { start, end, pcm })
+}
+
 pub(super) struct Decoder {
     detector: StreamingDetector,
     phrase: String,
@@ -63,6 +86,9 @@ impl Decoder {
         chunk: Chunk,
         buffer: &Mutex<WakeBuffer>,
     ) -> Result<Option<Match>, String> {
+        // A notification may have been queued while the preceding snapshot
+        // already included its samples. It must not rewind the source clock.
+        if chunk.end <= self.accepted_end { return Ok(None); }
         let pcm = if chunk.start == self.accepted_end {
             chunk.pcm
         } else {

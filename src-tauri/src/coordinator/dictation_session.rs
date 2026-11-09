@@ -295,9 +295,12 @@ async fn begin_microphone_session(inner: &Arc<Inner>, translation: bool, wake_to
     clear_embedded_audio_stats(inner);
     clear_embedded_audio_final_result(inner);
     begin_embedded_audio_preview_session(inner, current_session_id);
+    let active_asr = active_asr_provider_from_preferences(inner);
     #[cfg(target_os = "windows")]
-    if wake_token.is_some() {
-        arm_microphone_wake_body_guard(inner, current_session_id);
+    if active_asr == "volcengine" {
+        register_native_microphone_endpoint(inner, current_session_id);
+    } else if wake_token.is_some() {
+        arm_native_microphone_body_guard(inner, current_session_id);
     }
     #[cfg(target_os = "windows")]
     {
@@ -320,7 +323,6 @@ async fn begin_microphone_session(inner: &Arc<Inner>, translation: bool, wake_to
         return Ok(());
     }
 
-    let active_asr = active_asr_provider_from_preferences(inner);
     sync_active_asr_provider_to_credentials_for_runtime(&active_asr);
     log_dictation_asr_engine_selection(current_session_id, &active_asr);
 

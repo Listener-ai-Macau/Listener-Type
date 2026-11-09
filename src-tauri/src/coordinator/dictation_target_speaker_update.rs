@@ -392,7 +392,7 @@ fn handle_target_speaker_endpoint_stop(
     };
     async_runtime::spawn(async move {
         #[cfg(target_os = "windows")]
-        if inner.microphone_wake.owns_dictation_session(session_id) {
+        if native_microphone_endpoint_owns(&inner, session_id) {
             finish_microphone_endpoint_stop(&inner, stop_reason, admission, &stop_dispatched, &stop_completed).await;
             return;
         }

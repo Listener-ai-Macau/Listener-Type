@@ -1,6 +1,28 @@
 use super::*;
 
 #[test]
+fn automatic_source_does_not_wait_on_qa_while_holding_dictation() {
+    let coordinator = Coordinator::new();
+    let inner = &coordinator.inner;
+    let mut prefs = UserPreferences::default();
+    prefs.dictation_input_source = DictationInputSource::Microphone;
+    inner.prefs.replace_for_tests(prefs);
+    inner.embedded_ble_listener_ready.store(true, Ordering::SeqCst);
+    let qa = inner.qa_state.lock();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let shared = Arc::clone(inner);
+    let worker = std::thread::spawn(move || { let _ = tx.send(reconcile(&shared)); });
+    let result = rx.recv_timeout(Duration::from_secs(1));
+    // Recreate the existing QA-idle order before releasing its QA lock.
+    let dictation_available = inner.state.try_lock().is_some();
+    drop(qa);
+    worker.join().unwrap();
+    assert_eq!(result.ok(), Some(true));
+    assert!(dictation_available);
+    assert_eq!(inner.prefs.get().dictation_input_source, DictationInputSource::Microphone);
+}
+
+#[test]
 fn enabling_automatic_mode_keeps_an_existing_device_capture_attached() {
     let coordinator = Coordinator::new();
     let inner = &coordinator.inner;

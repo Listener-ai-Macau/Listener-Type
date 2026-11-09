@@ -332,6 +332,8 @@ struct Inner {
     recorder: Mutex<Option<SessionResource<Recorder>>>,
     #[cfg(target_os = "windows")]
     microphone_wake: Arc<microphone_wake::Runtime>,
+    #[cfg(target_os = "windows")]
+    native_microphone_endpoint_session: Mutex<Option<SessionId>>,
     /// 当前 dictation / QA session 的 wav 归档是否真的被写到磁盘上。
     /// 由 Recorder::start 返回值 (archive_active) 写入；history.append 路径读取，
     /// 决定 DictationSession.has_audio_recording 字段。比单纯读 prefs.record_audio_for_debug
@@ -1251,6 +1253,7 @@ impl Coordinator {
                 asr: Mutex::new(None),
                 recorder: Mutex::new(None),
                 microphone_wake: Arc::new(Default::default()),
+                native_microphone_endpoint_session: Mutex::new(None),
                 device_processing_hint_revision: AtomicU64::new(0),
                 device_processing_hint_io: Mutex::new(()),
 

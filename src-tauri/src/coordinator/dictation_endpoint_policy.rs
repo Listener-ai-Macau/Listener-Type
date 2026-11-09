@@ -365,9 +365,9 @@ fn manual_endpoint_vad_allowed(
 ) -> bool {
     let mut untracked_capture = !automatic_wake_session_active(inner, session_id);
     #[cfg(target_os = "windows")]
-    { untracked_capture |= inner.microphone_wake.owns_dictation_session(session_id); }
-    // Native wake capture has already proved the activation owner, but does
-    // not fabricate BLE's per-body speaker tracker. Its independent VAD uses
+    { untracked_capture |= native_microphone_endpoint_owns(inner, session_id); }
+    // A native capture has explicit session ownership, and does not
+    // fabricate BLE's per-body speaker tracker. Its independent VAD uses
     // the existing untracked-capture endpoint evidence and silence contract.
     policy.body_started && untracked_capture && !update.local_speaker_tracking_enabled
 }

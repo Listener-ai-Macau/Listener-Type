@@ -1,7 +1,7 @@
 //! Windows computer-microphone wake is a separate capture owner from BLE.
 //! It lends its live recorder to the ordinary microphone dictation pipeline.
 use super::microphone_wake_buffer::WakeBuffer;
-use super::microphone_wake_decoder::{Chunk, Decoder};
+use super::microphone_wake_decoder::{newest_source_chunk, Chunk, Decoder};
 use super::*;
 use crate::recorder::{AudioConsumer, RecorderError};
 use std::path::PathBuf;
@@ -556,6 +556,10 @@ fn run_detector(
         if cancel.load(Ordering::SeqCst) {
             break;
         }
+        let chunk = match newest_source_chunk(chunk, &receiver, &ingress.buffer) {
+            Ok(chunk) => chunk,
+            Err(_) => break,
+        };
         let found = match decoder.accept(chunk, &ingress.buffer) {
             Ok(Some(found)) => found,
             Ok(None) => continue,
@@ -761,6 +765,56 @@ mod tests {
             recovered,
             [vec![2; FEED_BYTES], vec![3; FEED_BYTES]].concat()
         );
+    }
+
+    #[test]
+    fn slow_wake_worker_uses_current_source_instead_of_queued_old_edges() {
+        let (sender, receiver) = mpsc::sync_channel(8);
+        let ingress = Ingress { buffer: Mutex::new(WakeBuffer::default()), pending: Mutex::new(Vec::new()), sender };
+        let mut source = Vec::new();
+        for value in 0..24_u8 {
+            let chunk = vec![value; FEED_BYTES];source.extend_from_slice(&chunk);
+            ingress.consume_pcm_chunk(&chunk);
+        }
+        let first = receiver.recv().unwrap();
+        let old_edge = first.end;
+        let current = newest_source_chunk(first, &receiver, &ingress.buffer).unwrap();
+        assert!(old_edge < current.end);
+        assert_eq!(current.end, source.len() as u64);
+        assert_eq!(current.pcm, source);
+        assert!(receiver.try_recv().is_err());
+        eprintln!("queued-source old_edge_ms={} current_edge_ms={} preserved_bytes={}",old_edge/32,current.end/32,current.pcm.len());
+    }
+
+    #[test]
+    #[ignore = "controlled queued synthetic source with real KWS/phrase helper; no microphone, cloud or private audio"]
+    fn coalesced_wake_source_keeps_native_word_proof_and_rejects_near_phrase() {
+        crate::asr::local::wake_helper::preload().unwrap();
+        let root=std::path::PathBuf::from(std::env::var_os("LISTENER_WAKE_DIAG_DIR").unwrap());
+        for (name,expected) in [("wake_huihui",true),("neg_kaishi_luxiang",false)] {
+            let (sender,receiver)=mpsc::sync_channel(8);
+            let ingress=Ingress {buffer:Mutex::new(WakeBuffer::default()),pending:Mutex::new(Vec::new()),sender};
+            let speech=denzic_audio_v1_core::read_wav_pcm16le(&std::fs::read(root.join(format!("{name}.wav"))).unwrap()).unwrap();
+            let mut source=vec![0;10*32_000];source.extend(speech);source.extend(vec![0;10_240]);
+            for pcm in source.chunks(FEED_BYTES) {ingress.consume_pcm_chunk(pcm);}
+            let first=receiver.recv().unwrap();let old_edge=first.end;
+            let stale=Chunk {start:first.start,end:first.end,pcm:first.pcm.clone()};
+            let current=newest_source_chunk(first,&receiver,&ingress.buffer).unwrap();
+            assert_eq!(current.end,source.len()as u64);
+            let mut decoder=Decoder::new(crate::wake_phrase::StreamingDetector::new_strict("开始录音").unwrap(),"开始录音".into());
+            let found=decoder.accept(current,&ingress.buffer).unwrap();
+            let mut confirmed=false;
+            if let Some(found)=found {
+                let end=(found.audio_end_seconds.unwrap()as f64*32_000.0).round()as u64;
+                let begin=((found.start_seconds.unwrap_or(0.0)as f64*32_000.0).round()as u64).max(ingress.buffer.lock().start);
+                let clip={let b=ingress.buffer.lock();b.range(begin,b.end.min(end+32_000)).unwrap()};
+                confirmed=super::super::microphone_wake_decoder::confirm_candidate(&clip,"开始录音").unwrap()==Some(crate::wake_phrase::LocalPhraseRelation::ExactStart);
+                assert_eq!(ingress.buffer.lock().body_after(end).unwrap(),source[end as usize..]);
+            }
+            assert_eq!(confirmed,expected,"case {name}");
+            assert!(decoder.accept(stale,&ingress.buffer).unwrap().is_none(),"old notifications must not rewind the decoder");
+            eprintln!("coalesced-real-source case={name} old_edge_ms={} current_edge_ms={} confirmed={confirmed}",old_edge/32,source.len()/32);
+        }
     }
 
     #[test]

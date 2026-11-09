@@ -1,10 +1,19 @@
 // Native microphone capture uses the existing endpoint evidence and normal
 // finalization. It has no BLE segment, firmware STOP or synthetic BLE stats.
 
-fn arm_microphone_wake_body_guard(inner: &Arc<Inner>, session: SessionId) {
-    // The native handoff already removes the activation PCM at its proven
-    // boundary. Reuse the automatic body lifecycle with no textual prefix to
-    // strip: a literal wake phrase spoken later is ordinary body content.
+fn native_microphone_endpoint_owns(inner: &Arc<Inner>, session: SessionId) -> bool {
+    *inner.native_microphone_endpoint_session.lock() == Some(session)
+}
+
+fn register_native_microphone_endpoint(inner: &Arc<Inner>, session: SessionId) {
+    *inner.native_microphone_endpoint_session.lock() = Some(session);
+    arm_native_microphone_body_guard(inner, session);
+}
+
+fn arm_native_microphone_body_guard(inner: &Arc<Inner>, session: SessionId) {
+    // Keyboard capture starts at source zero; a wake handoff has already
+    // removed activation PCM at its proved boundary. Neither has a textual
+    // wake prefix to strip. Both use the same body and ending lifecycle.
     arm_automatic_wake_text_guard(inner, session, String::new(), 0);
 }
 
@@ -55,7 +64,7 @@ fn microphone_endpoint_consumer(
     inner: &Arc<Inner>, session: SessionId, asr: &Arc<VolcengineStreamingASR>,
     target: Arc<dyn crate::recorder::AudioConsumer>,
 ) -> Arc<dyn crate::recorder::AudioConsumer> {
-    if !inner.microphone_wake.owns_dictation_session(session) { return target; }
+    if !native_microphone_endpoint_owns(inner, session) { return target; }
     let activity = LocalSpeechActivity::with_quality_timeline(
         asr.local_speech_activity_sink(), asr.local_speech_quality_sink());
     Arc::new(MicrophoneEndpointConsumer { target, asr: Arc::clone(asr), capture: Mutex::new((activity, 0)) })
@@ -65,7 +74,7 @@ fn begin_microphone_endpoint_stop(
     inner: &Arc<Inner>, admission: &EndpointStopAdmission,
 ) -> Option<DictationTransition> {
     let session = admission.ticket.session_id;
-    if !inner.microphone_wake.owns_dictation_session(session) || !admission.is_valid(inner)
+    if !native_microphone_endpoint_owns(inner, session) || !admission.is_valid(inner)
         || !microphone_endpoint_silence_qualified(admission) { return None; }
     if !admission.stop_state.lock().begin_sending(admission.ticket) || !admission.is_valid(inner)
         || !microphone_endpoint_silence_qualified(admission) { return None; }
@@ -87,8 +96,8 @@ fn begin_microphone_endpoint_stop(
 fn microphone_endpoint_silence_qualified(admission: &EndpointStopAdmission) -> bool {
     let evidence = admission.asr.local_speech_activity_snapshot();
     let captured = admission.asr.endpoint_update_snapshot().audio_duration_ms;
-    // Source sample zero is the independently proved end of activation. A
-    // wake-only session may have no body speech at all. Require the same full
+    // Source zero is the beginning of this native capture (after a proved
+    // activation trim for voice wake). Require the same full
     // analyzed silence window, current epoch and bounded analysis lag even
     // when the common automatic no-body clock proposes its wall-time escape.
     evidence.state == crate::asr::volcengine::LocalSpeechActivityState::NonSpeech
@@ -134,6 +143,7 @@ mod microphone_endpoint_tests {
         let session = new_session_id();
         { let mut state = inner.state.lock(); state.session_id=session; state.phase=SessionPhase::Listening; state.cancelled=false; }
         inner.microphone_wake.mark_dictation_owner_for_test(session);
+        register_native_microphone_endpoint(inner, session);
         *inner.recorder.lock() = Some(SessionResource::new(session, Recorder::without_device_for_test()));
         let asr = Arc::new(VolcengineStreamingASR::new(VolcengineCredentials {
             app_id:"offline".into(),access_token:"offline".into(),resource_id:"offline".into(),
@@ -157,7 +167,7 @@ mod microphone_endpoint_tests {
         let (coordinator, admission)=fixture(true);
         let inner=&coordinator.inner;
         let session=admission.ticket.session_id;
-        arm_microphone_wake_body_guard(inner,session);
+        arm_native_microphone_body_guard(inner,session);
         let no_body=resolve_target_speaker_endpoint_policy(inner,session,None,Some(0));
         assert!(!no_body.body_started && no_body.initial_body_wait_active);
         assert!(no_body.automatic_no_body_started_at.is_some());
@@ -170,6 +180,27 @@ mod microphone_endpoint_tests {
         mark_automatic_wake_stop_requested(inner,session);
         assert_eq!(filter_automatic_wake_text(inner,session,text,false),text);
         assert!(!inner.microphone_wake.owns_dictation_session(new_session_id()));
+    }
+
+    #[test]
+    fn keyboard_and_voice_native_capture_share_endpoint_without_wake_permission() {
+        for keyboard in [false, true] {
+            let (coordinator,admission)=fixture(true);
+            let inner=&coordinator.inner;let session=admission.ticket.session_id;
+            if keyboard {
+                inner.microphone_wake.mark_dictation_owner_for_test(new_session_id());
+                let mut prefs=inner.prefs.get();prefs.microphone_wake_enabled=false;
+                inner.prefs.replace_for_tests(prefs);
+                assert!(!inner.microphone_wake.owns_dictation_session(session));
+            }
+            let text="最后一句正常流式，开始录音这几个字也是正文。";
+            assert_eq!(filter_automatic_wake_text(inner,session,text,true),text);
+            let policy=resolve_target_speaker_endpoint_policy(inner,session,Some(text),Some(8000));
+            assert!(manual_endpoint_vad_allowed(inner,session,policy,&admission.asr.endpoint_update_snapshot()));
+            assert_eq!(policy.endpoint_timeout_ms,EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS);
+            assert!(begin_microphone_endpoint_stop(inner,&admission).is_some());
+            assert_eq!(inner.state.lock().phase,SessionPhase::Processing);
+        }
     }
 
     #[test]
@@ -187,7 +218,7 @@ mod microphone_endpoint_tests {
                 6=>inner.state.lock().session_id=new_session_id(),
                 7=>inner.state.lock().phase=SessionPhase::Starting,
                 8=>{inner.recorder.lock().take();},
-                9=>inner.microphone_wake.mark_dictation_owner_for_test(new_session_id()),
+                9=>*inner.native_microphone_endpoint_session.lock()=Some(new_session_id()),
                 10=>admission.endpoint_clock.lock().generation+=1,
                 _=>unreachable!(),
             }
@@ -225,6 +256,12 @@ mod microphone_endpoint_tests {
     fn provisional_body_reaches_native_stop_through_complete_controller() {
         use crate::asr::volcengine::PendingBodyDelivery;
         let (coordinator,mut admission)=fixture(false);
+        // A keyboard-started recorder has no wake runtime ownership and works
+        // with idle wake disabled. Its registered native capability is enough.
+        coordinator.inner.microphone_wake.mark_dictation_owner_for_test(new_session_id());
+        let mut prefs=coordinator.inner.prefs.get();prefs.microphone_wake_enabled=false;
+        coordinator.inner.prefs.replace_for_tests(prefs);
+        assert!(!coordinator.inner.microphone_wake.owns_dictation_session(admission.ticket.session_id));
         admission.asr=Arc::new(VolcengineStreamingASR::new(VolcengineCredentials {
             app_id:"offline".into(),access_token:"offline".into(),resource_id:"offline".into(),
         },Vec::new()));
@@ -237,7 +274,10 @@ mod microphone_endpoint_tests {
         let mut pcm=denzic_audio_v1_core::read_wav_pcm16le(&std::fs::read(root.join("wake_huihui.wav")).unwrap()).unwrap();
         pcm.extend(vec![0;5*32000]);
         let base=Instant::now();
-        let mut native=SettledTargetEndpointClock {native_capture_endpoint:true,..Default::default()};
+        let mut native=SettledTargetEndpointClock {
+            native_capture_endpoint:native_microphone_endpoint_owns(&coordinator.inner,admission.ticket.session_id),
+            ..Default::default()
+        };
         let mut legacy=SettledTargetEndpointClock::default();
         let mut end=0;
         let mut first_due=None;
