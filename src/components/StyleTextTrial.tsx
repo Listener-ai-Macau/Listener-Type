@@ -19,6 +19,7 @@ import { SavedTextDraftsDialog } from './SavedTextDraftsDialog';
 import { BufferedSourceFactError, preserveBufferedSourceFacts, preserveTranslatedSourceFacts } from '../lib/bufferedSourceFacts';
 import { isEmailDraftStyle, isMessageDraftStyle, removeUnrequestedEmailSignaturePlaceholder } from '../lib/messageDraftStyle';
 import { protectTranslationTerms } from '../lib/protectedTranslation';
+import { textProcessingNotice } from '../lib/textProcessingNotice';
 
 function withDraftOriginName(origin: string, suffix: string): string {
   const room = Math.max(0, 80 - Array.from(suffix).length - 3);
@@ -516,7 +517,7 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
       </div>
       <div ref={workspaceScroll} className="ol-style-trial-scroll ol-thinscroll" data-workspace-scroll>
       <div className="ol-style-trial-intro">
-      <p id={`${workspaceId}-description`} className="ol-style-trial-hint" data-style-trial-service-notice>{t(offline ? 'offlineTranslation.localNotice' : readiness?.requiresTextService === false ? prepareShorter ? 'textWorkspace.localWithShorterNotice' : 'textWorkspace.localNotice' : 'textWorkspace.cloudNotice')}</p>
+      <p id={`${workspaceId}-description`} className="ol-style-trial-hint" data-style-trial-service-notice>{t(textProcessingNotice(isTauri, offline, readiness, !!prepareShorter))}</p>
       <details className="ol-style-trial-details" data-workspace-use-help>
         <summary>{t('style.trial.detailsSummary')}</summary>
         <p className="ol-style-trial-hint">{t('style.trial.shortNotice')}</p>
@@ -639,6 +640,16 @@ export function StyleTextTrial({ pack, packs, onSelectPack, extraStyleChoice, dr
           if (!value.trim()) { setWorkflowOriginal(null); setTranslationReference(null); setPreviousStep(null); setRefinementReturn(null); }
         }}
       />
+      <div className="ol-style-trial-input-save" data-workspace-input-save>
+        <SaveTextDraft kind="input" name={withDraftOriginName(presentation.name, t('textWorkspace.inputDraft'))}
+          original={originalForSave} text={draft}
+          disabled={pending || copying || delivering || draftSaving || translationPreparing || !!styleChangePending}
+          onBusy={setDraftSaving} onOpenSaved={(id, onUnavailable) => {
+            if (onOpenSavedDraft) onOpenSavedDraft(id, onUnavailable);
+            else setLocalLibrary({ id, onUnavailable });
+          }} />
+        <p className="ol-style-trial-hint">{t(isTauri ? 'textWorkspace.inputStorageHint' : 'textWorkspace.browserInputStorageHint')}</p>
+      </div>
       </div>
       <div className="ol-style-trial-outputs">
       {result && (

@@ -676,7 +676,7 @@ export const zhTW: typeof zhCN = {
       output: "處理結果",
       serviceResult: "由你設定的文字服務傳回 · {{seconds}} 秒",
       rawResult: "原文 · 未呼叫文字服務",
-      nativeRequired: "請開啟 Windows 軟體，在「設定 → 提供者」設定文字服務後試用。瀏覽器預覽不會模擬處理結果。",
+      nativeRequired: "此預覽不處理或傳送正文。實際處理位置由 Windows 軟體中選擇的風格與服務決定。",
       invalidText: "請輸入 1～4,000 個字元的文字。",
       timeout: "文字服務在 45 秒內未完成。文字仍保留，可以重試。",
       failed: "這次未能處理文字：{{error}}",

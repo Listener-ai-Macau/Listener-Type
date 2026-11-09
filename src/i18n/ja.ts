@@ -634,7 +634,7 @@ export const ja: typeof zhCN = {
       output: "処理結果",
       serviceResult: "設定済みのテキストサービスからの結果 · {{seconds}} 秒",
       rawResult: "原文 · テキストサービス未使用",
-      nativeRequired: "Windowsアプリを開き、「設定 → プロバイダー」でテキストサービスを設定してください。このブラウザープレビューは結果を模擬しません。",
+      nativeRequired: "このプレビューは本文の処理や送信を行いません。Windowsアプリでは、選択したスタイルとサービスによって処理先が決まります。",
       invalidText: "1～4,000文字の文章を入力してください。",
       timeout: "45秒以内に処理が完了しませんでした。文章は保持されています。もう一度試せます。",
       failed: "文章を処理できませんでした：{{error}}",

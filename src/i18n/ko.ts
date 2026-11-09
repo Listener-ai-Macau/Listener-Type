@@ -634,7 +634,7 @@ export const ko: typeof zhCN = {
       output: "처리 결과",
       serviceResult: "설정된 텍스트 서비스의 결과 · {{seconds}}초",
       rawResult: "원문 · 텍스트 서비스 미사용",
-      nativeRequired: "Windows 앱을 열고 「설정 → 제공업체」에서 텍스트 서비스를 설정하세요. 브라우저 미리보기는 결과를 모의 생성하지 않습니다.",
+      nativeRequired: "이 미리보기는 본문을 처리하거나 전송하지 않습니다. Windows 앱에서는 선택한 스타일과 서비스에 따라 처리 위치가 결정됩니다.",
       invalidText: "1~4,000자의 글을 입력하세요.",
       timeout: "45초 안에 처리가 끝나지 않았습니다. 글은 남아 있으니 다시 시도할 수 있습니다.",
       failed: "글을 처리하지 못했습니다: {{error}}",

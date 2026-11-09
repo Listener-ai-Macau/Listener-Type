@@ -5,20 +5,22 @@ import { useTextDraftSave } from '../lib/useTextDraftSave';
 import { Btn } from '../pages/_atoms';
 import { SavedTextDraftsDialog } from './SavedTextDraftsDialog';
 
-export function SaveTextDraft({ name, original, text, disabled, onBusy, onSaved, onUnsaved, onOpenSaved, compact = false }: {
+export function SaveTextDraft({ name, original, text, disabled, onBusy, onSaved, onUnsaved, onOpenSaved, compact = false, kind = 'result' }: {
   name: string; original: string; text: string; disabled: boolean; onBusy: (busy: boolean) => void;
   onSaved?: (text: string) => void;
   onUnsaved?: () => void;
   onOpenSaved?: (id: string, onUnavailable: (id: string) => void) => void;
   compact?: boolean;
+  kind?: 'input' | 'result';
 }) {
   const { t } = useTranslation();
   const { save, saving, isSaved, savedId, error, invalidate } = useTextDraftSave({ name, original, text, disabled, onBusy, onSaved, onUnsaved });
   const [draftsOpen,setDraftsOpen] = useState(false);
   return <><div className="ol-save-text-draft">
     <Btn size="sm" variant="ghost" disabled={disabled||saving||!text.trim()||isSaved} onClick={()=>void save()}>
-      {t(saving?'textDraft.saving':isSaved?'textDraft.saved':'textDraft.save')}
+      {t(saving?'textDraft.saving':kind==='input'?isSaved?'textWorkspace.inputSaved':'textWorkspace.saveInput':isSaved?'textDraft.saved':'textDraft.save')}
     </Btn>
+    {kind==='input'&&!isSaved&&text.trim()&&<span role="status" className="ol-style-trial-hint">{t('textWorkspace.inputUnsaved')}</span>}
     {isSaved&&<span role="status" className="ol-style-trial-hint"> {t(isTauri?compact?'textWorkspace.savedWhere':'textDraft.savedWhere':'textDraft.browserSaved')}</span>}
     {isSaved&&<Btn size="sm" variant="ghost" disabled={disabled||saving}
       onClick={()=>{if(onOpenSaved&&savedId)onOpenSaved(savedId,invalidate);else setDraftsOpen(true);}}>{t('textDraft.openSaved')}</Btn>}

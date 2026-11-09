@@ -69,6 +69,10 @@
 .ol-style-trial-options > * { min-width: 0; align-self: start; }
 .ol-style-trial-options > .ol-local-translation-setup { margin: 0; }
 .ol-style-trial-draft, .ol-style-trial-outputs, .ol-style-trial-result, .ol-style-trial-placeholder { min-width: 0; }
+.ol-style-trial-input-save { margin-top: 10px; }
+.ol-style-trial-input-save .ol-save-text-draft { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.ol-style-trial-input-save .ol-save-text-draft > button { white-space: normal; height: auto; min-height: 30px; }
+.ol-style-trial-input-save > p { margin: 8px 0 0; }
 .ol-style-trial-comparisons { margin-top: 20px; border-top: 1px solid var(--ol-line); padding-top: 14px; }
 .ol-style-trial-comparisons h3, .ol-style-trial-comparisons h4 { margin: 0; font-size: 13px; }
 .ol-style-trial-comparison-heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: center; }

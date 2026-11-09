@@ -674,7 +674,7 @@ export const zhCN = {
       output: "处理结果",
       serviceResult: "由你配置的文本服务返回 · {{seconds}} 秒",
       rawResult: "原文 · 未调用文本服务",
-      nativeRequired: "请打开 Windows 软件，在“设置 → 提供商”配置文本服务后试用。浏览器预览不会模拟处理结果。",
+      nativeRequired: "此预览不处理或发送正文。实际处理位置由 Windows 软件中选择的风格和服务决定。",
       invalidText: "请输入 1～4,000 个字符的文字。",
       timeout: "文本服务在 45 秒内未完成。文字仍保留，可以重试。",
       failed: "这次未能处理文字：{{error}}",

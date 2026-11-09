@@ -677,7 +677,7 @@ export const en: typeof zhCN = {
       output: "Result",
       serviceResult: "Returned by your configured text service · {{seconds}} s",
       rawResult: "Original text · no text-service request",
-      nativeRequired: "To process real text, open the Windows app and configure a text service in Settings → Providers. This browser preview does not simulate a result.",
+      nativeRequired: "This preview does not process or send your text. The Windows app determines the processing route from the selected style and service.",
       invalidText: "Enter 1–4,000 characters of text.",
       timeout: "The text service did not finish within 45 seconds. Your text is still here; you can try again.",
       failed: "Could not process this text: {{error}}",

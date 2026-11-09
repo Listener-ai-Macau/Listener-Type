@@ -13,6 +13,7 @@ import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import { Btn, Card, PageHeader, Pill } from './_atoms';
 import './History.css';
 import { HistoryClearDialog } from '../components/HistoryClearDialog';
+import { QuickStyleTextTrial } from '../components/QuickStyleTextTrial';
 
 function useFilters(): Array<{ id: 'all' | PolishMode; label: string }> {
   const { t } = useTranslation();
@@ -55,15 +56,17 @@ export function History({ onOpenSavedDrafts, savedDraftsOpen = false }: { onOpen
   const MODE_LABEL = useModeLabel();
   const [filter, setFilter] = useState<'all' | PolishMode>('all');
   const [savedDraftCount, setSavedDraftCount] = useState<number | null>(null);
+  const [editableCopy, setEditableCopy] = useState<{ original: string; text: string } | null>(null);
+  const workspaceOpen = editableCopy !== null;
   const hasSavedDraftEntry = !!onOpenSavedDrafts;
   useEffect(() => {
-    if (!hasSavedDraftEntry || savedDraftsOpen) return;
+    if (!hasSavedDraftEntry || savedDraftsOpen || workspaceOpen) return;
     let current = true;
     setSavedDraftCount(null);
     void listSavedTextDrafts().then(rows => { if (current) setSavedDraftCount(rows.length); })
       .catch(() => { if (current) setSavedDraftCount(null); });
     return () => { current = false; };
-  }, [hasSavedDraftEntry, savedDraftsOpen]);
+  }, [hasSavedDraftEntry, savedDraftsOpen, workspaceOpen]);
   const [items, setItems] = useState<DictationSession[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -275,6 +278,10 @@ export function History({ onOpenSavedDrafts, savedDraftsOpen = false }: { onOpen
       {clearRequested && <HistoryClearDialog count={items.length} busy={clearing} error={actionError}
         onCancel={() => { if (!clearRunning.current) setClearRequested(false); }}
         onConfirm={() => void onClear()} />}
+      {editableCopy && <QuickStyleTextTrial draft={editableCopy.text}
+        onDraftChange={text => setEditableCopy(current => current ? { ...current, text } : null)}
+        inputOriginName={t('textWorkspace.historyCopyOrigin')} inputOriginal={editableCopy.original}
+        onClose={() => setEditableCopy(null)} />}
       <PageHeader
         kicker={t('history.kicker')}
         title={t('history.title')}
@@ -441,6 +448,8 @@ export function History({ onOpenSavedDrafts, savedDraftsOpen = false }: { onOpen
                   <span style={{ fontSize: 11, color: 'var(--ol-ink-4)' }}>{formatDuration(item.durationMs, t)}</span>
                 </div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  <Btn variant="ghost" size="sm" disabled={copying || !item.finalText.trim() || item.finalText.length > 4000}
+                    onClick={() => setEditableCopy({ original: isQaSession(item) ? item.finalText : item.rawTranscript || item.finalText, text: item.finalText })}>{t('textWorkspace.editHistoryCopy')}</Btn>
                   <Btn icon={justCopied ? 'check' : 'copy'} variant="ghost" size="sm" disabled={copying || !item.finalText.trim()} onClick={() => void onCopy()}>{justCopied ? t('common.copied') : t('common.copy')}</Btn>
                   {item.hasAudioRecording && !audioMissingIds.has(item.id) && (
                     <Btn icon="download" variant="ghost" size="sm" onClick={() => void onExportAudio()}>{t('history.exportRecording')}</Btn>
@@ -448,6 +457,9 @@ export function History({ onOpenSavedDrafts, savedDraftsOpen = false }: { onOpen
                   <Btn icon="trash" variant="ghost" size="sm" onClick={onDelete}>{t('common.delete')}</Btn>
                 </div>
               </div>
+              <p style={{ margin: '0 0 12px', fontSize: 12, lineHeight: 1.6, color: 'var(--ol-ink-3)' }}>
+                {t(item.finalText.length > 4000 ? 'textWorkspace.historyCopyTooLong' : 'textWorkspace.historyCopyHint')}
+              </p>
               {item.hasAudioRecording && !audioMissingIds.has(item.id) && (
                 <AudioRecordingPlayer
                   sessionId={item.id}

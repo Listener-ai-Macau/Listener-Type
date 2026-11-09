@@ -55,7 +55,7 @@ export function SettingsModal({ os: _os, onClose, initialSettingsSection, initia
   // redirect the customer to a different section while they are editing.
   const entrySection = useRef<SettingsSectionId | null>(initialSettingsSection ?? null);
   if (entrySection.current === null && (prefs || !prefsLoading)) {
-    entrySection.current = prefs?.dictationInputSource === 'microphone' ? 'recording' : 'device';
+    entrySection.current = 'recording';
   }
   const [section, setSection] = useState<ModalSectionId>('settings');
   const savedToast = useSavedToastListener();
