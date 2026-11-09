@@ -1,9 +1,18 @@
-# Listener v1.0.6-rc1 · Type build281 / Firmware38
+# Listener v1.0.6-rc1 · Type build282 / Firmware38
 
 | Download | File |
 | --- | --- |
-| **Windows app** | **[Download MSI · build281](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · build282](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | Firmware · USB flashing or Bluetooth OTA | [Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip) |
+
+## What’s changed since build281
+
+- **Stream without a separate switch.** The recording settings no longer expose a streaming-insertion toggle. Recording-time incremental insertion and streaming polish had separate behavior, so the former could continue even when the old polish switch was off. Old disabled values, including already-migrated configurations, now normalize to enabled on load and settings IPC and are saved durably. Existing platform, provider and secure-target compatibility gates remain.
+- **Device settings before computer shortcuts.** Settings navigation now starts Recording → Device → Shortcuts. Existing service and writing navigation from build281 is retained.
+
+Controlled native checks covered defaults, old disk/IPC values, durable migration without other preference changes, stable rereads and existing streaming eligibility gates. Actual React and the final packaged frontend confirmed the new order and absent switch. The end-of-recording complete-copy choice and automatic-send settings remain independent and preserved. Recording/endpoint/insertion implementations, model thresholds, storage format and Firmware38 are unchanged. Original intermittent wake and other previously scoped real-use limits remain open.
+
+## Included from build281
 
 ## What’s changed since build280
 
@@ -150,15 +159,17 @@ US$49 is the hardware price. Type is free and open source. No ready-to-use offic
 
 ## File identity
 
-- Windows runtime source: `acf6a087c203eaf3ab20c3d4270f6c3d062dc32a` · build281.
-- Windows MSI: 305733632 bytes · SHA256 `805c72b97fbc229fba0d0a2b90e1a3ff037d642a6b41a4ee6bc3d41899970a13`.
+- Windows runtime source: `14c99b45b2245ac764cfc7bcc66062c2be866db2` · build282.
+- Windows MSI: 305717248 bytes · SHA256 `849dbdb070962de1b92619abd926fbb1a80d7f234912177bb36602aaffa61ed6`.
 - The release tag includes a documentation-only follow-up that aligns the download pages; application/build inputs match the runtime source above.
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`.
 - Firmware ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`.
 
 ## 中文说明
 
-本次Type281理顺服务与按键上下文：服务按声音转文字／文字处理分开查看，隐藏时仍保留表单和保存状态；文字工作区、已保存文字进入子设置／按键布局时暂停父窗口显示，返回保留原内容，凭据待保存完成再返回。固定短语和其它按键动作分开选择，窄窗主动切换会显示编辑区；输入草稿不以尚未应用的风格命名，风格摘要明确可更改。保存格式、原文、布局权限、真实提供商、录音、唤醒、流式／完整复制及FW38不变；原间歇唤醒仍开放。
+本次Type282：设备移到快捷键上方；去掉流式输入开关，旧配置里已经迁移过的关闭值也统一启用并持久化。录音逐段上屏、润色流式与原平台/提供方兼容保护保留；结束后复制完整终稿、自动发送等独立选项不变，不重新粘贴整稿。录音/收尾/粘贴实现、声纹门限、模型和FW38未改，旧间歇唤醒仍开放。
+
+此前Type281：服务按声音转文字／文字处理分开查看，隐藏时仍保留表单和保存状态；文字工作区、已保存文字进入子设置／按键布局时暂停父窗口显示，返回保留原内容，凭据待保存完成再返回。固定短语和其它按键动作分开选择，窄窗主动切换会显示编辑区；输入草稿不以尚未应用的风格命名，风格摘要明确可更改。保存格式、原文、布局权限、真实提供商、录音、唤醒、流式／完整复制及FW38不变；原间歇唤醒仍开放。
 
 此前Type280：工具页前置文字处理和已保存文字；一处选择整理／起草／翻译，邮件类型在起草下选择，风格选项默认收起、翻译才展开语言与方式。输入和已有编辑结果保留，切换不自动处理、不激活日常听写风格；已保存文字同时容纳输入草稿及处理结果，保存格式和原件规则不变。本机／公开／桌面同步同包；录音后端、唤醒门限、自动结束、流式／完整复制与Firmware38未改，原间歇唤醒仍开放。
 
