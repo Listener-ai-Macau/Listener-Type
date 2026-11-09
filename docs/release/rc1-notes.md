@@ -1,9 +1,20 @@
-# Listener v1.0.6-rc1 · Type build280 / Firmware38
+# Listener v1.0.6-rc1 · Type build281 / Firmware38
 
 | Download | File |
 | --- | --- |
-| **Windows app** | **[Download MSI · build280](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · build281](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | Firmware · USB flashing or Bluetooth OTA | [Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip) |
+
+## What’s changed since build280
+
+- **Set up one service purpose at a time.** Provider settings separates speech-to-text from text processing, with plain descriptions of their roles. Both forms stay mounted when switching the visible purpose, so entered values and pending saves remain intact. Opening a purpose does not switch the actual provider, submit a connection check or change the recording source. Context-specific text/speech setup still opens its own existing form.
+- **Return to the writing you started with.** Opening text-service setup or a key layout suspends the originating workspace dialog while retaining its input, edited result and scroll state. Saved text behaves the same way when opening a layout. The active child has an explicit return label; credential writes still finish before returning. Key layouts opened from a result are siblings of the suspended dialog, so they remain visible.
+- **Choose fixed text or another key action explicitly.** The saved-text/result entry now says it sets a fixed key phrase. Inside the layout, fixed text and other key actions have separate views; the supplied text remains available when switching back. Action editing is directly visible, and an explicit purpose/action change reveals the editor in a narrow window. Existing save/revision/unsaved-change protection and device-application rules are retained.
+- **Name the input for what it is.** An input draft no longer inherits an unexecuted style name. The style summary explicitly offers changing it; saved results and original text retain their existing storage rules.
+
+Controlled React checks covered retained credential fields without provider/preference mutation, delayed credential saves before returning, one active editing dialog, retained input/edited result, fixed-text/action switching, layout saves and unsaved-return protection. The exact final packaging frontend was also exercised through unmodified browser mocks in all five UI languages and a narrow desktop view. These are scoped software-interface checks, not real cloud, hardware, microphone or clipboard acceptance. Recording, wake thresholds, streaming/final-copy logic, storage schema and Firmware38 are unchanged; the original intermittent wake issue remains open.
+
+## Included from build280
 
 ## What’s changed since build279
 
@@ -139,15 +150,17 @@ US$49 is the hardware price. Type is free and open source. No ready-to-use offic
 
 ## File identity
 
-- Windows runtime source: `d9fac6b876928b236f7747265e34100ebdc77577` · build280.
-- Windows MSI: 305733632 bytes · SHA256 `0f12bd3e0aa7cb09f9ce3f8f5fe9442d3a5349b922367bfe7203a58bdc522539`.
+- Windows runtime source: `acf6a087c203eaf3ab20c3d4270f6c3d062dc32a` · build281.
+- Windows MSI: 305733632 bytes · SHA256 `805c72b97fbc229fba0d0a2b90e1a3ff037d642a6b41a4ee6bc3d41899970a13`.
 - The release tag includes a documentation-only follow-up that aligns the download pages; application/build inputs match the runtime source above.
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`.
 - Firmware ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`.
 
 ## 中文说明
 
-本次Type280简化文字使用流程：工具页前置文字处理和已保存文字；一处选择整理／起草／翻译，邮件类型在起草下选择，风格选项默认收起、翻译才展开语言与方式。输入和已有编辑结果保留，切换不自动处理、不激活日常听写风格；已保存文字同时容纳输入草稿及处理结果，保存格式和原件规则不变。本机／公开／桌面同步同包；录音后端、唤醒门限、自动结束、流式／完整复制与Firmware38未改，原间歇唤醒仍开放。
+本次Type281理顺服务与按键上下文：服务按声音转文字／文字处理分开查看，隐藏时仍保留表单和保存状态；文字工作区、已保存文字进入子设置／按键布局时暂停父窗口显示，返回保留原内容，凭据待保存完成再返回。固定短语和其它按键动作分开选择，窄窗主动切换会显示编辑区；输入草稿不以尚未应用的风格命名，风格摘要明确可更改。保存格式、原文、布局权限、真实提供商、录音、唤醒、流式／完整复制及FW38不变；原间歇唤醒仍开放。
+
+此前Type280：工具页前置文字处理和已保存文字；一处选择整理／起草／翻译，邮件类型在起草下选择，风格选项默认收起、翻译才展开语言与方式。输入和已有编辑结果保留，切换不自动处理、不激活日常听写风格；已保存文字同时容纳输入草稿及处理结果，保存格式和原件规则不变。本机／公开／桌面同步同包；录音后端、唤醒门限、自动结束、流式／完整复制与Firmware38未改，原间歇唤醒仍开放。
 
 此前Type279：录音、快捷键和设备在前，服务准备与语言权限在后；流式输入、完成后复制、去语气词和发送按键集中到录音页，原设置值与实际行为不变。胶囊/声音、历史、启动与诊断下移；固件维护默认收起，首次展开才加载，之后折叠不销毁进行中的操作。切换分类从顶部阅读，窄窗麦克风选择器与选中标记跟随布局。没有更改录音后端、声纹/唤醒门限、自动结束、最终复制、数据格式或Firmware38；唤醒不灵敏的原间歇问题仍开放。界面工程核验与隔离AI模拟使用不冒充真实语音、实物或长期通过。
 
