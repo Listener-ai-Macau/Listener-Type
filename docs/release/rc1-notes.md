@@ -1,9 +1,20 @@
-# Listener v1.0.6-rc1 · Type build277 / Firmware38
+# Listener v1.0.6-rc1 · Type build278 / Firmware38
 
 | Download | File |
 | --- | --- |
-| **Windows app** | **[Download MSI · build277](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · build278](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | Firmware · USB flashing or Bluetooth OTA | [Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip) |
+
+## What’s changed since build277
+
+- **Save input before processing.** The text workspace can explicitly save an input draft without a recognition or text-service request. It shows whether the current input is saved and links to that exact saved copy. Later edits save separately using the existing immutable draft IDs and original-text storage. Saved input is available from History → Saved drafts; it is separate from dictation history. The browser preview keeps it in the current page session only, while the installed app uses the existing local draft store.
+- **Edit a copy from History.** Open a record in the text workspace, edit it and explicitly save a separate copy. The original history entry stays unchanged. Opening this workspace does not process, send, paste or copy the text. Closing it refreshes the saved-draft count. Entries over the existing4,000-character workspace limit stay complete in History; the copy action explains the limit instead of truncating them.
+- **State the processing route accurately.** An unavailable or still-unconfirmed route no longer means that the selected style is local. The browser preview explicitly says it does not process or submit the body. A confirmed native local style, optional service-based shortening and text-service style keep separate notices. Text is still submitted only by an explicit processing action; no credentials, service routes or charges are added by this change.
+- **Start settings with everyday recording.** Recording, providers and local recognition appear before device customization. Default settings opens Recording for both microphone and device users; explicit links to device/provider pages keep their destinations. Opening settings does not change the input-source choice. Hardware and firmware controls remain available in their existing sections.
+
+The matching production frontend was exercised in isolated browser conditions. Input-save/reopen, immutable revisions, history-copy editing, the separate library/count, narrow-window controls and the existing automatic/fixed source controls were checked. Independent AI simulated feedback is recorded separately from real customer use. The preview has no real microphone, device, native insertion or configured service, so it does not establish recognition quality or the full real speech workflow. There is no recording/backend, firmware, model, voiceprint, preference or data-schema change in this batch. The prior intermittent acoustic, manual-stop/slow-target and long-term limits remain open.
+
+## Included from build277
 
 ## What’s changed since build272
 
@@ -106,15 +117,19 @@ US$49 is the hardware price. Type is free and open source. No ready-to-use offic
 
 ## File identity
 
-- Windows runtime source: `91b962541bf9d62e1fffc1974c2a332090ce0cf0` · build277.
-- Windows MSI: 305737728 bytes · SHA256 `9bb4a59cc15bdab631d84d85b776252f9b5e9523743de2cc8c38ff3e0da22e75`.
+- Windows runtime source: `94e0407d3cc0718e65f3f0414a2cb09b270dfd4a` · build278.
+- Windows MSI: 305741824 bytes · SHA256 `d1e21a93003fbb682a44cb78a459eb74aafd582833e32aa1294888375e163e1f`.
 - The release tag includes a documentation-only follow-up that aligns the download pages; application/build inputs match the runtime source above.
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`.
 - Firmware ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`.
 
 ## 中文说明
 
-本次发布已安装并核对实际所选来源启动的 Type277。Windows电脑麦克风使用火山识别时，快捷键／界面开始与语音开始统一注册本会话录音能力，复用说话检测、原3秒新鲜安静证明、同recorder／session／epoch防过期、尾句普通流式及共同finalizer；快捷键自动结束不再要求开启电脑待机唤醒，也不再借用wake runtime归属。其它识别提供方保留原结束方式，手动结束仍可用。
+本次Type278集中整理日用文字流程：文字尚未处理、服务尚未配置时，也可明确保存输入草稿，再从「历史 → 已保存成稿」找回；后续修改另存副本，不覆盖旧保存。历史详情新增「编辑副本」，在文字工作区修改、另存，原历史完整保留，打开不自动发送／处理／复制／粘贴；超出现有4,000字符上限时明确说明，不截断。成稿库和听写历史仍分别存放，预览仅当前页面会话，安装版沿原本机保存。
+
+同时修正处理位置的误导：预览／不可用／未确认不再显示成已确认本机处理，原本机风格、服务风格及可选缩短动作各有相应说明，真实提交仍由用户明确点击。设置默认先打开录音，服务／本地识别在设备定制前，设备／提供商深链保持，不修改输入源和已有偏好。本批实际React保存／找回／原件保持／计数／窄窗／输入来源检查与独立AI模拟反馈分开记录；未把预览当真人、真实语音、硬件或全部兼容验收。录音后端／尾句finalizer／完成完整复制／模型声纹／数据schema及Firmware38均未改；原间歇范围继续开放。
+
+包含此前Type277：本次发布已安装并核对实际所选来源启动的 Type277。Windows电脑麦克风使用火山识别时，快捷键／界面开始与语音开始统一注册本会话录音能力，复用说话检测、原3秒新鲜安静证明、同recorder／session／epoch防过期、尾句普通流式及共同finalizer；快捷键自动结束不再要求开启电脑待机唤醒，也不再借用wake runtime归属。其它识别提供方保留原结束方式，手动结束仍可用。
 
 语音定位恢复较慢时，原FIFO可能仍逐个消费旧通知；现在合并有界通知，读到原ring中当前已收到的真实PCM，旧通知不得倒退解码时钟，中间音频不丢、不当静音。原模型门限、native词尾、完整词确认及本人校验保持。受控阻塞对照旧通知160ms／实际11720ms，新路径可处理当前来源，完整词通过而近词继续拒绝、正文音频保持；不是所有场景的固定延迟收益，也未据此关闭全部真实间歇原因。
 
