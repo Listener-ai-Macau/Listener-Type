@@ -568,6 +568,14 @@ fn persist_settings<T: SettingsWriter>(
 }
 
 #[tauri::command]
+pub fn set_ui_locale(app: AppHandle, preference: String, resolved: String) -> Result<(), String> {
+    if crate::tray_locale::set(&preference, &resolved)? {
+        crate::refresh_tray_microphone_menu(&app).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub fn set_settings(
     coord: CoordinatorState<'_>,
     app: AppHandle,

@@ -74,6 +74,7 @@ mod startup_evidence;
 mod timeline;
 mod transcript_boundary;
 mod types;
+mod tray_locale;
 mod device_key_profile;
 mod device_layouts;
 mod saved_text_drafts;
@@ -819,7 +820,6 @@ pub fn run() {
                     .on_menu_event(move |app, event| match event.id.as_ref() {
                         "quit" => request_app_quit(app),
                         "dark-mode" => handle_dark_mode_toggle(app),
-                        "acceptance" => show_acceptance_window(app),
                         id => {
                             if handle_style_tray_menu_event(app, id) {
                                 return;
@@ -959,6 +959,7 @@ pub fn run() {
             commands::reset_capsule_position,
             commands::move_capsule,
             commands::set_settings,
+            commands::set_ui_locale,
             commands::set_cloud_account_session,
             commands::clear_cloud_account_session,
             commands::get_cloud_account_status,
@@ -1252,7 +1253,7 @@ fn tray_style_menu_enabled() -> bool {
     cfg!(target_os = "windows")
 }
 
-fn tray_polish_mode_menu_entries(selected: PolishMode) -> Vec<TrayPolishModeMenuEntry> {
+fn tray_polish_mode_menu_entries(selected: PolishMode, locale: tray_locale::UiLocale) -> Vec<TrayPolishModeMenuEntry> {
     [
         (PolishMode::Raw, "style-raw"),
         (PolishMode::Light, "style-light"),
@@ -1262,7 +1263,7 @@ fn tray_polish_mode_menu_entries(selected: PolishMode) -> Vec<TrayPolishModeMenu
     .into_iter()
     .map(|(mode, id)| TrayPolishModeMenuEntry {
         id: id.to_string(),
-        label: mode.display_name(),
+        label: locale.style(mode),
         mode,
         checked: mode == selected,
     })
@@ -1293,11 +1294,11 @@ fn build_tray_menu<M: Manager<tauri::Wry>>(
 ) -> tauri::Result<TrayMenu> {
     let input_source_menu = build_input_source_tray_menu(app, coordinator)?;
     let microphone_menu = build_microphone_tray_menu(app, coordinator)?;
-    let dark_mode = CheckMenuItemBuilder::with_id("dark-mode", "深色模式")
+    let locale = tray_locale::current();
+    let dark_mode = CheckMenuItemBuilder::with_id("dark-mode", locale.text(["深色模式", "深色模式", "Dark mode", "ダークモード", "다크 모드"]))
         .checked(coordinator.prefs().get().dark_mode)
         .build(app)?;
-    let acceptance = MenuItemBuilder::with_id("acceptance", "验收清单…").build(app)?;
-    let quit = MenuItemBuilder::with_id("quit", "退出 Listener Type").build(app)?;
+    let quit = MenuItemBuilder::with_id("quit", locale.text(["退出 Listener Type", "結束 Listener Type", "Quit Listener Type", "Listener Type を終了", "Listener Type 종료"])) .build(app)?;
     let mut builder = MenuBuilder::new(app);
     let style_menu = if tray_style_menu_enabled() {
         Some(build_style_tray_menu(app, coordinator)?)
@@ -1312,7 +1313,6 @@ fn build_tray_menu<M: Manager<tauri::Wry>>(
             &dark_mode,
             &input_source_menu.submenu,
             &microphone_menu.submenu,
-            &acceptance,
             &quit,
         ])
         .build()?;
@@ -1332,8 +1332,9 @@ fn build_style_tray_menu<M: Manager<tauri::Wry>>(
         .get_or_default_active(&prefs.active_style_pack_id)
         .map(|pack| pack.base_mode)
         .unwrap_or(prefs.default_mode);
-    let mut submenu = SubmenuBuilder::with_id(app, "style", "输出风格");
-    for entry in tray_polish_mode_menu_entries(selected) {
+    let locale = tray_locale::current();
+    let mut submenu = SubmenuBuilder::with_id(app, "style", locale.text(["输出风格", "輸出風格", "Output style", "出力スタイル", "출력 스타일"]));
+    for entry in tray_polish_mode_menu_entries(selected, locale) {
         let item = CheckMenuItemBuilder::with_id(&entry.id, entry.label)
             .checked(entry.checked)
             .build(app)?;
@@ -1351,16 +1352,17 @@ fn build_input_source_tray_menu<M: Manager<tauri::Wry>>(
     let prefs = coordinator.prefs().get();
     let selected = prefs.dictation_input_source;
     let manual = prefs.dictation_input_source_user_overridden;
-    let automatic = CheckMenuItemBuilder::with_id("input-source-auto", "自动（设备优先）")
+    let locale = tray_locale::current();
+    let automatic = CheckMenuItemBuilder::with_id("input-source-auto", locale.text(["自动（设备优先）", "自動（裝置優先）", "Automatic (device first)", "自動（デバイス優先）", "자동(기기 우선)"]))
         .checked(!manual)
         .build(app)?;
-    let microphone = CheckMenuItemBuilder::with_id("input-source-microphone", "麦克风")
+    let microphone = CheckMenuItemBuilder::with_id("input-source-microphone", locale.text(["麦克风", "麥克風", "Microphone", "マイク", "마이크"]))
         .checked(manual && selected == DictationInputSource::Microphone)
         .build(app)?;
     let embedded_ble = CheckMenuItemBuilder::with_id("input-source-embedded-ble", "Listener BLE")
         .checked(manual && selected == DictationInputSource::EmbeddedBle)
         .build(app)?;
-    let submenu = SubmenuBuilder::with_id(app, "input-source", "输入源")
+    let submenu = SubmenuBuilder::with_id(app, "input-source", locale.text(["输入源", "輸入來源", "Input source", "入力ソース", "입력 소스"]))
         .items(&[&automatic, &microphone, &embedded_ble])
         .build()?;
     Ok(InputSourceTrayMenu { submenu })
@@ -1372,7 +1374,8 @@ fn build_microphone_tray_menu<M: Manager<tauri::Wry>>(
 ) -> tauri::Result<MicrophoneTrayMenu> {
     let selected = coordinator.prefs().get().microphone_device_name;
     let mut items = Vec::new();
-    let mut submenu = SubmenuBuilder::with_id(app, "microphone", "选择麦克风");
+    let locale = tray_locale::current();
+    let mut submenu = SubmenuBuilder::with_id(app, "microphone", locale.text(["选择麦克风", "選擇麥克風", "Choose microphone", "マイクを選択", "마이크 선택"]));
     let devices = match recorder::list_input_devices() {
         Ok(devices) => devices,
         Err(err) => {
@@ -1383,7 +1386,7 @@ fn build_microphone_tray_menu<M: Manager<tauri::Wry>>(
     let selected_available =
         selected.trim().is_empty() || devices.iter().any(|device| device.name == selected);
 
-    let default_item = CheckMenuItemBuilder::with_id("mic-default", "系统默认麦克风")
+    let default_item = CheckMenuItemBuilder::with_id("mic-default", locale.text(["系统默认麦克风", "系統預設麥克風", "System default microphone", "システム既定のマイク", "시스템 기본 마이크"]))
         .checked(selected.trim().is_empty() || !selected_available)
         .build(app)?;
     submenu = submenu.item(&default_item);
@@ -1394,7 +1397,7 @@ fn build_microphone_tray_menu<M: Manager<tauri::Wry>>(
     });
 
     if devices.is_empty() {
-        let empty = MenuItemBuilder::with_id("mic-empty", "未发现麦克风")
+        let empty = MenuItemBuilder::with_id("mic-empty", locale.text(["未发现麦克风", "找不到麥克風", "No microphones found", "マイクが見つかりません", "마이크를 찾을 수 없습니다"]))
             .enabled(false)
             .build(app)?;
         submenu = submenu.item(&empty);
@@ -1402,7 +1405,7 @@ fn build_microphone_tray_menu<M: Manager<tauri::Wry>>(
         for (index, device) in devices.into_iter().enumerate() {
             let id = format!("mic-device-{index}");
             let label = if device.is_default {
-                format!("{}（系统默认）", device.name)
+                format!("{} ({})", device.name, locale.text(["系统默认", "系統預設", "system default", "システム既定", "시스템 기본값"]))
             } else {
                 device.name.clone()
             };
@@ -1429,6 +1432,9 @@ pub(crate) fn refresh_tray_microphone_menu(app: &AppHandle) -> tauri::Result<()>
     let tray_menu = build_tray_menu(app, &coordinator)?;
     if let Some(tray) = app.tray_by_id("main-tray") {
         tray.set_menu(Some(tray_menu.menu))?;
+        if let Some(view) = net_health::latest_network_health_payload() {
+            tray.set_tooltip(Some(format!("Listener Type · {}", tray_locale::current().network_status(view.class))))?;
+        }
     }
     let state = app.state::<commands::TrayMicrophoneMenuState>();
     *state.lock() = tray_menu.microphone_items;
@@ -1453,7 +1459,7 @@ fn start_network_health_light<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
                 return;
             }
             if let Some(tray) = app_for_tray.tray_by_id("main-tray") {
-                let _ = tray.set_tooltip(Some(format!("Listener Type · {}", view.message)));
+                let _ = tray.set_tooltip(Some(format!("Listener Type · {}", tray_locale::current().network_status(view.class))));
                 if let Some(icon) = icon {
                     if let Err(err) = tray.set_icon(Some(icon)) {
                         log::warn!("[net-health] tray light icon set failed: {err}");
@@ -1919,39 +1925,6 @@ pub fn log_dir_path() -> std::path::PathBuf {
         }
         std::env::temp_dir().join(app_profile_dir_name())
     }
-}
-
-/// 验收清单弹窗(2026-09-22 起的分轮人工验收):托盘菜单「验收清单…」。
-/// always-on-top 小窗,场景勾完一键复制结果发回开发侧。窗口本体在
-/// tauri.conf.json 声明(按需创建),首次打开时才加载其 WebView。
-fn show_acceptance_window<R: Runtime>(app: &AppHandle<R>) {
-    let window = if let Some(window) = app.get_webview_window("acceptance") {
-        window
-    } else {
-        let Some(config) = app
-            .config()
-            .app
-            .windows
-            .iter()
-            .find(|config| config.label == "acceptance")
-        else {
-            log::warn!("[acceptance] window missing from config");
-            return;
-        };
-        match tauri::WebviewWindowBuilder::from_config(app, config)
-            .and_then(|builder| builder.build())
-        {
-            Ok(window) => window,
-            Err(error) => {
-                log::warn!("[acceptance] create window failed: {error}");
-                return;
-            }
-        }
-    };
-    let _ = window.show();
-    let _ = window.unminimize();
-    let _ = window.set_focus();
-    log::info!("[acceptance] window shown");
 }
 
 fn ensure_main_window<R: Runtime>(app: &AppHandle<R>) -> Result<WebviewWindow<R>, String> {
@@ -3972,7 +3945,7 @@ mod tests {
 
     #[test]
     fn tray_style_menu_lists_builtin_modes_in_expected_order() {
-        let entries = tray_polish_mode_menu_entries(PolishMode::Structured);
+        let entries = tray_polish_mode_menu_entries(PolishMode::Structured, crate::tray_locale::UiLocale::ZhCn);
 
         assert_eq!(
             entries
@@ -3982,7 +3955,7 @@ mod tests {
             vec![
                 ("style-raw", "原文", PolishMode::Raw, false),
                 ("style-light", "轻度润色", PolishMode::Light, false),
-                ("style-structured", "清晰结构", PolishMode::Structured, true),
+                ("style-structured", "技术指令", PolishMode::Structured, true),
                 ("style-formal", "正式表达", PolishMode::Formal, false),
             ]
         );

@@ -25,6 +25,7 @@ import { sourceFactMessages } from './sourceFacts';
 import { settingsOrganizationMessages } from './settingsOrganization';
 import { simpleTextWorkflowMessages } from './simpleTextWorkflow';
 import { guidedSetupMessages } from './guidedSetup';
+import { deviceMaintenanceMessages } from './deviceMaintenance';
 
 export const SUPPORTED_LOCALES = ['zh-CN', 'zh-TW', 'en', 'ja', 'ko'] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
@@ -94,6 +95,9 @@ export default i18n;
 for (const [locale, settingsOrganization] of Object.entries(settingsOrganizationMessages)) {
   i18n.addResourceBundle(locale, 'translation', { settingsOrganization }, true, true);
 }
+for (const [locale, settings] of Object.entries(deviceMaintenanceMessages)) {
+  i18n.addResourceBundle(locale, 'translation', { settings }, true, true);
+}
 
 for (const [locale, qaPreparation] of Object.entries(qaPreparationMessages)) {
   i18n.addResourceBundle(locale, 'translation', { qaPreparation }, true, true);
@@ -146,6 +150,30 @@ const LOCALE_CHANGED_EVENT = 'listener-type:ui-locale-changed';
 const localeWindowId = Math.random().toString(36).slice(2);
 const validPreference = (value: unknown): value is SupportedLocale | typeof FOLLOW_SYSTEM_VALUE =>
   value === FOLLOW_SYSTEM_VALUE || SUPPORTED_LOCALES.includes(value as SupportedLocale);
+
+// Only the main window publishes UI language to native menus. Keep it separate
+// from speech/output preferences, and serialize writes so a late old locale
+// cannot replace the user's latest choice.
+let nativeLocaleQueue = Promise.resolve();
+let nativeLocaleGeneration = 0;
+let nativeLocalePublished = '';
+function syncNativeLocale() {
+  if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
+  const generation = ++nativeLocaleGeneration;
+  const preference = getLocalePreference();
+  const resolved = resolveLocalePreference(preference);
+  const signature = JSON.stringify([preference, resolved]);
+  nativeLocaleQueue = nativeLocaleQueue.catch(() => undefined).then(async () => {
+    const [{ getCurrentWindow }, { invoke }] = await Promise.all([
+      import('@tauri-apps/api/window'), import('@tauri-apps/api/core'),
+    ]);
+    if (generation !== nativeLocaleGeneration || getCurrentWindow().label !== 'main' || signature === nativeLocalePublished) return;
+    await invoke('set_ui_locale', { preference, resolved });
+    nativeLocalePublished = signature;
+  }).catch(cause => console.warn('[i18n] native menu language unavailable', cause));
+}
+i18n.on('languageChanged', syncNativeLocale);
+syncNativeLocale();
 
 // Each native WebView has its own i18next instance. Persisting the main view's
 // choice alone leaves an already-created QA/capsule view in its old language.

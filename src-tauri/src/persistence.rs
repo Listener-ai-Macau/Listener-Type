@@ -189,6 +189,15 @@ pub(crate) fn capsule_placement_path() -> Result<PathBuf> {
     Ok(data_dir()?.join("capsule-position.json"))
 }
 
+pub(crate) fn ui_locale_path() -> Result<PathBuf> {
+    Ok(data_dir()?.join("ui-locale.json"))
+}
+
+pub(crate) fn write_ui_locale(path: &Path, bytes: &[u8]) -> Result<()> {
+    if let Some(parent) = path.parent() { fs::create_dir_all(parent)?; }
+    atomic_write(path, bytes)
+}
+
 pub(crate) fn local_device_layouts_path() -> Result<PathBuf> {
     Ok(data_dir()?.join("device-layouts.json"))
 }
