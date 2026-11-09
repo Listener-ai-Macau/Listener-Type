@@ -1478,14 +1478,11 @@ pub struct UserPreferences {
     /// - 仅 OpenAI-compatible provider 实装（v1）；Gemini / Codex provider 走原一次性
     ///   插入路径
     ///
-    /// 默认 true（自 1.3.2-3 起）—— 流式落字感知延迟低，所有 fallback case 都已经接好，
-    /// 让开箱即用就能体验。CJK IME / Codex / Gemini provider 自动回落到一次性路径，
-    /// 用户无感。详见上面「限制」段。
+    /// 旧配置兼容字段。现在固定开启，不再提供流式输入开关；不支持流式的
+    /// 提供方、目标和平台仍沿原兼容回退。反序列化统一忽略旧关闭值。
     #[serde(default = "default_true")]
     pub streaming_insert: bool,
-    /// issue #440 的一次性迁移标记。老版本会把默认 `streamingInsert:false`
-    /// 写进 preferences.json，升级后仅看 bool 无法区分「老默认」和「用户手动关」。
-    /// 缺少此标记的旧文件统一迁到 true；迁移后用户再关会带着标记保存，后续保留 false。
+    /// issue #440 的历史迁移标记。保留为 true，兼容旧配置与旧客户端。
     #[serde(default)]
     pub streaming_insert_default_migrated: bool,
     /// 流式输入成功后是否把最终润色文本写回剪贴板。一次性路径天然走剪贴板，所以
@@ -1840,12 +1837,11 @@ impl<'de> Deserialize<'de> for UserPreferences {
             None => default_dictation_hotkey_from_legacy(&hotkey, &wire.custom_combo_hotkey)
                 .map_err(serde::de::Error::custom)?,
         };
-        let streaming_insert_default_migrated = wire.streaming_insert_default_migrated;
-        let streaming_insert = if streaming_insert_default_migrated {
-            wire.streaming_insert
-        } else {
-            true
-        };
+        // Streaming output is the product behavior, not a user preference.
+        // Accept retired fields from disk/IPC, but never restore an old opt-out.
+        let _legacy_streaming_settings =
+            (wire.streaming_insert, wire.streaming_insert_default_migrated);
+        let streaming_insert = true;
         let remove_filler_words = if wire.remove_filler_words_default_migrated {
             wire.remove_filler_words
         } else {
@@ -3713,9 +3709,7 @@ mod tests {
         assert!(explicit_fifty_after_migration.device_led_brightness_102_default_migrated);
     }
 
-    /// issue #440: 老版本会把默认 `streamingInsert:false` 写进 preferences.json。
-    /// 缺少迁移标记的旧文件统一迁到 true；带有迁移标记后，用户再手动关掉的 false
-    /// 必须保留。
+    /// Missing and pre-migration preferences both retain streaming output.
     #[test]
     fn streaming_insert_defaults_to_enabled_for_missing_or_legacy_unmigrated_pref() {
         let prefs = UserPreferences::default();
@@ -3740,7 +3734,7 @@ mod tests {
     }
 
     #[test]
-    fn streaming_insert_preserves_explicit_disabled_value() {
+    fn retired_streaming_switch_is_enabled_without_changing_clipboard_choice() {
         let prefs: UserPreferences = serde_json::from_str(
             r#"{
                 "streamingInsert": false,
@@ -3750,7 +3744,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(!prefs.streaming_insert);
+        assert!(prefs.streaming_insert);
         assert!(prefs.streaming_insert_default_migrated);
         assert!(!prefs.streaming_insert_save_clipboard);
     }

@@ -9,27 +9,8 @@ import { SettingRow, Toggle, inputStyle } from './shared';
 export function DictationOutputSettings() {
   const { t } = useTranslation();
   const { prefs, updatePrefs: savePrefs } = useHotkeySettings();
-  const os = detectOS();
-  const isMac = os === 'mac';
-  const isWin = os === 'win';
   if (!prefs) return null;
   return <>
-        <SettingRow
-          label={t('settings.advanced.streamingInsertLabel')}
-          desc={t(
-            isMac
-              ? 'settings.advanced.streamingInsertHintMac'
-              : isWin
-                ? 'settingsOrganization.streamingHintWindows'
-                : 'settings.advanced.streamingInsertHintLinux'
-          )}>
-          <Toggle
-            on={!!prefs?.streamingInsert}
-            onToggle={(next) => {
-              if (prefs) void savePrefs({ ...prefs, streamingInsert: next });
-            }}
-          />
-        </SettingRow>
             <SettingRow
               label={t('settings.recording.removeFillerWordsLabel')}
               desc={t('settings.recording.removeFillerWordsDesc')}

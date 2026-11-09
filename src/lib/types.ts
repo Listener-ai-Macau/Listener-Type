@@ -552,12 +552,10 @@ export interface UserPreferences {
   darkMode: boolean;
   /** 自动更新渠道。当前固定为 'stable'，保留字段用于兼容旧配置。 */
   updateChannel: UpdateChannel;
-  /** 流式输入：润色 SSE 一边到达一边逐字模拟键盘事件输出到当前焦点。开启后用户感知到
-   *  的处理时延显著降低。v1 限定 macOS + OpenAI-compatible provider，其他配置自动回落
-   *  到原一次性插入。默认 true。 */
+  /** 旧配置兼容字段，后端固定为 true；流式输出不再提供用户开关。
+   *  不支持流式的提供方和目标仍保留原兼容回退。 */
   streamingInsert: boolean;
-  /** issue #440 一次性迁移标记：旧配置缺少该字段时后端会把老默认 false 迁到 true；
-   *  迁移后用户再手动关掉 streamingInsert 时保留 false。 */
+  /** 旧版本迁移标记，保留为 true 以兼容原配置。 */
   streamingInsertDefaultMigrated: boolean;
   /** 流式输入成功后是否把最终润色文本写回剪贴板。开启后 Cmd+V 还能重复粘贴该次输出，
    *  与一次性路径行为对齐。默认 true。 */

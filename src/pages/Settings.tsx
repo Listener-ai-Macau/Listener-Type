@@ -27,7 +27,7 @@ interface SettingsProps {
 export type SettingsSectionId = 'recording' | 'device' | 'providers' | 'localAsr' | 'shortcuts' | 'permissions' | 'language' | 'advanced';
 
 // Local preparation has its own destination; opening it does not activate a model.
-const SECTION_ORDER: SettingsSectionId[] = ['recording', 'shortcuts', 'device', 'providers', 'localAsr', 'language', 'permissions', 'advanced'];
+const SECTION_ORDER: SettingsSectionId[] = ['recording', 'device', 'shortcuts', 'providers', 'localAsr', 'language', 'permissions', 'advanced'];
 
 export function Settings({ embedded = false, initialSection = 'recording', initialProviderFocus, onSetupListener }: SettingsProps) {
   const { t } = useTranslation();

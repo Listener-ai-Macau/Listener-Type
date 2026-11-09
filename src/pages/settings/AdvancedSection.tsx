@@ -1,4 +1,4 @@
-// 高级设置：流式输入开关 / 同步剪贴板 / 本地 ASR 模型启用与禁用。
+// 高级设置：录音输出设置入口 / 本地 ASR 模型启用与禁用。
 // 拆出自 Settings.tsx，逻辑零改动；i18n key 全部保持 `settings.advanced.*`。
 
 import { useRef, useState } from 'react';
@@ -113,15 +113,6 @@ export function AdvancedSection({ onOpenRecording }: { onOpenRecording?: () => v
         </div>
       )}
 
-      {/* ─── 流式输入（全平台 opt-in） ───────────────────────────────────
-          润色 SSE 一边到达一边逐字模拟键盘事件落到光标。开启后用户感知到的处理
-          时延显著降低，但有几个限制（不满足时自动回落原一次性插入路径）：
-          - macOS：CGEvent Unicode + 临时切到 ABC 输入源（CJK / 日文 IME 拦截兜底）
-          - Windows：SendInput Unicode，绕过 TSF / IME，不需要切输入法
-          - Linux（实验）：X11 走 enigo + XTest；Wayland 下禁用流式输入并回落剪贴板
-          - 仅 OpenAI-compatible provider 实装；Gemini / Codex 透明降级
-          - 密码框 / 1Password / SSH prompt 等 Secure Input 框拒绝合成按键 → 失败回落
-          每个平台用各自的 hint key，互相不显示对方平台的细节。 */}
       <Card>
         <div style={{ fontSize: 13, fontWeight: 600 }}>{t('settingsOrganization.outputMoved')}</div>
         <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', margin: '6px 0 10px', lineHeight: 1.5 }}>{t('settingsOrganization.outputMovedDesc')}</div>

@@ -469,9 +469,8 @@ fn read_preferences(path: &Path) -> Result<UserPreferences> {
     let mut prefs = serde_json::from_slice::<UserPreferences>(&bytes)
         .with_context(|| format!("decode failed: {}", path.display()))?;
 
-    // issue #440：老版本可能已把旧默认 `streamingInsert:false` 写进 preferences.json。
-    // 反序列化会在内存里迁到 true，但还必须把迁移标记落盘，否则每次启动都停留在
-    // “旧文件”状态，无法表达用户后续手动关闭后的 durable opt-out。
+    // The streaming switch is retired. Persist the normalized value even when
+    // an old client had already written its migration marker alongside false.
     let raw_prefs = serde_json::from_slice::<serde_json::Value>(&bytes).ok();
     let streaming_default_migrated = raw_prefs
         .as_ref()
@@ -480,6 +479,11 @@ fn read_preferences(path: &Path) -> Result<UserPreferences> {
                 .get("streamingInsertDefaultMigrated")
                 .and_then(|flag| flag.as_bool())
         })
+        .unwrap_or(false);
+    let streaming_insert_enabled = raw_prefs
+        .as_ref()
+        .and_then(|value| value.get("streamingInsert"))
+        .and_then(|flag| flag.as_bool())
         .unwrap_or(false);
     let dictation_input_source_has_user_override_marker = raw_prefs
         .as_ref()
@@ -529,6 +533,7 @@ fn read_preferences(path: &Path) -> Result<UserPreferences> {
         prefs.active_asr_provider_default_migrated = true;
     }
     if !streaming_default_migrated
+        || !streaming_insert_enabled
         || !dictation_input_source_has_user_override_marker
         || !device_status_led_default_migrated
         || !device_key_led_default_migrated
@@ -3160,6 +3165,30 @@ mod tests {
                 .and_then(|value| value.as_bool()),
             Some(true)
         );
+
+        // Already-migrated false was the Owner's actual setting. Normalize it
+        // durably without changing independent output/clipboard preferences.
+        let mut previously_migrated = saved;
+        previously_migrated["streamingInsert"] = serde_json::json!(false);
+        previously_migrated["copyDictationToClipboard"] = serde_json::json!(false);
+        previously_migrated["copyFinalTextWithoutPasteConfirmation"] = serde_json::json!(false);
+        previously_migrated["sendKeyAfterDictation"] = serde_json::json!(false);
+        fs::write(&path, serde_json::to_vec_pretty(&previously_migrated).unwrap()).unwrap();
+        let normalized = read_preferences(&path).expect("read previously migrated prefs");
+        assert!(normalized.streaming_insert);
+        assert!(!normalized.copy_dictation_to_clipboard);
+        assert!(!normalized.copy_final_text_without_paste_confirmation);
+        assert!(!normalized.send_key_after_dictation);
+        let persisted = fs::read(&path).expect("read normalized prefs");
+        let normalized_json: serde_json::Value = serde_json::from_slice(&persisted).unwrap();
+        assert_eq!(normalized_json["streamingInsert"], true);
+        for (key, value) in previously_migrated.as_object().unwrap() {
+            if key != "streamingInsert" {
+                assert_eq!(&normalized_json[key], value, "unexpected change: {key}");
+            }
+        }
+        read_preferences(&path).expect("reread normalized prefs");
+        assert_eq!(fs::read(&path).unwrap(), persisted);
 
         let _ = fs::remove_dir_all(&tmp);
     }
