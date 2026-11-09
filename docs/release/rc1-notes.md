@@ -1,11 +1,28 @@
-# Listener v1.0.6-rc1 · Type build272 / Firmware38
+# Listener v1.0.6-rc1 · Type build277 / Firmware38
 
 | Download | File |
 | --- | --- |
-| **Windows app** | **[Download MSI · build272](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · build277](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | Firmware · USB flashing or Bluetooth OTA | [Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip) |
 
-## What’s changed since build271
+## What’s changed since build272
+
+- **Use one native ending path for keyboard and voice starts.** Windows computer-microphone sessions using Volcengine now register the same session capability for speech activity, endpoint policy and recorder stop. Keyboard/UI starts no longer require ownership by the optional wake listener to auto-finish. The existing fresh, fully analyzed quiet interval, current recorder/session/epoch, ordinary trailing-word delivery and complete-copy finalizer remain. Other recognition providers keep their existing ending behavior.
+- **Catch up voice input without discarding source audio.** If keyword timing recovery makes processing fall behind, the bounded wake notifications now coalesce into a retained-PCM snapshot through the current capture edge. Late notifications cannot rewind the decoder. Model thresholds, native word-boundary proof, independent complete-phrase confirmation and speaker checks are retained. A controlled blocked queue previously exposed only the first160ms notification while11720ms had arrived; the new path processes the available source and still confirms the full phrase and rejects a near phrase. This is a synthetic queue catch-up result, not a universal latency claim or proof of every real missed wake’s cause.
+
+- **Automatically choose the available input.** Automatic mode prefers the configured Listener only after its recording notify channel is ready; an OTA/USB identity or saved pairing alone does not select it. Without a ready device, it uses the computer microphone. Automatic is the default for preferences without a fixed-source override. Existing explicit fixed-source choices remain fixed until Automatic is selected in Settings → Recording or the tray.
+- **Finish active work before switching.** A link change waits for current dictation, question recording/processing and firmware OTA to finish. The current session keeps its original recorder and audio source. Device START/PCM cannot create a competing background session while computer input owns recording. Enabling Automatic also keeps an already attached device capture instead of restarting it.
+- **Keep reconnect discovery independent of the selected recorder.** Automatic mode retains the existing bounded device connection supervision while computer input is selected. A restored notify link can therefore become the next source without restarting Type. Routing itself waits on events; only a pending change during active work uses a light bounded interval check. No new standing voice model or firmware change is added. Computer-microphone wake remains a separate optional switch, off by default.
+- **Preserve automatic mode when settings are saved.** The automatic/fixed choice survives serialization. A later ordinary save cannot restore an older effective source from a stale UI snapshot. Settings and tray expose Automatic, computer microphone and Listener choices; narrow layouts retain visible source labels and controls.
+- **Withdraw the build276 identity change.** In real use, complete wake phrases were confirmed but the new source-bound owner check rejected several owner attempts. A previous normal trial did not establish stability. Build276 was withdrawn, and build277 restores build274’s owner decision and keyword/clock rules while separately repairing queue scheduling. Existing voiceprints, model assets and global thresholds are retained. The earlier acoustic false/missed wake, short-phrase, TV/replay and long-term limits remain open.
+
+Isolated production checks cover both availability directions, active dictation/QA/OTA deferral, a device START during computer capture, an attached link when Automatic is enabled, stale settings, preference migration and the existing cancellation/handoff/reconnect guards. Real React settings save the automatic/fixed choice correctly; the production frontend builds. The installed selected source and listening readiness are checked separately. These are not a complete physical unplug/reconnect cycle or a claim of long-term reliability. After restoring274 from the276 regression, the user reported normal operation; that feedback predates277 and is not presented as acceptance of its new automatic switching.
+
+Build273’s same-capture confirmation recovery and build274’s measured-onset native clock recovery are included. They keep the complete-phrase, retained-source, cancellation and one-time handoff rules. Build272 trailing-word delivery, the native Volcengine quiet-ending path and completion-only full copying remain below.
+
+## Included from build272
+
+### Trailing-word streaming since build271
 
 - **Confirm an unchanged new prefix while later words keep arriving.** The pending-fragment worker now uses the existing rolling revision ledger to plan complete, mature words after the submitted source boundary. Appended live words no longer restart the age of that earlier prefix or block an already-confirmed same-source result. The existing one-second maturity/context, sixty-second clip bound, single in-flight request and cumulative two-times-PCM replay budget remain in force.
 - **Accept a new-only decoder result at the correct audio occurrence.** A cropped decoder can legitimately omit the old, already-submitted context. For admitted ordinary capture, its first word must start after the submitted interval and match the first unsubmitted parent occurrence using the existing unique whole-token/retained-PCM midpoint matcher. A later repetition, unknown timing or overlapping old interval cannot skip words or repeat a submitted prefix. New words retain the child decoder’s own confirmation and coordinates and must match the current parent prefix. A conflicting child rendering stays pending. Identity-projected sources keep their existing strict seam/ownership checks.
@@ -89,15 +106,25 @@ US$49 is the hardware price. Type is free and open source. No ready-to-use offic
 
 ## File identity
 
-- Windows runtime source: `3aa74d5e22894f1c1e10b531b8aeba9b3c032ebf` · build272.
-- Windows MSI: 305717248 bytes · SHA256 `e4ad7090a10dd1aeb11d65e4db1dadff05929458c48b91eba4abd34efb562823`.
+- Windows runtime source: `91b962541bf9d62e1fffc1974c2a332090ce0cf0` · build277.
+- Windows MSI: 305737728 bytes · SHA256 `9bb4a59cc15bdab631d84d85b776252f9b5e9523743de2cc8c38ff3e0da22e75`.
 - The release tag includes a documentation-only follow-up that aligns the download pages; application/build inputs match the runtime source above.
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`.
 - Firmware ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`.
 
 ## 中文说明
 
-本次发布已在本机安装验证的 Type272。尾句补确认改为复用原滚动稳定记录，先处理已提交源边界之后的完整稳定新词，后续加字不再把前面稳定部分一起重等；同源child已确认结果也不再被父候选的新增长挡住。裁片识别若省略已上屏旧上下文，只有其第一个新词确实对应父流第一个未提交音频发生，才沿原whole-token／PCM midpoint匹配接续；不能跳到后面的重复词、借用父词时间或覆盖已提交内容。子结果与当前父文本冲突的部分继续待确认。保留原成熟／上下文时长、60秒单片／累计2倍PCM、单请求、防过期与身份边界，严格身份投影路径保持。
+本次发布已安装并核对实际所选来源启动的 Type277。Windows电脑麦克风使用火山识别时，快捷键／界面开始与语音开始统一注册本会话录音能力，复用说话检测、原3秒新鲜安静证明、同recorder／session／epoch防过期、尾句普通流式及共同finalizer；快捷键自动结束不再要求开启电脑待机唤醒，也不再借用wake runtime归属。其它识别提供方保留原结束方式，手动结束仍可用。
+
+语音定位恢复较慢时，原FIFO可能仍逐个消费旧通知；现在合并有界通知，读到原ring中当前已收到的真实PCM，旧通知不得倒退解码时钟，中间音频不丢、不当静音。原模型门限、native词尾、完整词确认及本人校验保持。受控阻塞对照旧通知160ms／实际11720ms，新路径可处理当前来源，完整词通过而近词继续拒绝、正文音频保持；不是所有场景的固定延迟收益，也未据此关闭全部真实间歇原因。
+
+新增自动选择：Listener 的实际录音通知通道就绪时优先使用设备，断开后回到电脑麦克风；只有USB／OTA可读或历史已配对不算录音就绪。听写、问答录音／处理和OTA进行中先保留原来源，收尾后再切，板子后台新START／PCM不能抢入电脑录音。自动模式下即使当前用电脑，也保留原设备连接监督以发现重连；切换不重开同一条已附着连接，正常等待由事件唤醒，不新增常驻声音模型。设置页和托盘可选自动、固定电脑、固定板子，旧明确手动选择不被更新强改；无固定标记的新设置默认为自动。电脑待机唤醒仍受原独立开关控制，默认关闭。
+
+276已因现场本人唤醒被拒撤回：完整词确认通过后，新身份窗／底线拒绝多次，旧一次“正常”不能抵消后失败。本版恢复274本人判定与关键词／时钟规则，另修通知队列，不靠降低底线掩盖已知错误声音控制，声纹资料、模型与全局门限保持；老间歇漏唤醒／旁人、电视和回放误开等限制继续开放。Owner恢复274后回传“恢复正常”，该回传发生在277安装前，不冒充新自动切换的真人验收。
+
+隔离真实生产路由已覆盖设备可用双向变化、听写／问答／OTA延后、后台START不得抢电脑、启用自动保留现有采集、旧设置保存不得撤回新来源、偏好迁移及原取消／交接／快速重连保护。真实React设置点击和请求标记、窄内容区布局以及前端构建通过；安装后另外核对实际来源和就绪日志。没有据此宣称实物拔插整轮、所有房间／机器及长期表现全通过。包含273同次确认恢复、274可靠源词时钟，原3秒收尾和完成后仅复制保持。
+
+包含已交付的Type272尾句流式修复：尾句补确认改为复用原滚动稳定记录，先处理已提交源边界之后的完整稳定新词，后续加字不再把前面稳定部分一起重等；同源child已确认结果也不再被父候选的新增长挡住。裁片识别若省略已上屏旧上下文，只有其第一个新词确实对应父流第一个未提交音频发生，才沿原whole-token／PCM midpoint匹配接续；不能跳到后面的重复词、借用父词时间或覆盖已提交内容。子结果与当前父文本冲突的部分继续待确认。保留原成熟／上下文时长、60秒单片／累计2倍PCM、单请求、防过期与身份边界，严格身份投影路径保持。
 
 完整非私人合成语音实测中，父流仍在加字时，新片段在6.330秒可交付，较等待下一主批10.039秒约早3.709秒，42字完整终稿保留。该对照是本批首个未发布候选的受阻路径，不是所有输入、271或整机CPU的固定降幅；本机272实际听写中，Owner回传“尾句更及时，也能自动结束”；数字记录为20／13／21字三次普通流式分批，全部54字在自动STOP前约2.88秒已派发，随后54字完整复制Stored、恢复待机，无收尾补粘贴。未独立读取输入框或剪贴板正文，单次正常不外推全部间歇场景。片段确认使用已配置识别服务，可能增加有界用量。当前自动结束、原流式粘贴、历史以及完成后仅完整复制保持。
 

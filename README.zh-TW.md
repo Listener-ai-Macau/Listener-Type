@@ -10,7 +10,7 @@
 
 | 用途 | 直接下載 |
 | --- | --- |
-| **Windows 軟體** | **[下載 MSI · Type build272](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows 軟體** | **[下載 MSI · Type build277](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **韌體：USB 燒寫 / 藍牙 OTA** | **[下載韌體 ZIP · 兩種方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 <!-- listener-local-text-entry -->
@@ -41,7 +41,7 @@
 Type 預設使用 **USB 有線燒寫**，能力已內建；無需另裝 Python、ESP-IDF 或其他燒寫軟體。
 裝置設定各自獨立：選擇一台有線／藍牙裝置並讀取；完成編輯後自動儲存明確修改，讀取或切換裝置不會寫入電腦預設值。名稱、燈光、電源、按鍵與旋鈕設定儲存在所選裝置。請配套使用本頁 MSI 與韌體 ZIP。
 
-Type build272 改善**火山識別的尾句串流交付**：後面還在繼續說時，前面已穩定的新增內容可以先輸入，減少尾句等整段結束才出現。保留分段輸入、完成後僅複製完整終稿的方式。有界片段確認沿用已設定的識別服務，可能增加識別用量。電腦麥克風喚醒與火山識別下的自動結束仍可在「設定 → 錄音」使用，其它識別方式手動結束，喚醒開關預設關閉；已有聲紋與剪貼簿交接保護保留，韌體仍為 Firmware38。
+Type build277 新增**輸入源自動選擇**：Listener 錄音通道就緒時優先用裝置，斷開後使用電腦麥克風；進行中的聽寫和問答先沿原來源收尾。在「設定 → 錄音」或系統匣可選自動、固定電腦或固定 Listener，已有固定選擇保留。電腦喚醒仍使用獨立開關，預設關閉。276 因實際本人喚醒被拒已撤回，本版恢復274的喚醒詞／身分判斷，既有間歇喚醒限制仍保留。包含尾句串流、火山識別自動結束和完成後僅完整複製，韌體仍為 Firmware38。
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
