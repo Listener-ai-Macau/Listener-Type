@@ -1,9 +1,19 @@
-# Listener v1.0.6-rc1 · Type build283 / Firmware38
+# Listener v1.0.6-rc1 · Type build284 / Firmware38
 
 | Download | File |
 | --- | --- |
-| **Windows app** | **[Download MSI · build283](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · build284](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | Firmware · USB flashing or Bluetooth OTA | [Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip) |
+
+## What’s changed since build283
+
+- **Reduce spurious activity at the end of computer-microphone dictation.** Active Windows computer-microphone recording now uses the pinned Silero VAD v5.0 model. A fixed gain of three applies only to its detector input, preserving low-volume continuation sensitivity; the audio sent to recognition remains byte-for-byte unchanged. The earlier detector remains bundled as a safe fallback if the new resource is unavailable or fails integrity validation.
+- **Retain the established ending and output behavior.** The existing three-second quiet policy and current-session/recorder/epoch guards remain. Recording continues to insert text incrementally, including the ordinary trailing-word path, and completion still copies the full final text without an extra paste. Wake-word and speaker verification, device recording, saved settings/data and Firmware38 are unchanged.
+- **Keep future endpoint evidence small and private.** Local detector state transitions include bounded numeric recent-level metadata. This change adds no audio recording, transcript logging or permanent helper process.
+
+Controlled Windows checks passed for low-volume continuation after a louder phrase (gains 1, 0.1, 0.03 and 0.01), exact recognition-audio forwarding, STOP safety, shared endpoint timing and the ordinary trailing-word path. The matching MSI, installed executable, model/license hashes, preserved settings/history and restored microphone-wake capture were verified. Source CI passed. The optional new real-microphone comparison was not started and is not counted as acceptance; the original failing audio was not retained. These results do not establish that every intermittent or long-term field case is resolved.
+
+## Included from build283
 
 ## What’s changed since build282
 
@@ -169,15 +179,17 @@ US$49 is the hardware price. Type is free and open source. No ready-to-use offic
 
 ## File identity
 
-- Windows runtime source: `67034b7af82d481cebea772022191e290173ac63` · build283.
-- Windows MSI: 305762304 bytes · SHA256 `6cc6796ebbff19a5ba66215a18879dddd6740586395c1d29ac0f7cec0a2a0191`.
+- Windows runtime source: `ba07449998bdcaa447c962ec9516350be95ffc8a` · build284.
+- Windows MSI: 307716096 bytes · SHA256 `da1ec359abe415c2b448ac73f2cf7fa2ae3aa9189f87cfaf94aef1f4af296732`.
 - The release tag includes a documentation-only follow-up that aligns the download pages; application/build inputs match the runtime source above.
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`.
 - Firmware ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`.
 
 ## 中文说明
 
-本次Type283：托盘移除内部验收清单入口，日常菜单与网络悬停提示跟随简中／繁中／英文／日文／韩文；界面语言独立保存，主窗口串行同步，其它窗口不覆盖。补齐设备和固件维护页漏译，五套资源键及插值变量一致。录音、声纹、结束、流式、完整复制、设备写入实现及FW38不变，原真实使用范围继续保留。
+本次Type284：针对电脑麦克风停说后检测仍反复活跃的问题，活动录音改用固定版本Silero VAD v5.0，并仅对检测器输入做3倍增益，实际识别音频逐字节保留。原3秒安静规则、会话与录音器保护、尾句正常流式、完成仅复制、唤醒和声纹、设备录音及FW38不变；模型与完整许可随包，新资源失效时保留旧检测器回退。低声续说／停止安全／共享端点／普通尾句和安装完整性检查已通过，偏好与历史保留。新同源真人对照未开始，不计通过；原偶发问题的长期现场范围继续开放。
+
+此前Type283：托盘移除内部验收清单入口，日常菜单与网络悬停提示跟随简中／繁中／英文／日文／韩文；界面语言独立保存，主窗口串行同步，其它窗口不覆盖。补齐设备和固件维护页漏译，五套资源键及插值变量一致。录音、声纹、结束、流式、完整复制、设备写入实现及FW38不变，原真实使用范围继续保留。
 
 此前Type282：设备移到快捷键上方；去掉流式输入开关，旧配置里已经迁移过的关闭值也统一启用并持久化。录音逐段上屏、润色流式与原平台/提供方兼容保护保留；结束后复制完整终稿、自动发送等独立选项不变，不重新粘贴整稿。录音/收尾/粘贴实现、声纹门限、模型和FW38未改，旧间歇唤醒仍开放。
 
