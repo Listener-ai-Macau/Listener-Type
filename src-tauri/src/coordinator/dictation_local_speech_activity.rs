@@ -63,6 +63,16 @@ mod local_speech_vad {
 
         pub(super) fn with_quality_timeline(evidence_sink: Arc<ParkingMutex<LocalSpeechEvidence>>,
             quality_sink: Arc<ParkingMutex<SpeechSignalTimeline>>) -> Self {
+            Self::with_endpoint_model(evidence_sink, quality_sink, false)
+        }
+
+        pub(super) fn with_native_endpoint_quality_timeline(evidence_sink: Arc<ParkingMutex<LocalSpeechEvidence>>,
+            quality_sink: Arc<ParkingMutex<SpeechSignalTimeline>>) -> Self {
+            Self::with_endpoint_model(evidence_sink, quality_sink, true)
+        }
+
+        fn with_endpoint_model(evidence_sink: Arc<ParkingMutex<LocalSpeechEvidence>>,
+            quality_sink: Arc<ParkingMutex<SpeechSignalTimeline>>, native_endpoint: bool) -> Self {
             let (job_tx, job_rx) = mpsc::channel();
             let queued_pcm_bytes = Arc::new(AtomicUsize::new(0));
             let analysis_generation = Arc::new(AtomicU64::new(1));
@@ -76,7 +86,7 @@ mod local_speech_vad {
                     let queued_pcm_bytes = Arc::clone(&queued_pcm_bytes);
                     let analysis_generation = Arc::clone(&analysis_generation);
                     move || run_vad_worker(job_rx, evidence_sink, quality_sink, invalidated,
-                        queued_pcm_bytes, analysis_generation)
+                        queued_pcm_bytes, analysis_generation, native_endpoint)
                 });
             if let Err(err) = spawned {
                 log::warn!("[asr] local VAD worker could not start: {err}");
@@ -192,14 +202,27 @@ mod local_speech_vad {
         invalidated: Arc<AtomicBool>,
         queued_pcm_bytes: Arc<AtomicUsize>,
         analysis_generation: Arc<AtomicU64>,
+        native_endpoint: bool,
     ) {
-        let model_path = match ensure_vad_model() {
-            Ok(path) => path,
+        let selected = if native_endpoint {
+            crate::speech_vad_windows::ensure_native_endpoint_vad_model()
+                .map(|path|(path,crate::speech_vad_windows::NATIVE_ENDPOINT_MODEL_SHA256,"native_v5"))
+                .or_else(|error| {
+                    log::warn!("[asr] native endpoint model unavailable, retaining existing local VAD: {error}");
+                    ensure_vad_model().map(|path|(path,VAD_MODEL_SHA256,"legacy_fallback"))
+                })
+        } else { ensure_vad_model().map(|path|(path,VAD_MODEL_SHA256,"legacy")) };
+        let (model_path, model_sha, profile) = match selected {
+            Ok(selected) => selected,
             Err(err) => {
                 log::warn!("[asr] local VAD model unavailable: {err}");
                 return;
             }
         };
+        // The newer model has a different low-amplitude input response. Keep
+        // faint continuations detectable without changing capture/ASR samples,
+        // applying a room-noise gate or modifying the existing STOP window.
+        let native_input_gain = if profile == "native_v5" { 3_f32 } else { 1_f32 };
         let runtime_root = match crate::persistence::speaker_verification_root() {
             Ok(root) => root,
             Err(err) => {
@@ -233,9 +256,9 @@ mod local_speech_vad {
             }
         };
         log::info!(
-            "[asr] local VAD worker ready model={} sha256={} runtime_root={} pending_onset={}",
+            "[asr] local VAD worker ready model={} sha256={} runtime_root={} pending_onset={} profile={profile} detector_input_gain={native_input_gain}",
             model_path.display(),
-            VAD_MODEL_SHA256,
+            model_sha,
             runtime.runtime_root().display(),
             pending_runtime.is_some()
         );
@@ -251,6 +274,9 @@ mod local_speech_vad {
         let mut invalid = false;
         let mut revision = 0_u64;
         let mut unresolved_speech_start: Option<u64> = None;
+        // Numeric-only half-second context for intermittent endpoint failures.
+        // These summaries cannot reconstruct audio and never affect a decision.
+        let mut recent_signal = std::collections::VecDeque::<(f32,f32)>::new();
 
         let mut worker_generation = 0;
         for job in job_rx {
@@ -307,7 +333,14 @@ mod local_speech_vad {
                         .map(|bytes| i16::from_le_bytes([bytes[0], bytes[1]]) as f32 / 32_768.0),
                 );
                 while pending_samples.len() >= VAD_WINDOW_SAMPLES {
-                    let frame = pending_samples.drain(..VAD_WINDOW_SAMPLES).collect::<Vec<_>>();
+                    let mut frame = pending_samples.drain(..VAD_WINDOW_SAMPLES).collect::<Vec<_>>();
+                    if profile == "native_v5" {
+                        let rms=(frame.iter().map(|s|(*s as f64).powi(2)).sum::<f64>()/frame.len()as f64).sqrt()as f32*32768.;
+                        let peak=frame.iter().fold(0_f32,|p,s|p.max(s.abs()))*32768.;
+                        recent_signal.push_back((rms,peak));
+                        if recent_signal.len()>16 { recent_signal.pop_front(); }
+                        for sample in &mut frame { *sample=(*sample*native_input_gain).clamp(-1.,1.); }
+                    }
                     runtime.accept(&frame);
                     if let Some(pending_runtime) = pending_runtime.as_ref() {
                         pending_runtime.accept(&frame);
@@ -400,8 +433,9 @@ mod local_speech_vad {
                 activity_epoch = activity_epoch.saturating_add(1);
             }
             if last_reported_state != Some(state) {
+                let signal=recent_signal.iter().copied().reduce(|a,b|(a.0.max(b.0),a.1.max(b.1)));
                 log::info!(
-                    "[asr] local VAD state transition state={state:?} activity_epoch={activity_epoch} analyzed_through_ms={analyzed_through_ms} pending_speech_start_ms={pending_speech_start_ms:?} canonical_detected={canonical_speech} pending_detected={pending_speech}"
+                    "[asr] local VAD state transition state={state:?} activity_epoch={activity_epoch} analyzed_through_ms={analyzed_through_ms} pending_speech_start_ms={pending_speech_start_ms:?} canonical_detected={canonical_speech} pending_detected={pending_speech} profile={profile} recent_raw_rms_peak_pcm16={signal:?}"
                 );
                 last_reported_state = Some(state);
             }
@@ -479,7 +513,7 @@ mod local_speech_vad {
             let worker = thread::spawn({
                 let sink=Arc::clone(&sink);let quality=Arc::clone(&quality);
                 let queued=Arc::clone(&queued);let generation=Arc::clone(&generation);
-                move || run_vad_worker(rx,sink,quality,invalidated,queued,generation)
+                move || run_vad_worker(rx,sink,quality,invalidated,queued,generation,false)
             });
             let deadline=Instant::now()+Duration::from_secs(5);
             while queued.load(Ordering::Acquire)!=0 {

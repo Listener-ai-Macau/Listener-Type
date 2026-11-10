@@ -65,7 +65,7 @@ fn microphone_endpoint_consumer(
     target: Arc<dyn crate::recorder::AudioConsumer>,
 ) -> Arc<dyn crate::recorder::AudioConsumer> {
     if !native_microphone_endpoint_owns(inner, session) { return target; }
-    let activity = LocalSpeechActivity::with_quality_timeline(
+    let activity = LocalSpeechActivity::with_native_endpoint_quality_timeline(
         asr.local_speech_activity_sink(), asr.local_speech_quality_sink());
     Arc::new(MicrophoneEndpointConsumer { target, asr: Arc::clone(asr), capture: Mutex::new((activity, 0)) })
 }
@@ -364,4 +364,41 @@ mod microphone_endpoint_tests {
         assert!(!microphone_endpoint_silence_qualified(&admission));
         input.extend(speech);assert_eq!(*sink.0.lock(),input,"capture is forwarded exactly once without dropping the final chunk");
     }
+
+    #[test]
+    #[ignore = "candidate model and generated low-volume PCM only; no microphone/cloud/editor"]
+    fn native_v5_keeps_low_volume_continuations_and_exact_asr_pcm() {
+        use crate::recorder::AudioConsumer;
+        #[derive(Default)] struct Sink(Mutex<Vec<u8>>);
+        impl AudioConsumer for Sink {fn consume_pcm_chunk(&self,pcm:&[u8]){self.0.lock().extend_from_slice(pcm);}}
+        let model=crate::speech_vad_windows::ensure_native_endpoint_vad_model().unwrap();
+        assert!(model.file_name().unwrap().to_string_lossy().contains("v5"));
+        let root=std::path::PathBuf::from(std::env::var_os("LISTENER_WAKE_DIAG_DIR").unwrap());
+        let speech=denzic_audio_v1_core::read_wav_pcm16le(&std::fs::read(root.join("wake_huihui.wav")).unwrap()).unwrap();
+        for gain in [1_f32,0.1,0.03,0.01] {
+            let (coordinator,admission)=fixture(false);
+            let asr=&admission.asr;asr.prepare_local_speech_quality_session();
+            let sink=Arc::new(Sink::default());
+            let consumer=microphone_endpoint_consumer(&coordinator.inner,admission.ticket.session_id,asr,sink.clone());
+            let mut input=speech.clone();input.extend(vec![0;5*32000]);
+            let mut end=0_u64;
+            let wait=|end:u64| {let until=Instant::now()+Duration::from_secs(5);
+                while asr.local_speech_activity_snapshot().analyzed_through_samples+512<end {
+                    assert!(Instant::now()<until,"VAD stalled");std::thread::sleep(Duration::from_millis(2));
+                }
+            };
+            for chunk in input.chunks(3200) {consumer.consume_pcm_chunk(chunk);end+=chunk.len()as u64/2;wait(end);}
+            let quiet=asr.local_speech_activity_snapshot();
+            assert_eq!(quiet.state,VadState::NonSpeech);
+            let quiet_epoch=quiet.activity_epoch;
+            let weak:Vec<u8>=speech.chunks_exact(2).flat_map(|b|((i16::from_le_bytes([b[0],b[1]])as f32*gain).round()as i16).to_le_bytes()).collect();
+            for chunk in weak.chunks(3200) {consumer.consume_pcm_chunk(chunk);end+=chunk.len()as u64/2;wait(end);}
+            assert!(asr.local_speech_activity_snapshot().activity_epoch>quiet_epoch,"new quiet voice must revoke old silence at gain {gain}");
+            input.extend(weak);
+            assert_eq!(*sink.0.lock(),input,"VAD model selection must never normalize, trim or gate ASR PCM");
+        }
+    }
 }
+
+#[cfg(all(test, target_os = "windows"))]
+include!("dictation_native_endpoint_diagnostic.rs");

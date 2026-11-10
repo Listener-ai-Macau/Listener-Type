@@ -85,6 +85,8 @@ const VAD_MIN_SILENCE_SECONDS: f32 = 0.25;
 pub(crate) const VAD_MIN_SPEECH_SECONDS: f32 = 0.25;
 const VAD_MAX_SPEECH_SECONDS: f32 = 60.0;
 const VAD_MODEL_NAME: &str = "silero_vad.onnx";
+const NATIVE_ENDPOINT_MODEL_NAME: &str = "silero_vad_v5.onnx";
+pub(crate) const NATIVE_ENDPOINT_MODEL_SHA256: &str = "6B99CBFD39246B6706F98EC13C7C50C6B299181F2474FA05CBC8046ACC274396";
 const VAD_RUNTIME_FILES: [&str; 3] = [
     "onnxruntime.dll",
     "onnxruntime_providers_shared.dll",
@@ -427,11 +429,25 @@ pub(crate) fn ensure_vad_model() -> Result<PathBuf, String> {
 }
 
 fn bundled_vad_model_path() -> Option<PathBuf> {
-    #[cfg(debug_assertions)]
+    bundled_vad_model_path_for(VAD_MODEL_NAME)
+}
+
+pub(crate) fn ensure_native_endpoint_vad_model() -> Result<PathBuf, String> {
+    let path = bundled_vad_model_path_for(NATIVE_ENDPOINT_MODEL_NAME)
+        .ok_or("native endpoint VAD v5 model is not bundled")?;
+    let actual = sha256_file(&path)?;
+    if actual != NATIVE_ENDPOINT_MODEL_SHA256 {
+        return Err(format!("native endpoint VAD model hash mismatch: expected={NATIVE_ENDPOINT_MODEL_SHA256} actual={actual}"));
+    }
+    Ok(path)
+}
+
+fn bundled_vad_model_path_for(name: &str) -> Option<PathBuf> {
+    #[cfg(any(debug_assertions, test))]
     {
         let development = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("resources/models")
-            .join(VAD_MODEL_NAME);
+            .join(name);
         if development.is_file() {
             return Some(development);
         }
@@ -440,9 +456,9 @@ fn bundled_vad_model_path() -> Option<PathBuf> {
     let executable = std::env::current_exe().ok()?;
     let root = executable.parent()?;
     [
-        root.join("resources/models").join(VAD_MODEL_NAME),
-        root.join("models").join(VAD_MODEL_NAME),
-        root.join(VAD_MODEL_NAME),
+        root.join("resources/models").join(name),
+        root.join("models").join(name),
+        root.join(name),
     ]
     .into_iter()
     .find(|candidate| candidate.is_file())
