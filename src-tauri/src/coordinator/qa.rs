@@ -310,7 +310,7 @@ mod tests {
         let bridge = super::super::DeferredAsrBridge::new();
         let pcm = vec![1_u8; 3_840];
         crate::recorder::AudioConsumer::consume_pcm_chunk(&bridge, &pcm);
-        let asr = Arc::new(VolcengineStreamingASR::new(VolcengineCredentials {
+        let asr = Arc::new(VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
             app_id: "isolated-test".into(), access_token: "not-a-key".into(),
             resource_id: VolcengineCredentials::default_resource_id().into(),
         }, Vec::new()));

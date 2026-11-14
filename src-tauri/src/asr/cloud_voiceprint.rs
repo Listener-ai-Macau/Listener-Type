@@ -27,6 +27,28 @@ pub(crate) fn account_fingerprint(app_id: &str) -> String {
     format!("{:x}", Sha256::digest(app_id.trim().as_bytes()))
 }
 
+pub(crate) fn credential_account_fingerprint(credentials: &VolcengineCredentials) -> String {
+    if credentials.api_key.trim().is_empty() {
+        account_fingerprint(&credentials.app_id)
+    } else {
+        // An opaque key does not prove ownership of a retained legacy App ID.
+        // Keep cloud identities scoped to the actual selected credential.
+        account_fingerprint(&format!("speech-api-key:{}", credentials.api_key.trim()))
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn speech_api_key_cloud_identity_cannot_borrow_retained_legacy_app_id() {
+    let mut credentials = VolcengineCredentials { api_key: "new-key-a".into(), app_id: "same-legacy-app".into(), access_token: "old-token".into(), resource_id: "resource".into() };
+    let first = credential_account_fingerprint(&credentials);
+    assert_ne!(first, account_fingerprint("same-legacy-app"));
+    credentials.api_key = "new-key-b".into();
+    assert_ne!(first, credential_account_fingerprint(&credentials));
+    credentials.api_key.clear();
+    assert_eq!(credential_account_fingerprint(&credentials), account_fingerprint("same-legacy-app"));
+}
+
 impl CloudOwnerVoiceprint {
     pub fn validate_identity(&self) -> Result<(), String> {
         validate_record(&self.id, &self.speaker_name)?;
@@ -37,7 +59,7 @@ impl CloudOwnerVoiceprint {
     }
 
     pub fn validate_for(&self, credentials: &VolcengineCredentials) -> Result<(), String> {
-        if self.account_fingerprint != account_fingerprint(&credentials.app_id) {
+        if self.account_fingerprint != credential_account_fingerprint(credentials) {
             return Err("云端本人声纹属于另一火山账号，请重新选择声纹".into());
         }
         validate_record(&self.id, &self.speaker_name)
@@ -127,8 +149,8 @@ fn unique_named_registration<'a>(rows: &'a [CloudVoiceprintRecord], name: &str) 
 
 impl CloudVoiceprintClient {
     pub fn new(credentials: VolcengineCredentials, proxy: &ProviderProxyConfig) -> Result<Self, String> {
-        if credentials.app_id.trim().is_empty() || credentials.access_token.trim().is_empty() {
-            return Err("请先配置火山 App ID 和 Access Key".into());
+        if !credentials.has_authentication() {
+            return Err("请先配置火山语音 API Key 或旧版 App ID 和 Access Token".into());
         }
         let client = crate::polish::http_client_builder_with_proxy(ENDPOINT, 20, proxy)
             // Never forward authentication to a redirect destination.
@@ -146,10 +168,12 @@ impl CloudVoiceprintClient {
         let endpoint = self.test_endpoint.as_deref().unwrap_or(ENDPOINT);
         #[cfg(not(test))]
         let endpoint = ENDPOINT;
-        let response = self.client.post(endpoint).query(&[("Action", action)])
-            .header("X-Api-App-Id", &self.credentials.app_id)
-            .header("X-Api-Access-Key", &self.credentials.access_token)
-            .json(&body).send().await
+        let mut request = self.client.post(endpoint).query(&[("Action", action)]);
+        for (name, value) in self.credentials.authentication_headers("X-Api-App-Id")
+            .map_err(|_| RegistryRequestError::Rejected("火山语音鉴权未配置".into()))? {
+            request = request.header(name, value);
+        }
+        let response = request.json(&body).send().await
             // Do not expose reqwest errors: a registration URL can be signed.
             .map_err(|_| RegistryRequestError::OutcomeUnknown(
                 "云端声纹请求未完成，请检查网络；登记超时后请先核对状态，避免重复登记".into()))?;
@@ -191,7 +215,7 @@ impl CloudVoiceprintClient {
             .ok_or("云端本人声纹不存在或已删除，请重新登记或选择")?;
         validate_record(&record.id, &record.speaker_name)?;
         Ok(CloudOwnerVoiceprint { id: record.id, speaker_name: record.speaker_name,
-            account_fingerprint: account_fingerprint(&self.credentials.app_id) })
+            account_fingerprint: credential_account_fingerprint(&self.credentials) })
     }
 
     pub async fn register(&self, audio_url: &str) -> Result<CloudOwnerVoiceprint, String> {
@@ -304,7 +328,7 @@ mod tests {
             for worker in delayed { worker.join().unwrap(); }
             actions
         });
-        let credentials = VolcengineCredentials {
+        let credentials = VolcengineCredentials { api_key: String::new(),
             app_id:"test-app".into(), access_token:"test-key".into(), resource_id:"test-resource".into(),
         };
         let client = CloudVoiceprintClient {
@@ -343,7 +367,7 @@ mod tests {
 
     #[test]
     fn account_switch_and_anonymous_names_cannot_be_owner() {
-        let creds = VolcengineCredentials { app_id:"app-a".into(), access_token:"test".into(), resource_id:"test".into() };
+        let creds = VolcengineCredentials { api_key: String::new(), app_id:"app-a".into(), access_token:"test".into(), resource_id:"test".into() };
         let mut profile = CloudOwnerVoiceprint { id:ID.into(), speaker_name:"Billy".into(), account_fingerprint:account_fingerprint("app-a") };
         assert!(profile.validate_for(&creds).is_ok());
         profile.account_fingerprint = account_fingerprint("app-b");

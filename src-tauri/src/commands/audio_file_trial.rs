@@ -84,8 +84,7 @@ pub async fn transcribe_audio_file_trial(
         return Err("audio_file_recording".into());
     }
     let credentials = crate::coordinator::read_volc_credentials();
-    if credentials.app_id.trim().is_empty() || credentials.access_token.trim().is_empty()
-        || credentials.resource_id.trim().is_empty() { return Err("audio_file_setup".into()); }
+    if !credentials.is_configured() { return Err("audio_file_setup".into()); }
     let proxy = crate::coordinator::read_asr_proxy_config("volcengine")
         .map_err(|_| "audio_file_proxy".to_owned())?;
     // A separate recognizer: no capture, owner model, global style, target,

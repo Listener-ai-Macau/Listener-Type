@@ -656,6 +656,8 @@ impl CredsMarketplace {
 #[allow(non_snake_case)]
 struct CredsAsrEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
+    speechApiKey: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     apiKey: Option<String>,
     /// Historical vault payloads used `baseUrl`; keep reading them so ASR
     /// endpoints do not silently fall back to the wrong default.
@@ -680,6 +682,7 @@ struct CredsAsrEntry {
 impl CredsAsrEntry {
     fn is_empty(&self) -> bool {
         self.apiKey.as_deref().unwrap_or("").is_empty()
+            && self.speechApiKey.as_deref().unwrap_or("").is_empty()
             && self.baseURL.as_deref().unwrap_or("").is_empty()
             && self.model.as_deref().unwrap_or("").is_empty()
             && self.appKey.as_deref().unwrap_or("").is_empty()
@@ -1130,6 +1133,7 @@ fn lookup_account(root: &CredsRoot, account: CredentialAccount) -> Option<String
     let llm = root.providers.llm.get(&root.active.llm);
     let pick = |s: &Option<String>| s.as_ref().filter(|v| !v.is_empty()).cloned();
     match account {
+        CredentialAccount::VolcengineApiKey => asr.and_then(|e| pick(&e.speechApiKey)),
         CredentialAccount::VolcengineAppKey => {
             asr.and_then(|e| pick(&e.appKey).or_else(|| pick(&e.apiKey)))
         }
@@ -1154,6 +1158,10 @@ fn write_account(root: &mut CredsRoot, account: CredentialAccount, value: Option
     let llm_id = root.active.llm.clone();
     let normalized = value.and_then(|v| if v.is_empty() { None } else { Some(v) });
     match account {
+        CredentialAccount::VolcengineApiKey => {
+            let entry = root.providers.asr.entry(asr_id).or_default();
+            entry.speechApiKey = normalized;
+        }
         CredentialAccount::VolcengineAppKey => {
             let entry = root.providers.asr.entry(asr_id).or_default();
             entry.appKey = normalized;
@@ -2605,6 +2613,7 @@ fn validate_correction_rule_syntax(pattern: &str, replacement: &str) -> Result<(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CredentialAccount {
+    VolcengineApiKey,
     VolcengineAppKey,
     VolcengineAccessKey,
     VolcengineResourceId,
@@ -2633,6 +2642,7 @@ impl CredentialAccount {
     /// readable after upgrade.
     pub fn keyring_account(&self) -> &'static str {
         match self {
+            CredentialAccount::VolcengineApiKey => "volcengine.api_key",
             CredentialAccount::VolcengineAppKey => "volcengine.app_key",
             CredentialAccount::VolcengineAccessKey => "volcengine.access_key",
             CredentialAccount::VolcengineResourceId => "volcengine.resource_id",
@@ -2652,6 +2662,7 @@ impl CredentialAccount {
 
     pub fn all() -> &'static [CredentialAccount] {
         &[
+            CredentialAccount::VolcengineApiKey,
             CredentialAccount::VolcengineAppKey,
             CredentialAccount::VolcengineAccessKey,
             CredentialAccount::VolcengineResourceId,
@@ -2673,6 +2684,7 @@ impl CredentialAccount {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CredentialsSnapshot {
+    pub volcengine_api_key: Option<String>,
     pub volcengine_app_key: Option<String>,
     pub volcengine_access_key: Option<String>,
     pub volcengine_resource_id: Option<String>,
@@ -2825,6 +2837,7 @@ impl CredentialsVault {
         let _guard = credentials_lock().lock();
         let root = load_credentials();
         CredentialsSnapshot {
+            volcengine_api_key: lookup_account(&root, CredentialAccount::VolcengineApiKey),
             volcengine_app_key: lookup_account(&root, CredentialAccount::VolcengineAppKey),
             volcengine_access_key: lookup_account(&root, CredentialAccount::VolcengineAccessKey),
             volcengine_resource_id: lookup_account(&root, CredentialAccount::VolcengineResourceId),
@@ -2835,6 +2848,30 @@ impl CredentialsVault {
             ark_model_id: lookup_account(&root, CredentialAccount::ArkModelId),
             ark_endpoint: lookup_account(&root, CredentialAccount::ArkEndpoint),
         }
+    }
+}
+
+#[cfg(test)]
+mod speech_api_key_tests {
+    use super::*;
+    #[test]
+    fn speech_api_key_is_independent_of_legacy_app_and_other_providers() {
+        let mut root = CredsRoot::default();
+        root.active.asr = "volcengine".into();
+        write_account(&mut root, CredentialAccount::AsrApiKey, Some("legacy-app-id".into()));
+        write_account(&mut root, CredentialAccount::VolcengineAccessKey, Some("legacy-token".into()));
+        assert_eq!(lookup_account(&root, CredentialAccount::VolcengineAppKey).as_deref(), Some("legacy-app-id"));
+        assert_eq!(lookup_account(&root, CredentialAccount::VolcengineApiKey), None);
+        write_account(&mut root, CredentialAccount::VolcengineApiKey, Some("new-speech-key".into()));
+        let roundtrip: CredsRoot = serde_json::from_str(&serde_json::to_string(&root).unwrap()).unwrap();
+        assert_eq!(lookup_account(&roundtrip, CredentialAccount::VolcengineApiKey).as_deref(), Some("new-speech-key"));
+        assert_eq!(lookup_account(&roundtrip, CredentialAccount::VolcengineAppKey).as_deref(), Some("legacy-app-id"));
+        assert_eq!(lookup_account(&roundtrip, CredentialAccount::VolcengineAccessKey).as_deref(), Some("legacy-token"));
+        root.active.asr = "whisper".into();
+        assert_eq!(lookup_account(&root, CredentialAccount::VolcengineApiKey), None);
+        write_account(&mut root, CredentialAccount::AsrApiKey, Some("other-provider-key".into()));
+        root.active.asr = "volcengine".into();
+        assert_eq!(lookup_account(&root, CredentialAccount::VolcengineApiKey).as_deref(), Some("new-speech-key"));
     }
 }
 

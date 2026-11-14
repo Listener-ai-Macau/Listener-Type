@@ -334,7 +334,7 @@ pub async fn prepare_enrollment(
     if route == CloudModelRoute::Byok {
         CloudVoiceprintClient::new(byok.clone(), &proxy)?;
         body["accountFingerprint"] =
-            json!(super::cloud_voiceprint::account_fingerprint(&byok.app_id));
+            json!(super::cloud_voiceprint::credential_account_fingerprint(&byok));
     }
     let result = client
         .request(

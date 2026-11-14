@@ -173,7 +173,7 @@ async fn asr_handoff_embedded_factory_ignores_a_retired_owner_without_provider_i
     let coordinator=Coordinator::new();let owner=new_session_id();let retired=new_session_id();
     { let mut state=coordinator.inner.state.lock();state.session_id=owner;state.phase=super::SessionPhase::Listening; }
     let live=std::sync::Arc::new(crate::asr::volcengine::VolcengineStreamingASR::new(
-        crate::asr::volcengine::VolcengineCredentials{app_id:String::new(),access_token:String::new(),resource_id:"no-network".into()},Vec::new()));
+        crate::asr::volcengine::VolcengineCredentials{ api_key: String::new(),app_id:String::new(),access_token:String::new(),resource_id:"no-network".into()},Vec::new()));
     *coordinator.inner.asr.lock()=Some(super::SessionResource::new(owner,super::ActiveAsr::Volcengine(std::sync::Arc::clone(&live))));
     let result=super::build_embedded_audio_asr_consumer(&coordinator.inner,retired,"bailian").await;
     assert!(matches!(result,Ok(None)),"retired startup is an ignored result, not a provider error");
@@ -186,7 +186,7 @@ async fn asr_handoff_embedded_factory_preserves_a_provider_owned_by_finalization
     let coordinator=Coordinator::new();let owner=new_session_id();
     { let mut state=coordinator.inner.state.lock();state.session_id=owner;state.phase=super::SessionPhase::Processing; }
     let live=std::sync::Arc::new(crate::asr::volcengine::VolcengineStreamingASR::new(
-        crate::asr::volcengine::VolcengineCredentials{app_id:String::new(),access_token:String::new(),resource_id:"no-network".into()},Vec::new()));
+        crate::asr::volcengine::VolcengineCredentials{ api_key: String::new(),app_id:String::new(),access_token:String::new(),resource_id:"no-network".into()},Vec::new()));
     *coordinator.inner.asr.lock()=Some(super::SessionResource::new(owner,super::ActiveAsr::Volcengine(std::sync::Arc::clone(&live))));
     assert!(matches!(super::build_embedded_audio_asr_consumer(&coordinator.inner,owner,"bailian").await,Ok(None)));
     assert!(!live.cancelled_for_test());
@@ -2634,7 +2634,7 @@ fn recorded_second_wake_in_body_preserves_all_later_submission() {
     prefs.remove_filler_words = false;
     inner.prefs.set(prefs).unwrap();
     arm_automatic_wake_text_guard(inner, session, "开始录音".into(), 2000);
-    let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+    let asr = VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
         app_id: "recorded".into(), access_token: "offline".into(), resource_id: "offline".into(),
     }, Vec::new()).with_owner_activity_only(true);
     asr.note_accepted_wake_phrase("开始录音");
@@ -2890,7 +2890,7 @@ fn recorded_live_output_fallback_reaches_source_consumption_before_stop() {
         ledger.session_id = Some(session);
         ledger.llm_auth_fingerprint = Some(Some(fingerprint));
     }
-    let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+    let asr = VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
         app_id: "recorded".into(), access_token: "offline".into(), resource_id: "offline".into(),
     }, Vec::new()).with_owner_activity_only(true);
     asr.note_accepted_wake_phrase("开始录音");
@@ -3198,7 +3198,7 @@ fn admitted_nonmatching_wake_starts_enrolled_presence_without_granting_identity(
     for case in protocol["cases"].as_array().unwrap() {
         let pcm = std::fs::read(case["pcm"].as_str().unwrap()).unwrap();
         let archive: serde_json::Value = serde_json::from_slice(&std::fs::read(case["archive"].as_str().unwrap()).unwrap()).unwrap();
-        let make_asr = || Arc::new(VolcengineStreamingASR::new(VolcengineCredentials {
+        let make_asr = || Arc::new(VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
             app_id:"saved".into(), access_token:"offline".into(), resource_id:"offline".into(),
         }, Vec::new()).with_owner_activity_only(true));
         let baseline = make_asr();
@@ -3278,7 +3278,7 @@ fn chronological_saved_foreign_draft_uses_source_evidence_and_original_body_rece
     let audio=protocol["audioEvents"].as_array().unwrap();
     let receipts=protocol["receiptEvents"].as_array().unwrap();
     let phrase=protocol["phrase"].as_str().unwrap();
-    let asr=Arc::new(VolcengineStreamingASR::new(VolcengineCredentials {
+    let asr=Arc::new(VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
         app_id:"saved".into(),access_token:"offline".into(),resource_id:"offline".into(),
     },Vec::new()).with_owner_activity_only(true));
     let mut session=embedded_audio_test_session(new_session_id(),Arc::new(CapturingConsumer::default()));
@@ -4624,7 +4624,7 @@ fn startup_voiceprint_pending_does_not_discard_unclassified_retained_audio() {
 fn completed_speaker_evidence_does_not_wait_for_the_audio_mailbox_to_be_drained() {
     use crate::asr::volcengine::{VolcengineCredentials, VolcengineStreamingASR};
     use crate::speaker_verification::SessionSpeakerClassification::NonTarget;
-    let asr = Arc::new(VolcengineStreamingASR::new(VolcengineCredentials {
+    let asr = Arc::new(VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
         app_id:"test".into(), access_token:"test".into(),
         resource_id:VolcengineCredentials::default_resource_id().into(),
     }, Vec::new()));
@@ -4697,7 +4697,7 @@ fn startup_speaker_buffer_is_bounded_and_evicted_gap_stays_unknown() {
 fn late_body_submission_gets_three_full_seconds_after_processing_delay() {
     use crate::asr::volcengine::{VolcengineCredentials, VolcengineStreamingASR};
     use crate::speaker_verification::SessionSpeakerClassification::Target;
-    let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+    let asr = VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
         app_id: "app".into(), access_token: "token".into(), resource_id: "resource".into(),
     }, Vec::new());
     asr.note_verified_local_speaker_tracking_started("开始录音");
@@ -4718,7 +4718,7 @@ fn late_body_submission_gets_three_full_seconds_after_processing_delay() {
 fn body_submitted_after_in_window_owner_continuation_restarts_the_full_window() {
     use crate::asr::volcengine::{VolcengineCredentials, VolcengineStreamingASR};
     use crate::speaker_verification::SessionSpeakerClassification::Target;
-    let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+    let asr = VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
         app_id: "app".into(), access_token: "token".into(), resource_id: "resource".into(),
     }, Vec::new());
     asr.note_verified_local_speaker_tracking_started("开始录音");
@@ -4744,7 +4744,7 @@ fn body_submitted_after_in_window_owner_continuation_restarts_the_full_window() 
 fn vad_coverage_quiet_capture_does_not_extend_the_three_second_owner_deadline() {
     use crate::asr::volcengine::{VolcengineCredentials, VolcengineStreamingASR};
     use crate::speaker_verification::SessionSpeakerClassification;
-    let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+    let asr = VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
         app_id: "app".into(), access_token: "token".into(),
         resource_id: VolcengineCredentials::default_resource_id().into(),
     }, Vec::new());
@@ -4892,7 +4892,7 @@ async fn recorded_startup_speaker_coverage_live_delivery_probe() {
     };
     let credential = |account| CredentialsVault::get(account).unwrap()
         .filter(|v| !v.is_empty()).expect("installed credential");
-    let mut asr = VolcengineStreamingASR::new(VolcengineCredentials {
+    let mut asr = VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
         app_id: credential(CredentialAccount::VolcengineAppKey),
         access_token: credential(CredentialAccount::VolcengineAccessKey),
         resource_id: credential(CredentialAccount::VolcengineResourceId),
@@ -11253,7 +11253,7 @@ fn cancelled_idle_session_runs_cancel_cleanup_before_releasing_actor_evidence() 
     actor.session = Some(embedded_audio_test_session(session_id, consumer));
     actor.session.as_mut().unwrap().archive_pcm = None;
     let asr = Arc::new(crate::asr::VolcengineStreamingASR::new(
-        crate::asr::VolcengineCredentials { app_id: "app".into(), access_token: "token".into(), resource_id: crate::asr::VolcengineCredentials::default_resource_id().into() }, Vec::new(),
+        crate::asr::VolcengineCredentials { api_key: String::new(), app_id: "app".into(), access_token: "token".into(), resource_id: crate::asr::VolcengineCredentials::default_resource_id().into() }, Vec::new(),
     ));
     *coordinator.inner.asr.lock() = Some(super::SessionResource::new(session_id, super::ActiveAsr::Volcengine(asr)));
     {
@@ -13106,7 +13106,7 @@ async fn run_embedded_streaming_final_wait_probe(
     }
 
     let asr = Arc::new(crate::asr::volcengine::VolcengineStreamingASR::new(
-        crate::asr::VolcengineCredentials {
+        crate::asr::VolcengineCredentials { api_key: String::new(),
             app_id: "test".into(),
             access_token: "test".into(),
             resource_id: crate::asr::VolcengineCredentials::default_resource_id().into(),
@@ -19600,7 +19600,7 @@ async fn recorded_separator_product_authority_probe() {
     }
     let credential = |account| CredentialsVault::get(account).unwrap().filter(|v| !v.is_empty()).unwrap();
     let mut asr = crate::asr::VolcengineStreamingASR::new(
-        crate::asr::VolcengineCredentials {
+        crate::asr::VolcengineCredentials { api_key: String::new(),
             app_id: credential(CredentialAccount::VolcengineAppKey),
             access_token: credential(CredentialAccount::VolcengineAccessKey),
             resource_id: credential(CredentialAccount::VolcengineResourceId),
@@ -20732,7 +20732,7 @@ fn native_confirmation_reaches_short_and_unpunctuated_submission_without_a_secon
     use crate::asr::volcengine::{LiveDeliveryStability, VolcengineCredentials, VolcengineStreamingASR};
     use super::{pause_early_ready_segment as ready, embedded_audio_partial_preview_stability_key as key};
     for text in ["好。", "Yes.", "はい。", "네.", "OK", "a confirmed clause without punctuation"] {
-        let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+        let asr = VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
             app_id: "app".into(), access_token: "token".into(), resource_id: "resource".into(),
         }, Vec::new()).with_owner_activity_only(true);
         let result = |definite: bool| serde_json::json!({"text":text,"utterances":[{
@@ -20770,7 +20770,7 @@ fn recorded_native_confirmation_reaches_coordinator_submission_boundary() {
     let mut cases = Vec::new();
     for case in protocol["cases"].as_array().unwrap() {
         let archive: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join(case["archive"].as_str().unwrap())).unwrap()).unwrap();
-        let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+        let asr = VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
             app_id: "app".into(), access_token: "token".into(), resource_id: "resource".into(),
         }, Vec::new()).with_owner_activity_only(true);
         let mut frames = Vec::new();
@@ -20819,7 +20819,7 @@ fn recorded_ordinary_tail_and_punctuation_reaches_final_delivery_planner() {
     let mut cases = Vec::new();
     for case in protocol["cases"].as_array().unwrap() {
         let archive: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join(case["archive"].as_str().unwrap())).unwrap()).unwrap();
-        let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+        let asr = VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
             app_id:"recorded".into(), access_token:"offline".into(), resource_id:"offline".into(),
         },Vec::new()).with_owner_activity_only(true);
         if let Some(phrase) = case["acceptedWakePhrase"].as_str() {
@@ -20958,7 +20958,7 @@ fn recorded_final_rendering_revision_does_not_resubmit_consumed_native_word() {
     let consumed_prefix = delivery["consumedRawSource"]["prefix"].as_str().unwrap();
     let delivered = consumed_prefix.strip_prefix("开始录音").unwrap()
         .trim_start_matches(crate::transcript_boundary::is_decorative);
-    let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+    let asr = VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
         app_id:"recorded".into(), access_token:"offline".into(), resource_id:"offline".into(),
     }, Vec::new()).with_owner_activity_only(true);
     asr.note_accepted_wake_phrase("开始录音");
@@ -21779,7 +21779,7 @@ async fn recorded_provider_word_coordinates_probe() {
         let pcm_sha256 = format!("{:x}", Sha256::digest(&pcm));
         assert_eq!(pcm_sha256, input["extracted_pcm_sha256"].as_str().unwrap());
         let mut asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: credential(CredentialAccount::VolcengineAppKey),
                 access_token: credential(CredentialAccount::VolcengineAccessKey),
                 resource_id: credential(CredentialAccount::VolcengineResourceId),
@@ -22040,7 +22040,7 @@ fn raw_body_consumption_commits_with_delivery_and_rollback_keeps_the_old_occurre
     let coordinator = Coordinator::new();
     let inner = &coordinator.inner;
     let session = new_session_id();
-    let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+    let asr = VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
         app_id: "offline".into(), access_token: "offline".into(), resource_id: "offline".into(),
     }, Vec::new()).with_owner_activity_only(true);
     asr.note_accepted_wake_phrase("开始录音");

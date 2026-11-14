@@ -424,6 +424,20 @@ export function ProvidersSection({ onOpenLocalAsr, prioritizeTextService = false
         {committedAsrProvider === 'volcengine' ? (
           <>
             <CredentialField
+              key={`${committedAsrProvider}:api_key`}
+              label={t('settings.providers.apiKeyLabel')}
+              account="volcengine.api_key"
+              mono
+              mask
+            />
+            <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.6 }}>
+              {t('settings.providers.volcengineApiKeyHint')}
+            </div>
+            <details style={{ margin: '8px 0 12px' }}>
+              <summary style={{ cursor: 'pointer', color: 'var(--ol-ink-3)', fontSize: 12 }}>
+                {t('settings.providers.volcengineLegacyAuth')}
+              </summary>
+            <CredentialField
               key={`${committedAsrProvider}:app_key`}
               label={t('settings.providers.volcengineAppKeyLabel')}
               account="volcengine.app_key"
@@ -437,6 +451,7 @@ export function ProvidersSection({ onOpenLocalAsr, prioritizeTextService = false
               mono
               mask
             />
+            </details>
             <CredentialField
               key={`${committedAsrProvider}:resource_id`}
               label={t('settings.providers.volcengineResourceIdLabel')}
@@ -446,6 +461,7 @@ export function ProvidersSection({ onOpenLocalAsr, prioritizeTextService = false
             <div style={{ marginTop: 2, fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.6 }}>
               {t('settings.providers.volcengineMappingNote')}
             </div>
+            <ProviderTools kind="asr" modelAccount="asr.model" onModelSelected={() => {}} canListModels={false} />
           </>
         ) : committedAsrProvider === 'local-qwen3' || committedAsrProvider === 'foundry-local-whisper' ? (
           <LocalAsrProviderHint provider={committedAsrProvider} selectedProvider={committedAsrProvider} />
@@ -658,7 +674,7 @@ function ProviderProxySettings({ kind, providerId }: { kind: 'llm' | 'asr'; prov
 
 type ProviderToolStatus = 'idle' | 'loading' | 'success' | 'empty' | 'error';
 
-function ProviderTools({ kind, modelAccount, onModelSelected }: { kind: 'llm' | 'asr'; modelAccount: string; onModelSelected: () => void }) {
+function ProviderTools({ kind, modelAccount, onModelSelected, canListModels = true }: { kind: 'llm' | 'asr'; modelAccount: string; onModelSelected: () => void; canListModels?: boolean }) {
   const { t } = useTranslation();
   const [models, setModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
@@ -721,11 +737,11 @@ function ProviderTools({ kind, modelAccount, onModelSelected }: { kind: 'llm' | 
   };
 
   return (
-    <SettingRow label={t('settings.providers.toolsLabel')} desc={t('settings.providers.toolsDesc')}>
+    <SettingRow label={t('settings.providers.toolsLabel')} desc={canListModels ? t('settings.providers.toolsDesc') : undefined}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 420 }}>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
           <button onClick={validate} style={miniBtnStyle} disabled={status === 'loading'}>{t('settings.providers.validate')}</button>
-          <button onClick={loadModels} style={miniBtnStyle} disabled={status === 'loading'}>{t('settings.providers.fetchModels')}</button>
+          {canListModels && <button onClick={loadModels} style={miniBtnStyle} disabled={status === 'loading'}>{t('settings.providers.fetchModels')}</button>}
           {models.length > 0 && (
             <SelectLite
               value={selectedModel}

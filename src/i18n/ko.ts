@@ -1149,6 +1149,8 @@ export const ko: typeof zhCN = {
         asrFoundryLocalWhisper: '로컬 Whisper(Foundry Local)',
         asrLocalQwen3: '로컬 Qwen3-ASR',
       },
+      volcengineApiKeyHint: '새 Volcengine Speech 콘솔의 API Key를 입력하세요. 저장된 API Key를 우선 사용하며 기존 인증 정보도 유지됩니다.',
+      volcengineLegacyAuth: '기존 인증 방식',
       volcengineAppKeyLabel: 'APP ID',
       volcengineAccessKeyLabel: 'Access Token',
       volcengineResourceIdLabel: 'Resource ID',

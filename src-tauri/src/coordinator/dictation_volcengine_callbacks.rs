@@ -278,7 +278,7 @@ mod callback_resource_lifetime_tests {
                 state.cancelled = cancelled;
             }
             coordinator.inner.shutdown.store(shutting_down, Ordering::SeqCst);
-            let asr = Arc::new(VolcengineStreamingASR::new(crate::asr::VolcengineCredentials {
+            let asr = Arc::new(VolcengineStreamingASR::new(crate::asr::VolcengineCredentials { api_key: String::new(),
                 app_id: "offline-lifetime-test".into(), access_token: "not-a-credential".into(),
                 resource_id: crate::asr::VolcengineCredentials::default_resource_id().into(),
             }, Vec::new()));

@@ -1149,6 +1149,8 @@ export const ja: typeof zhCN = {
         asrFoundryLocalWhisper: 'ローカル Whisper（Foundry Local）',
         asrLocalQwen3: 'ローカル Qwen3-ASR',
       },
+      volcengineApiKeyHint: '新しい Volcengine Speech コンソールの API Key を入力してください。保存した API Key が優先され、従来の認証情報も保持されます。',
+      volcengineLegacyAuth: '従来の認証方式',
       volcengineAppKeyLabel: 'APP ID',
       volcengineAccessKeyLabel: 'Access Token',
       volcengineResourceIdLabel: 'Resource ID',

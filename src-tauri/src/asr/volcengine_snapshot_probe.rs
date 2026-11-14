@@ -14,7 +14,7 @@ async fn recorded_lexical_snapshot_probe() {
     assert!(through_ms > 0 && through_ms <= 60_000 && through_ms * 32 <= pcm.len() as u64);
     pcm.truncate(through_ms as usize * 32);
     let credential = |account| CredentialsVault::get(account).unwrap().filter(|v| !v.is_empty()).unwrap();
-    let asr = Arc::new(VolcengineStreamingASR::new(VolcengineCredentials {
+    let asr = Arc::new(VolcengineStreamingASR::new(VolcengineCredentials { api_key: credential(CredentialAccount::VolcengineApiKey),
         app_id: credential(CredentialAccount::VolcengineAppKey),
         access_token: credential(CredentialAccount::VolcengineAccessKey),
         resource_id: credential(CredentialAccount::VolcengineResourceId),

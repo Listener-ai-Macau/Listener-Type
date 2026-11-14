@@ -145,7 +145,7 @@ mod microphone_endpoint_tests {
         inner.microphone_wake.mark_dictation_owner_for_test(session);
         register_native_microphone_endpoint(inner, session);
         *inner.recorder.lock() = Some(SessionResource::new(session, Recorder::without_device_for_test()));
-        let asr = Arc::new(VolcengineStreamingASR::new(VolcengineCredentials {
+        let asr = Arc::new(VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
             app_id:"offline".into(),access_token:"offline".into(),resource_id:"offline".into(),
         }, Vec::new()));
         asr.note_local_audio_activity_with_speech_end_samples(8000, 128000, Some(4000));
@@ -262,7 +262,7 @@ mod microphone_endpoint_tests {
         let mut prefs=coordinator.inner.prefs.get();prefs.microphone_wake_enabled=false;
         coordinator.inner.prefs.replace_for_tests(prefs);
         assert!(!coordinator.inner.microphone_wake.owns_dictation_session(admission.ticket.session_id));
-        admission.asr=Arc::new(VolcengineStreamingASR::new(VolcengineCredentials {
+        admission.asr=Arc::new(VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
             app_id:"offline".into(),access_token:"offline".into(),resource_id:"offline".into(),
         },Vec::new()));
         let asr=&admission.asr;

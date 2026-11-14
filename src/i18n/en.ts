@@ -1194,6 +1194,8 @@ export const en: typeof zhCN = {
         asrFoundryLocalWhisper: 'Local Whisper (Foundry Local)',
         asrLocalQwen3: 'Local Qwen3-ASR',
       },
+      volcengineApiKeyHint: 'Use an API key from the new Volcengine Speech console. A saved API key takes priority; legacy credentials remain available.',
+      volcengineLegacyAuth: 'Legacy authentication',
       volcengineAppKeyLabel: 'APP ID',
       volcengineAccessKeyLabel: 'Access Token',
       volcengineResourceIdLabel: 'Resource ID',

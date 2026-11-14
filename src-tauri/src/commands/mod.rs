@@ -846,8 +846,8 @@ pub fn get_credentials(coord: CoordinatorState<'_>) -> CredentialsStatus {
 }
 
 fn volcengine_configured(snap: &CredentialsSnapshot) -> bool {
-    configured(&snap.volcengine_app_key)
-        && configured(&snap.volcengine_access_key)
+    (configured(&snap.volcengine_api_key)
+        || (configured(&snap.volcengine_app_key) && configured(&snap.volcengine_access_key)))
         && configured(&snap.volcengine_resource_id)
 }
 
@@ -1322,6 +1322,14 @@ async fn validate_llm_provider() -> Result<(), String> {
 
 async fn validate_asr_provider() -> Result<(), String> {
     let active_asr = CredentialsVault::get_active_asr();
+    if active_asr == "volcengine" {
+        let credentials = crate::coordinator::read_volc_credentials();
+        let proxy = crate::coordinator::read_asr_proxy_config("volcengine").map_err(|error| error.to_string())?;
+        let asr = std::sync::Arc::new(crate::asr::VolcengineStreamingASR::new_with_proxy_config(credentials, vec![], proxy));
+        asr.open_session().await.map_err(|error| error.to_string())?;
+        asr.cancel();
+        return Ok(());
+    }
     if active_asr_is_keyless_for_validation(&active_asr) {
         return Ok(());
     }
@@ -1622,6 +1630,7 @@ fn parse_gemini_model_ids(body: &str) -> Result<Vec<String>, String> {
 
 fn parse_account(s: &str) -> Result<CredentialAccount, String> {
     match s {
+        "volcengine.api_key" => Ok(CredentialAccount::VolcengineApiKey),
         "volcengine.app_key" => Ok(CredentialAccount::VolcengineAppKey),
         "volcengine.access_key" => Ok(CredentialAccount::VolcengineAccessKey),
         "volcengine.resource_id" => Ok(CredentialAccount::VolcengineResourceId),
@@ -2600,3 +2609,21 @@ pub async fn submit_embedded_audio_ble_stream(
 #[cfg(test)]
 #[path = "../commands_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod speech_api_key_readiness_tests {
+    use super::*;
+    #[test]
+    fn api_key_only_is_ready_and_keeps_resource_and_legacy_rules() {
+        let mut snapshot = CredentialsSnapshot { volcengine_api_key: Some("new-key".into()), volcengine_resource_id: Some("chosen-resource".into()), ..Default::default() };
+        assert!(volcengine_configured(&snapshot));
+        snapshot.volcengine_resource_id = None;
+        assert!(!volcengine_configured(&snapshot));
+        snapshot.volcengine_resource_id = Some("chosen-resource".into());
+        snapshot.volcengine_api_key = None;
+        snapshot.volcengine_app_key = Some("old-app".into());
+        assert!(!volcengine_configured(&snapshot));
+        snapshot.volcengine_access_key = Some("old-token".into());
+        assert!(volcengine_configured(&snapshot));
+    }
+}

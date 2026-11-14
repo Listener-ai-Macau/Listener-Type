@@ -455,7 +455,7 @@ mod native_composition_tests {
         let inner = &coordinator.inner;
         let session = crate::coordinator_state::new_session_id();
         { let mut active = inner.state.lock(); active.session_id = session; active.phase = SessionPhase::Listening; }
-        let asr = Arc::new(VolcengineStreamingASR::new(VolcengineCredentials {
+        let asr = Arc::new(VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
             app_id: "offline".into(), access_token: "offline".into(), resource_id: "offline".into(),
         }, Vec::new()).with_owner_activity_only(true));
         arm_accepted_automatic_wake_text_guard(inner, session, "开始录音".into(), 0, true);
@@ -547,7 +547,7 @@ mod native_composition_tests {
         arm_accepted_automatic_wake_text_guard(inner, session, "开始录音".into(), 0, true);
         let asr = Arc::new(
             VolcengineStreamingASR::new(
-                VolcengineCredentials {
+                VolcengineCredentials { api_key: String::new(),
                     app_id: "offline-fixture".into(),
                     access_token: "offline-fixture".into(),
                     resource_id: "offline-fixture".into(),

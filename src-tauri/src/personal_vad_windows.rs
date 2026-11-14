@@ -877,7 +877,7 @@ mod tests {
             let entries = trace["trace"]["entries"].as_array().unwrap();
             let frames: Vec<_> = entries.iter().filter(|entry| entry["stage"] == "normalized_result"
                 && entry["provider_result"].is_object()).collect();
-            let mut asr = VolcengineStreamingASR::new(VolcengineCredentials {
+            let mut asr = VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
                 app_id: "offline".into(), access_token: "offline".into(), resource_id: "offline".into(),
             }, Vec::new()).with_owner_activity_only(true);
             asr.enable_diagnostic_trace();
@@ -979,7 +979,7 @@ mod tests {
             if let Some(path)=case["trace"].as_str() {
                 let trace:serde_json::Value=serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
                 let mut analyzer=NativeSourceIdentity::default();
-                let mut asr=VolcengineStreamingASR::new(VolcengineCredentials{app_id:"offline".into(),access_token:"offline".into(),resource_id:"offline".into()},Vec::new()).with_owner_activity_only(true);
+                let mut asr=VolcengineStreamingASR::new(VolcengineCredentials{ api_key: String::new(),app_id:"offline".into(),access_token:"offline".into(),resource_id:"offline".into()},Vec::new()).with_owner_activity_only(true);
                 asr.note_accepted_wake_phrase(phrase);
                 for entry in trace["trace"]["entries"].as_array().unwrap().iter().filter(|e|e["stage"]=="normalized_result" && e["provider_result"].is_object()) {
                     let result=&entry["provider_result"];

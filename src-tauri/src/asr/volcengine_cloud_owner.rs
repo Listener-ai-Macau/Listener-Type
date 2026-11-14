@@ -168,7 +168,7 @@ mod tests {
     }
 
     fn asr() -> VolcengineStreamingASR {
-        VolcengineStreamingASR::new(VolcengineCredentials {
+        VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
             app_id:"test-app".into(),access_token:"test-token".into(),resource_id:"test-resource".into(),
         },Vec::new()).with_cloud_owner(Some(CloudOwnerVoiceprint {
             id:"a3ee18be-6113-4b9a-8bc1-55fbb9f88f71".into(),speaker_name:"Billy".into(),account_fingerprint:"test".into(),

@@ -99,9 +99,7 @@ impl StreamingAsrProvider for VolcengineStreamingProvider {
         &self,
         sink: Arc<dyn AsrEventSink>,
     ) -> Result<Box<dyn StreamingAsrSession>, AsrError> {
-        if !self.managed_cloud && (self.credentials.app_id.trim().is_empty()
-            || self.credentials.access_token.trim().is_empty()
-            || self.credentials.resource_id.trim().is_empty())
+        if !self.managed_cloud && !self.credentials.is_configured()
         {
             return Err(map_volcengine_error(VolcengineASRError::CredentialsMissing));
         }
@@ -268,7 +266,7 @@ mod tests {
     #[test]
     fn provider_id_matches_listener_configuration_key() {
         let provider = VolcengineStreamingProvider::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: "resource".into(),
@@ -281,7 +279,7 @@ mod tests {
     #[test]
     fn missing_credentials_fail_before_runtime_or_network_setup() {
         let provider = VolcengineStreamingProvider::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: String::new(),
                 access_token: "token".into(),
                 resource_id: "resource".into(),

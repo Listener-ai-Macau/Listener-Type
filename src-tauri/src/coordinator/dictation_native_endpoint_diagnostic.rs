@@ -46,7 +46,7 @@ fn native_endpoint_v5_readonly_live_diagnostic() {
     let coordinator = super::Coordinator::new();
     let session = new_session_id();
     register_native_microphone_endpoint(&coordinator.inner, session);
-    let asr = Arc::new(VolcengineStreamingASR::new(VolcengineCredentials {
+    let asr = Arc::new(VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
         app_id:"offline".into(), access_token:"offline".into(),resource_id:"offline".into(),
     },Vec::new()));
     asr.prepare_local_speech_quality_session();

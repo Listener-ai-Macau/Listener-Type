@@ -317,7 +317,7 @@ mod tests {
         OwnerContinuitySnapshot::capture(&state).restore(&mut restored);
         assert_eq!(restored.provider_non_owner_audio_ranges, vec![(100, 900)]);
         assert_eq!(restored.provider_distinct_foreign_audio_ranges, vec![(100, 900)]);
-        let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+        let asr = VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
             app_id:"app".into(), access_token:"token".into(), resource_id:VolcengineCredentials::default_resource_id().into(),
         }, Vec::new());
         *asr.state.lock() = restored;

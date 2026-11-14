@@ -113,19 +113,66 @@ const SECOND_PASS_END_WINDOW_MS: u32 = 500;
 // Preserve the provider's recommended one-second initial voice protection.
 const SECOND_PASS_FORCE_TO_SPEECH_MS: u32 = 1_000;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct VolcengineCredentials {
+    pub api_key: String,
     pub app_id: String,
     pub access_token: String,
     pub resource_id: String,
 }
 
 impl VolcengineCredentials {
+    pub fn has_authentication(&self) -> bool {
+        !self.api_key.trim().is_empty()
+            || (!self.app_id.trim().is_empty() && !self.access_token.trim().is_empty())
+    }
+
+    pub fn is_configured(&self) -> bool {
+        self.has_authentication() && !self.resource_id.trim().is_empty()
+    }
+
+    pub(crate) fn authentication_headers(&self, legacy_app_header: &'static str)
+        -> Result<Vec<(&'static str, &str)>, VolcengineASRError>
+    {
+        if !self.api_key.trim().is_empty() {
+            return Ok(vec![("X-Api-Key", self.api_key.trim())]);
+        }
+        if self.has_authentication() {
+            return Ok(vec![(legacy_app_header, self.app_id.trim()),
+                          ("X-Api-Access-Key", self.access_token.trim())]);
+        }
+        Err(VolcengineASRError::CredentialsMissing)
+    }
+
+    fn apply_asr_headers(&self, headers: &mut tokio_tungstenite::tungstenite::http::HeaderMap)
+        -> Result<(), VolcengineASRError>
+    {
+        if !self.is_configured() { return Err(VolcengineASRError::CredentialsMissing); }
+        for (name, value) in self.authentication_headers("X-Api-App-Key")? {
+            let mut value = HeaderValue::from_str(value)
+                .map_err(|_| VolcengineASRError::AuthenticationFailed)?;
+            value.set_sensitive(true);
+            headers.insert(name, value);
+        }
+        headers.insert("X-Api-Resource-Id", HeaderValue::from_str(self.resource_id.trim())
+            .map_err(|_| VolcengineASRError::AuthenticationFailed)?);
+        Ok(())
+    }
+
     pub fn default_resource_id() -> &'static str {
         // Compatibility default for existing bigasr hourly grants. Explicit
         // saved resource IDs take precedence; seedasr/bigasr are distinct
         // resources and acceptance must be checked on the configured account.
         "volc.bigasr.sauc.duration"
+    }
+}
+
+impl std::fmt::Debug for VolcengineCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VolcengineCredentials")
+            .field("auth_mode", &if self.api_key.trim().is_empty() { "legacy" } else { "api_key" })
+            .field("resource_id", &self.resource_id)
+            .finish_non_exhaustive()
     }
 }
 
@@ -9383,7 +9430,7 @@ impl VolcengineStreamingASR {
             Some((client, ticket))
         } else {
             self.verify_cloud_owner_configuration().await?;
-            if self.credentials.app_id.is_empty() || self.credentials.access_token.is_empty() || self.credentials.resource_id.is_empty() {
+            if !self.credentials.is_configured() {
                 return Err(VolcengineASRError::CredentialsMissing);
             }
             None
@@ -9403,15 +9450,14 @@ impl VolcengineStreamingASR {
             headers.insert("X-Listener-Session-Token",HeaderValue::from_str(&ticket.session_token)
                 .map_err(|_|VolcengineASRError::CloudOwnerUnavailable("托管会话凭据无效".into()))?);
         } else {
-            headers.insert("X-Api-App-Key",HeaderValue::from_str(&self.credentials.app_id)
-                .map_err(|e|VolcengineASRError::ConnectionFailed(e.to_string()))?);
-            headers.insert("X-Api-Access-Key",HeaderValue::from_str(&self.credentials.access_token)
-                .map_err(|e|VolcengineASRError::ConnectionFailed(e.to_string()))?);
-            headers.insert("X-Api-Resource-Id",HeaderValue::from_str(&self.credentials.resource_id)
-                .map_err(|e|VolcengineASRError::ConnectionFailed(e.to_string()))?);
+            self.credentials.apply_asr_headers(headers)?;
         }
         headers.insert("X-Api-Connect-Id",HeaderValue::from_str(&connect_id)
             .map_err(|e|VolcengineASRError::ConnectionFailed(e.to_string()))?);
+        if managed.is_none() {
+            headers.insert("X-Api-Request-Id",HeaderValue::from_str(&connect_id)
+                .map_err(|_| VolcengineASRError::ConnectionFailed("invalid ASR request identifier".into()))?);
+        }
 
         let (ws, _resp) = tokio::time::timeout(
             WEBSOCKET_CONNECT_TIMEOUT,
@@ -12857,14 +12903,14 @@ fn hotword_context(entries: &[DictionaryHotword]) -> Option<String> {
 mod tests {
     #[test]
     fn independent_question_command_keeps_the_enrolled_identity_through_tracking() {
-        let asr=VolcengineStreamingASR::new(VolcengineCredentials{app_id:String::new(),access_token:String::new(),resource_id:String::new()},Vec::new());
+        let asr=VolcengineStreamingASR::new(VolcengineCredentials{ api_key: String::new(),app_id:String::new(),access_token:String::new(),resource_id:String::new()},Vec::new());
         asr.note_accepted_wake_for_profile("开始提问","开始录音");
         assert_eq!(asr.state.lock().wake_speaker_phrase.as_deref(),Some("开始提问"));
         assert_eq!(asr.identity_profile_phrase().as_deref(),Some("开始录音"));
         asr.note_verified_local_speaker_tracking_started("开始提问");
         assert_eq!(asr.state.lock().wake_speaker_phrase.as_deref(),Some("开始提问"));
         assert_eq!(asr.identity_profile_phrase().as_deref(),Some("开始录音"));
-        let legacy=VolcengineStreamingASR::new(VolcengineCredentials{app_id:String::new(),access_token:String::new(),resource_id:String::new()},Vec::new());
+        let legacy=VolcengineStreamingASR::new(VolcengineCredentials{ api_key: String::new(),app_id:String::new(),access_token:String::new(),resource_id:String::new()},Vec::new());
         legacy.note_accepted_wake_phrase("开始录音");
         assert_eq!(legacy.identity_profile_phrase().as_deref(),Some("开始录音"));
     }
@@ -13723,7 +13769,7 @@ mod tests {
     fn confirmed_owner_continuation_after_a_foreign_row_reaches_the_live_ledger() {
         use crate::speaker_verification::SessionSpeakerClassification::{Target, Uncertain};
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials { app_id: "app".into(), access_token: "token".into(),
+            VolcengineCredentials { api_key: String::new(), app_id: "app".into(), access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into() },
             Vec::new(),
         );
@@ -14727,7 +14773,7 @@ mod tests {
     fn proved_owner_prefix_survives_a_later_unscoped_speaker_dip() {
         use crate::speaker_verification::SessionSpeakerClassification::{NonTarget, Target};
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -15298,7 +15344,7 @@ mod tests {
     #[test]
     fn live_interference_delivery_uses_owner_audio_not_the_longer_same_cloud_mixture() {
         let make_asr = || Arc::new(VolcengineStreamingASR::new(
-            VolcengineCredentials { app_id: "app".into(), access_token: "token".into(), resource_id: VolcengineCredentials::default_resource_id().into() },
+            VolcengineCredentials { api_key: String::new(), app_id: "app".into(), access_token: "token".into(), resource_id: VolcengineCredentials::default_resource_id().into() },
             Vec::new(),
         ));
         let primary = make_asr();
@@ -15570,7 +15616,7 @@ mod tests {
 
     #[test]
     fn owner_provisional_stays_pending_but_cannot_age_into_irreversible_delivery() {
-        let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+        let asr = VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
             app_id: "test".into(), access_token: "test".into(),
             resource_id: VolcengineCredentials::default_resource_id().into(),
         }, Vec::new());
@@ -15812,7 +15858,7 @@ mod tests {
 
     #[test]
     fn completed_owner_return_does_not_revoke_new_words_from_historical_foreign_evidence() {
-        let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+        let asr = VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
             app_id: "test".into(), access_token: "test".into(),
             resource_id: VolcengineCredentials::default_resource_id().into(),
         }, Vec::new());
@@ -15840,7 +15886,7 @@ mod tests {
 
     #[test]
     fn provider_word_coordinates_schedule_identity_without_becoming_owner_evidence() {
-        let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+        let asr = VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
             app_id: "test".into(), access_token: "test".into(),
             resource_id: VolcengineCredentials::default_resource_id().into(),
         }, Vec::new());
@@ -16145,7 +16191,7 @@ mod tests {
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
     #[test]
     fn certified_owner_subset_keeps_streaming_without_emitting_raw_foreign_tail() {
-        let primary = VolcengineStreamingASR::new(VolcengineCredentials {
+        let primary = VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
             app_id: "app".into(), access_token: "token".into(), resource_id: VolcengineCredentials::default_resource_id().into(),
         }, Vec::new());
         let owner = "开始录音，这是我的完整正文。";
@@ -16174,7 +16220,7 @@ mod tests {
     #[test]
     fn pending_owner_stream_never_falls_back_to_the_rejected_mixture() {
         let primary = VolcengineStreamingASR::new(
-            VolcengineCredentials { app_id: "app".into(), access_token: "token".into(), resource_id: VolcengineCredentials::default_resource_id().into() }, Vec::new(),
+            VolcengineCredentials { api_key: String::new(), app_id: "app".into(), access_token: "token".into(), resource_id: VolcengineCredentials::default_resource_id().into() }, Vec::new(),
         );
         let text = "已提交的本人开头。随后是待确认的混合音轨。";
         {
@@ -16189,7 +16235,7 @@ mod tests {
         assert!(primary.pause_early_delivery_ledger_snapshot_after(Duration::ZERO, "").is_none(), "the source boundary stays latched while the owner final settles");
 
         let noise_only = VolcengineStreamingASR::new(
-            VolcengineCredentials { app_id: "app".into(), access_token: "token".into(), resource_id: VolcengineCredentials::default_resource_id().into() }, Vec::new(),
+            VolcengineCredentials { api_key: String::new(), app_id: "app".into(), access_token: "token".into(), resource_id: VolcengineCredentials::default_resource_id().into() }, Vec::new(),
         );
         {
             let mut state = noise_only.state.lock();
@@ -16440,7 +16486,7 @@ mod tests {
     #[test]
     fn stable_ledger_cannot_seal_a_recorded_unresolved_owner_tail() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: String::new(), access_token: String::new(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
             }, Vec::new(),
@@ -16474,7 +16520,7 @@ mod tests {
     #[tokio::test]
     async fn unresolved_tail_waits_for_the_complete_final_instead_of_cancelling() {
         let asr = Arc::new(VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: String::new(), access_token: String::new(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
             }, Vec::new(),
@@ -16568,7 +16614,7 @@ mod tests {
     #[test]
     fn stable_ledger_snapshot_requires_finishing_stable_clean_ledger() {
         let mut asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: String::new(),
                 access_token: String::new(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -16696,7 +16742,7 @@ mod tests {
     #[tokio::test]
     async fn early_seal_prefers_a_prompt_real_final_and_falls_back_to_the_ledger() {
         let mut asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: String::new(),
                 access_token: String::new(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -16717,7 +16763,7 @@ mod tests {
 
         // No final ever arrives; the stable ledger seals after the head start.
         let mut asr2 = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: String::new(),
                 access_token: String::new(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -16749,7 +16795,7 @@ mod tests {
     #[test]
     fn diagnostic_trace_is_opt_in_bounded_and_unicode_safe() {
         let mut asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: String::new(),
                 access_token: String::new(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -17162,7 +17208,7 @@ mod tests {
     #[test]
     fn cancel_does_not_emit_a_platform_provider_error() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -17182,7 +17228,7 @@ mod tests {
 
     fn uplink_stall_test_asr() -> VolcengineStreamingASR {
         VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -17665,7 +17711,7 @@ mod tests {
     #[test]
     fn optimized_bidirectional_diagnostic_mode_enables_official_second_pass() {
         let asr = VolcengineStreamingASR::new_with_session_options(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -17701,7 +17747,7 @@ mod tests {
     #[test]
     fn default_session_uses_one_optimized_bidirectional_engine_for_preview_and_final_result() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -17737,7 +17783,7 @@ mod tests {
     #[test]
     fn optimized_bidirectional_emits_speakerless_early_text_without_promoting_it_to_final_state() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -17814,7 +17860,7 @@ mod tests {
         // the capsule may show the provisional text, but no local/provider
         // ownership gate ever commits it into best_transcript_text.
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -17907,7 +17953,7 @@ mod tests {
         let owner = "主人已接受正文";
         let provisional_tail = "旁路暂态尾巴";
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -17979,7 +18025,7 @@ mod tests {
     #[test]
     fn protocol_final_preserves_continuously_confirmed_owner_preview_when_boundaries_drop_it() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -18103,7 +18149,7 @@ mod tests {
     #[test]
     fn authoritative_final_frame_beats_inflated_repeated_session_ledger() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -18157,7 +18203,7 @@ mod tests {
     #[test]
     fn two_pass_empty_final_seals_stream_without_erasing_session_speech() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -18411,7 +18457,7 @@ mod tests {
     #[test]
     fn protocol_final_preserves_owner_preview_after_non_target_tail_empties_boundaries() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -18931,7 +18977,7 @@ mod tests {
     #[test]
     fn local_non_target_speech_never_enters_optimistic_preview() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -19136,7 +19182,7 @@ mod tests {
     fn speaker_signal_quality_survives_transport_recovery_without_losing_early_rows() {
         use crate::speaker_verification::SessionSpeakerClassification::Uncertain;
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -19193,7 +19239,7 @@ mod tests {
             ),
         ] {
             let asr = VolcengineStreamingASR::new(
-                VolcengineCredentials {
+                VolcengineCredentials { api_key: String::new(),
                     app_id: "app".into(),
                     access_token: "token".into(),
                     resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -19382,7 +19428,7 @@ mod tests {
                 .audio_end_ms = last_end;
 
             let asr = VolcengineStreamingASR::new(
-                VolcengineCredentials {
+                VolcengineCredentials { api_key: String::new(),
                     app_id: "app".into(),
                     access_token: "token".into(),
                     resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -19509,7 +19555,7 @@ mod tests {
     #[test]
     fn handoff_first_positive_owner_window_protects_continuation_without_admitting_text() {
         use crate::speaker_verification::SessionSpeakerClassification::{Target, NonTarget};
-        let asr = VolcengineStreamingASR::new(VolcengineCredentials {
+        let asr = VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
             app_id: "app".into(), access_token: "token".into(), resource_id: "resource".into(),
         }, Vec::new());
         asr.note_verified_local_speaker_tracking_started("开始录音");
@@ -19915,7 +19961,7 @@ mod tests {
         use crate::speaker_verification::SessionSpeakerClassification::Uncertain;
         for owner_returns in [false, true] {
             let asr = VolcengineStreamingASR::new(
-                VolcengineCredentials {
+                VolcengineCredentials { api_key: String::new(),
                     app_id: "app".into(),
                     access_token: "token".into(),
                     resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -20370,7 +20416,7 @@ mod tests {
         );
 
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -21368,7 +21414,7 @@ mod tests {
     #[test]
     fn local_speaker_negative_evidence_is_endpoint_only_and_never_deletes_text() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -21433,7 +21479,7 @@ mod tests {
         // guide endpointing, but it cannot turn recognized text into an empty
         // final when the provider has no evidence of a second speaker.
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -22107,7 +22153,7 @@ mod tests {
     #[test]
     fn reanchor_local_speaker_tracking_heals_lost_activation() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -22329,7 +22375,7 @@ mod tests {
     #[test]
     fn protocol_final_preserves_same_cluster_body_without_identity_departure() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -22399,7 +22445,7 @@ mod tests {
     #[test]
     fn owner_can_resume_after_provider_local_isolation_freeze() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -22423,7 +22469,7 @@ mod tests {
     #[test]
     fn ephemeral_wake_profile_cannot_freeze_or_delete_same_session_body() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -22454,7 +22500,7 @@ mod tests {
     #[test]
     fn adaptive_profile_marks_repeated_strong_other_speech_for_endpoint_only() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -22506,7 +22552,7 @@ mod tests {
     #[test]
     fn startup_false_negatives_do_not_create_target_endpoint_authority() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -22566,7 +22612,7 @@ mod tests {
     #[test]
     fn transient_non_target_does_not_extend_owner_endpoint_clock() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -22599,7 +22645,7 @@ mod tests {
     #[test]
     fn target_speaker_endpoint_keeps_established_owner_through_uncertain_cross_phrase_window() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -22699,7 +22745,7 @@ mod tests {
     #[test]
     fn other_person_speech_does_not_lengthen_owner_auto_end() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -22895,7 +22941,7 @@ mod tests {
         // so requiring a fresh positive Target vote froze preview at 17 chars
         // even though the body began 68 ms after the wake row.
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -23441,7 +23487,7 @@ mod tests {
         ));
 
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -23584,7 +23630,7 @@ mod tests {
         ));
 
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -23702,7 +23748,7 @@ mod tests {
         ));
 
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -23819,7 +23865,7 @@ mod tests {
         assert!(stable_provider_foreign_row_has_local_veto(&state, &result));
 
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -24258,7 +24304,7 @@ mod tests {
             ]
         });
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -24395,7 +24441,7 @@ mod tests {
         ));
 
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -24449,7 +24495,7 @@ mod tests {
         // debounced identity never left the owner. The identical evidence was
         // accepted only at protocol final, causing a ~5.9 s first preview.
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -24736,7 +24782,7 @@ mod tests {
     #[test]
     fn session_52_final_packet_keeps_previously_attributed_body() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -25204,7 +25250,7 @@ mod tests {
     #[test]
     fn local_speech_activity_is_provisional_until_stable_speaker_attribution_arrives() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -25297,7 +25343,7 @@ mod tests {
     #[test]
     fn retained_audio_survives_a_live_delivery_failure_until_finalization() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -25323,7 +25369,7 @@ mod tests {
     #[tokio::test]
     async fn retained_audio_recovery_is_strictly_one_shot() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -25369,7 +25415,7 @@ mod tests {
     #[test]
     fn qualified_owner_activity_raw_callback_waits_for_classifier_coverage() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -25499,7 +25545,7 @@ mod tests {
         // 确信 Target 恢复刷新。2026-09-23 重校后 0.42+ 已是确信 Target——
         // 该序列在新世界里走 Target 路径（见 owner_body_band_lifts_freeze）。
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -25539,7 +25585,7 @@ mod tests {
     #[test]
     fn owner_body_band_lifts_freeze_after_recalibration() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -25573,7 +25619,7 @@ mod tests {
     #[test]
     fn moderate_same_owner_negative_pair_remains_advisory() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -25600,7 +25646,7 @@ mod tests {
     #[test]
     fn insufficient_quality_strong_negative_cannot_advance_endpoint_or_transcript_foreign_runs() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -25640,7 +25686,7 @@ mod tests {
     #[test]
     fn insufficient_quality_observation_breaks_consecutive_foreign_confirmation() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -25691,7 +25737,7 @@ mod tests {
     #[test]
     fn consecutive_qualified_strong_negatives_still_confirm_foreign_run() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -25725,7 +25771,7 @@ mod tests {
     #[test]
     fn local_shadow_recovery_requires_verified_owner_and_zero_other_speaker_evidence() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -25759,7 +25805,7 @@ mod tests {
     #[test]
     fn extreme_local_pair_waits_for_provider_boundary_without_erasing_owner_growth() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -25803,7 +25849,7 @@ mod tests {
     #[test]
     fn isolated_extreme_mismatch_discards_staged_checkpoint_without_rollback() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -25837,7 +25883,7 @@ mod tests {
     #[test]
     fn short_hard_mismatch_pair_is_non_destructive_without_provider_boundary() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -25884,7 +25930,7 @@ mod tests {
         // 人声持续到尾端。仅唤醒词残段 / 音频太短 / 无本地证据不得触发重试。
         let new_asr = || {
             VolcengineStreamingASR::new(
-                VolcengineCredentials {
+                VolcengineCredentials { api_key: String::new(),
                     app_id: "app".into(),
                     access_token: "token".into(),
                     resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -25935,7 +25981,7 @@ mod tests {
     fn manual_short_empty_retry_requires_real_local_speech_and_enough_audio() {
         let new_asr = || {
             VolcengineStreamingASR::new(
-                VolcengineCredentials {
+                VolcengineCredentials { api_key: String::new(),
                     app_id: "app".into(),
                     access_token: "token".into(),
                     resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -25969,7 +26015,7 @@ mod tests {
     #[test]
     fn recovery_snapshot_preserves_local_wake_speaker_evidence() {
         let source = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -25998,7 +26044,7 @@ mod tests {
             });
         }
         let replay = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -26046,7 +26092,7 @@ mod tests {
             VolcengineASRError::ConnectionFailed("socket closed".into()),
         ] {
             let asr = VolcengineStreamingASR::new(
-                VolcengineCredentials {
+                VolcengineCredentials { api_key: String::new(),
                     app_id: "app".into(),
                     access_token: "token".into(),
                     resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -26076,7 +26122,7 @@ mod tests {
         }
 
         let raw_only = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -26173,7 +26219,7 @@ mod tests {
     #[tokio::test]
     async fn audio_delivery_readiness_waits_for_bridge_flush() {
         let asr = Arc::new(VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -26195,7 +26241,7 @@ mod tests {
     #[tokio::test]
     async fn audio_delivery_readiness_returns_the_real_startup_failure() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -26216,7 +26262,7 @@ mod tests {
     #[tokio::test]
     async fn deferred_open_failure_waits_until_recovery_pcm_is_sealed() {
         let asr = Arc::new(VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: String::new(),
                 access_token: String::new(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -26255,7 +26301,7 @@ mod tests {
     async fn twenty_deferred_open_failures_retain_every_pcm_byte_before_publication() {
         for attempt in 0u8..20 {
             let asr = Arc::new(VolcengineStreamingASR::new(
-                VolcengineCredentials {
+                VolcengineCredentials { api_key: String::new(),
                     app_id: String::new(),
                     access_token: String::new(),
                     resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -26286,7 +26332,7 @@ mod tests {
     fn twenty_send_failures_keep_prefix_and_tail_losslessly() {
         for attempt in 0u8..20 {
             let asr = VolcengineStreamingASR::new(
-                VolcengineCredentials {
+                VolcengineCredentials { api_key: String::new(),
                     app_id: "app".into(),
                     access_token: "token".into(),
                     resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -26312,7 +26358,7 @@ mod tests {
     fn twenty_final_failures_allow_exactly_one_complete_replay_claim() {
         for attempt in 0u8..20 {
             let asr = VolcengineStreamingASR::new(
-                VolcengineCredentials {
+                VolcengineCredentials { api_key: String::new(),
                     app_id: "app".into(),
                     access_token: "token".into(),
                     resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -26346,7 +26392,7 @@ mod tests {
     #[test]
     fn full_audio_replay_timeout_covers_the_long_recording_drain() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -26371,7 +26417,7 @@ mod tests {
     #[tokio::test]
     async fn audio_delivery_drain_returns_the_real_worker_failure() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -26395,7 +26441,7 @@ mod tests {
     #[test]
     fn retained_audio_burst_preserves_every_sample_and_sequence() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -26428,7 +26474,7 @@ mod tests {
     #[test]
     fn queued_audio_observation_stays_with_original_segment_after_rebind() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -26479,7 +26525,7 @@ mod tests {
     #[test]
     fn production_consume_path_preserves_mixed_segment_shares_across_rebind() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -26678,7 +26724,7 @@ mod tests {
     #[test]
     fn missing_source_interval_keeps_destination_fact_unknown_without_borrowing_current_source() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -26721,7 +26767,7 @@ mod tests {
 
     #[test]
     fn independent_asr_sessions_do_not_collide_when_sequences_restart() {
-        let credentials = VolcengineCredentials {
+        let credentials = VolcengineCredentials { api_key: String::new(),
             app_id: "app".into(),
             access_token: "token".into(),
             resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -26736,7 +26782,7 @@ mod tests {
     #[test]
     fn reopen_barrier_does_not_abandon_new_stream_or_claimed_old_stream() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -26814,7 +26860,7 @@ mod tests {
     #[test]
     fn reopen_barrier_abandons_only_unclaimed_old_stream_entries() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -26875,7 +26921,7 @@ mod tests {
     #[test]
     fn mismatched_interval_is_local_to_one_call_and_cannot_bind_the_next_pcm() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -26933,7 +26979,7 @@ mod tests {
     #[test]
     fn source_interval_validation_is_local_and_rejects_wrong_generation_segment_or_observation() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -27014,7 +27060,7 @@ mod tests {
     #[test]
     fn two_logical_streams_keep_independent_ranges_in_asr_source_shares() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -27060,7 +27106,7 @@ mod tests {
     #[test]
     fn explicit_unknown_source_does_not_fallback_to_current_observation() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -27094,7 +27140,7 @@ mod tests {
     #[test]
     fn missing_worker_source_stays_unassociated_across_capture_rebind() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -27125,7 +27171,7 @@ mod tests {
     #[test]
     fn cancel_seals_a_pending_half_frame_as_unresolved_under_one_boundary() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -27160,7 +27206,7 @@ mod tests {
     #[test]
     fn claimed_audio_source_is_not_abandoned_by_cancel_cleanup() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -27232,7 +27278,7 @@ mod tests {
     #[test]
     fn failed_and_unresolved_audio_are_source_bound_and_settled_once() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -27300,7 +27346,7 @@ mod tests {
     #[test]
     fn closed_audio_queue_rejects_every_unsent_frame_with_its_source() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -27335,7 +27381,7 @@ mod tests {
     #[tokio::test]
     async fn audio_delivery_drain_waits_for_queued_audio_before_finalization() {
         let asr = Arc::new(VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -27363,7 +27409,7 @@ mod tests {
     #[tokio::test]
     async fn await_final_result_returns_error_when_final_frame_never_arrives() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -27387,7 +27433,7 @@ mod tests {
     #[tokio::test]
     async fn proactive_final_frame_is_idempotent_and_seals_later_audio() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -27423,7 +27469,7 @@ mod tests {
     #[test]
     fn stalled_stream_uses_ledger_only_when_it_covers_the_last_owner_speech() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -27458,7 +27504,7 @@ mod tests {
     #[tokio::test]
     async fn stalled_stream_finishes_from_the_existing_ledger_without_replay() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -27495,7 +27541,7 @@ mod tests {
     #[tokio::test]
     async fn await_final_result_rejects_stable_partial_without_protocol_final() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -27526,7 +27572,7 @@ mod tests {
     #[tokio::test]
     async fn await_final_result_rejects_uncovered_stable_partial() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -27566,7 +27612,7 @@ mod tests {
     #[tokio::test]
     async fn await_final_result_requires_protocol_final_even_with_full_server_audio() {
         let asr = VolcengineStreamingASR::new(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: "app".into(),
                 access_token: "token".into(),
                 resource_id: VolcengineCredentials::default_resource_id().into(),
@@ -27792,7 +27838,7 @@ mod tests {
                 .filter(|value| !value.trim().is_empty())
                 .expect("installed Volcengine credential is required")
         };
-        let credentials = VolcengineCredentials {
+        let credentials = VolcengineCredentials { api_key: String::new(),
             app_id: credential(CredentialAccount::VolcengineAppKey),
             access_token: credential(CredentialAccount::VolcengineAccessKey),
             resource_id: credential(CredentialAccount::VolcengineResourceId),
@@ -28080,7 +28126,7 @@ mod tests {
         assert_eq!(input_sha256, fixture["pcm_sha256"].as_str().unwrap().to_ascii_lowercase());
         let credential = |account| CredentialsVault::get(account).unwrap().filter(|v| !v.is_empty()).expect("installed credential");
         let mut asr = VolcengineStreamingASR::new_with_session_options(
-            VolcengineCredentials {
+            VolcengineCredentials { api_key: String::new(),
                 app_id: credential(CredentialAccount::VolcengineAppKey),
                 access_token: credential(CredentialAccount::VolcengineAccessKey),
                 resource_id: credential(CredentialAccount::VolcengineResourceId),
@@ -28259,7 +28305,7 @@ mod tests {
                 .filter(|value| !value.trim().is_empty())
                 .expect("installed Volcengine credential is required")
         };
-        let credentials = VolcengineCredentials {
+        let credentials = VolcengineCredentials { api_key: String::new(),
             app_id: credential(CredentialAccount::VolcengineAppKey),
             access_token: credential(CredentialAccount::VolcengineAccessKey),
             resource_id: credential(CredentialAccount::VolcengineResourceId),
@@ -28425,5 +28471,40 @@ mod tests {
             summary_path.display()
         );
         assert!(passed, "target-speaker filter probe report is FAIL");
+    }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+#[path = "volcengine_api_key_live_probe.rs"]
+mod api_key_live_probe;
+
+#[cfg(test)]
+mod speech_api_key_tests {
+    use super::*;
+    #[test]
+    fn api_key_only_and_priority_use_no_legacy_authentication() {
+        let mut credentials = VolcengineCredentials { api_key: "new-key".into(), app_id: String::new(), access_token: String::new(), resource_id: "chosen-resource".into() };
+        assert!(credentials.is_configured());
+        let mut headers = tokio_tungstenite::tungstenite::http::HeaderMap::new();
+        credentials.apply_asr_headers(&mut headers).unwrap();
+        assert_eq!(headers["X-Api-Key"], "new-key");
+        assert!(headers["X-Api-Key"].is_sensitive());
+        assert!(!headers.contains_key("X-Api-App-Key") && !headers.contains_key("X-Api-Access-Key"));
+        credentials.app_id = "old-app".into(); credentials.access_token = "expired-token".into();
+        let auth = credentials.authentication_headers("X-Api-App-Key").unwrap();
+        assert_eq!(auth, vec![("X-Api-Key", "new-key")]);
+        assert!(!format!("{credentials:?}").contains("new-key"));
+        assert!(!format!("{credentials:?}").contains("expired-token"));
+    }
+    #[test]
+    fn legacy_authentication_missing_resource_and_invalid_key_stay_distinct() {
+        let mut credentials = VolcengineCredentials { api_key: String::new(), app_id: "old-app".into(), access_token: "old-token".into(), resource_id: "chosen-resource".into() };
+        assert_eq!(credentials.authentication_headers("X-Api-App-Key").unwrap(), vec![("X-Api-App-Key", "old-app"), ("X-Api-Access-Key", "old-token")]);
+        credentials.api_key = "bad\nkey".into();
+        let error = credentials.apply_asr_headers(&mut Default::default()).unwrap_err();
+        assert!(!error.to_string().contains("bad"));
+        assert!(!error.permits_full_audio_replay());
+        credentials.resource_id.clear();
+        assert!(!credentials.is_configured());
     }
 }

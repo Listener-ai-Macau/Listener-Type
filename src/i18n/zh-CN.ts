@@ -1189,6 +1189,8 @@ export const zhCN = {
         asrFoundryLocalWhisper: '本地 Whisper（Foundry Local）',
         asrLocalQwen3: '本地 Qwen3-ASR',
       },
+      volcengineApiKeyHint: '填写新版火山语音控制台的 API Key。填写后优先使用，旧版凭据保留兼容。',
+      volcengineLegacyAuth: '旧版鉴权（兼容）',
       volcengineAppKeyLabel: 'APP ID',
       volcengineAccessKeyLabel: 'Access Token',
       volcengineResourceIdLabel: 'Resource ID',

@@ -4233,6 +4233,7 @@ pub(crate) fn read_volc_credentials() -> VolcengineCredentials {
     // Read one document under the vault lock. Three independent lookups could
     // mix fields if another settings operation refreshed the process cache.
     let snapshot = CredentialsVault::snapshot();
+    let api_key = snapshot.volcengine_api_key.unwrap_or_default();
     let app_id = snapshot.volcengine_app_key.unwrap_or_default();
     let access_token = snapshot.volcengine_access_key.unwrap_or_default();
     let resource_id = snapshot.volcengine_resource_id
@@ -4242,8 +4243,9 @@ pub(crate) fn read_volc_credentials() -> VolcengineCredentials {
         .into_iter().rev().collect();
     // Never log the token or full application ID. This identifies the actual
     // recording resource when the OS vault view changes between sessions.
-    log::info!("[asr] selected configured resource app_suffix={suffix} resource_id={resource_id}");
-    VolcengineCredentials {
+    let auth_mode = if api_key.trim().is_empty() { "legacy" } else { "api_key" };
+    log::info!("[asr] selected configured resource auth_mode={auth_mode} app_suffix={suffix} resource_id={resource_id}");
+    VolcengineCredentials { api_key,
         app_id,
         access_token,
         resource_id,

@@ -5201,7 +5201,7 @@ fn recorder_error_monitor_closes_its_own_active_recording() {
 
 fn qa_test_asr() -> Arc<VolcengineStreamingASR> {
     Arc::new(VolcengineStreamingASR::new(
-        crate::asr::volcengine::VolcengineCredentials {
+        crate::asr::volcengine::VolcengineCredentials { api_key: String::new(),
             app_id: String::new(),
             access_token: String::new(),
             resource_id: "test-no-network".into(),

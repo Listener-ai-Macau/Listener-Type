@@ -189,7 +189,7 @@ pub(crate) mod tests {
         let frames:Vec<_>=archived["trace"]["entries"].as_array().unwrap().iter()
             .filter(|entry|entry["stage"]=="normalized_result").collect();
         let original_entries=archived["trace"]["entries"].as_array().unwrap();
-        let mut actual=VolcengineStreamingASR::new(VolcengineCredentials {
+        let mut actual=VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
             app_id:"offline".into(),access_token:"offline".into(),resource_id:"offline".into()},Vec::new())
             .with_owner_activity_only(true);
         actual.enable_diagnostic_trace();
@@ -289,7 +289,7 @@ pub(crate) mod tests {
         let local=restore("local");let raw=restore("raw");
         use super::super::volcengine::{VolcengineCredentials, VolcengineStreamingASR};
         let offline=|| {
-            let mut asr=VolcengineStreamingASR::new(VolcengineCredentials {
+            let mut asr=VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),
                 app_id:"offline".into(),access_token:"offline".into(),resource_id:"offline".into(),
             },Vec::new()).with_owner_activity_only(true);
             asr.note_accepted_wake_phrase(phrase);asr.enable_diagnostic_trace();asr
@@ -393,7 +393,7 @@ pub(crate) mod tests {
             let frames:Vec<_>=trace["trace"]["entries"].as_array().unwrap().iter()
                 .filter(|entry|entry["stage"]=="normalized_result" && entry["provider_result"].is_object()).collect();
             assert!(!frames.is_empty());
-            let credentials=VolcengineCredentials {app_id:"offline".into(),access_token:"offline".into(),resource_id:"offline".into()};
+            let credentials=VolcengineCredentials { api_key: String::new(),app_id:"offline".into(),access_token:"offline".into(),resource_id:"offline".into()};
             let mut actual=VolcengineStreamingASR::new(credentials.clone(),Vec::new()).with_owner_activity_only(true);
             actual.enable_diagnostic_trace();
             let actual=Arc::new(actual);
@@ -826,8 +826,8 @@ impl NativeSourceIdentity {
             }
             (local,raw)
         };
-        let mut before=VolcengineStreamingASR::new(VolcengineCredentials {app_id:"offline".into(),access_token:"offline".into(),resource_id:"offline".into()},Vec::new()).with_owner_activity_only(true);
-        let mut after=VolcengineStreamingASR::new(VolcengineCredentials {app_id:"offline".into(),access_token:"offline".into(),resource_id:"offline".into()},Vec::new()).with_owner_activity_only(true);
+        let mut before=VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),app_id:"offline".into(),access_token:"offline".into(),resource_id:"offline".into()},Vec::new()).with_owner_activity_only(true);
+        let mut after=VolcengineStreamingASR::new(VolcengineCredentials { api_key: String::new(),app_id:"offline".into(),access_token:"offline".into(),resource_id:"offline".into()},Vec::new()).with_owner_activity_only(true);
         let callbacks=Arc::new(Mutex::new(Vec::<Value>::new()));let current_frame=Arc::new(AtomicU64::new(0));
         for (name,asr) in [("baseline",&mut before),("candidate",&mut after)] {
             asr.note_accepted_wake_phrase(phrase);asr.enable_diagnostic_trace();
