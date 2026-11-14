@@ -1,9 +1,21 @@
-# Listener v1.0.6-rc1 · Type build284 / Firmware38
+# Listener v1.0.6-rc1 · Type build285 / Firmware38
 
 | Download | File |
 | --- | --- |
-| **Windows app** | **[Download MSI · build284](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · build285](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | Firmware · USB flashing or Bluetooth OTA | [Download firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip) |
+
+## What’s changed since build284
+
+- **Use the current Volcengine Speech API Key.** Speech settings now lead with a masked API Key field and a connection check for the actual recognition protocol. Existing App ID / Access Token credentials remain available under legacy authentication. A configured API Key takes priority and sends the new authentication header only; a rejected key does not silently retry legacy credentials or replay audio.
+- **Keep saved credentials distinct.** The new speech key has its own protected credential field, so a legacy generic API field containing an App ID cannot be mistaken for a new key. Configuration readiness, dictation, audio-file recognition and platform adapters use the same authentication choice. Optional cloud voiceprint requests use the actual key’s identity; selecting a different key does not inherit a legacy account’s cloud owner profile. Local wake-word and speaker verification are retained.
+- **Make setup consistent across languages.** Simplified Chinese, Traditional Chinese, English, Japanese and Korean include the API Key guidance and legacy-authentication label. The speech connection check does not expose an unrelated model-list action. Personal keys are stored locally and are not included in this installer; other users supply their own credentials.
+
+Controlled Windows checks passed for new-key/legacy credential boundaries and readiness (5), existing ending guards (5), and cloud identity/legacy compatibility (7). A real provider check through the production Rust recognition client, with App ID and Access Token empty, recognized a 3,555 ms synthetic Chinese audio file: eight nonempty streaming updates arrived before EOF and the final result contained 13 characters. This check opened no microphone and read no editor or clipboard. Source CI passed. The matching MSI and installed executable were verified and existing settings/history were preserved.
+
+The established three-second quiet rule, incremental trailing-word insertion and completion-only full copying are retained, as are input selection, local wake/voiceprint behavior and Firmware38. This authentication update does not close the previously scoped intermittent acoustic, slow-editor, physical-device or long-term field limits. Provider account validity and service authorization still depend on the account administrator.
+
+## Included from build284
 
 ## What’s changed since build283
 
@@ -179,8 +191,8 @@ US$49 is the hardware price. Type is free and open source. No ready-to-use offic
 
 ## File identity
 
-- Windows runtime source: `ba07449998bdcaa447c962ec9516350be95ffc8a` · build284.
-- Windows MSI: 307716096 bytes · SHA256 `da1ec359abe415c2b448ac73f2cf7fa2ae3aa9189f87cfaf94aef1f4af296732`.
+- Windows runtime source: `a2b02a48dab106e0e501c66cb39921486559fade` · build285.
+- Windows MSI: 307724288 bytes · SHA256 `6dcef58fa55ff0fa35a8314928b7cbc5cc9b315897721ebb3642ab90ce4965c4`.
 - The release tag includes a documentation-only follow-up that aligns the download pages; application/build inputs match the runtime source above.
 - Firmware38 source: `bc1a1241e44ba79a424263bb89acdb8d72dec36a` · runtime `094f5a60049f59f4`.
 - Firmware ZIP: 1957429 bytes · SHA256 `af02bb866c7099bf24cebb0eed6cde35318743631cb720d65da8a4ee9f53b6e7`.

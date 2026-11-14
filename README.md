@@ -8,7 +8,7 @@ A microphone, a recording knob and four customizable keys. Speak a message, emai
 
 | Purpose | Direct download |
 | --- | --- |
-| **Windows app** | **[Download MSI · Type build284](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
+| **Windows app** | **[Download MSI · Type build285](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
 | **Firmware: USB flashing / Bluetooth OTA** | **[Download firmware ZIP · both methods](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
 
 <!-- listener-local-text-entry -->
@@ -39,7 +39,7 @@ Firmware: **ESP32-S3 N16R8**, build `094f5a60049f59f4`. Select the same ZIP for 
 Type defaults to **USB wired flashing**, with the flasher included in the MSI. No Python, ESP-IDF or separate flashing software is required.
 Device settings are independent: select one USB/Bluetooth device and read its settings. Explicit edits save automatically when editing finishes; reading or switching devices does not write computer defaults. Names, lights, power, keys and knob settings stay on the selected board. Use this paired MSI and firmware ZIP.
 
-Type build284 includes **automatic input selection**: use a ready Listener device first, then the computer microphone when the device disconnects. Active dictation and question recordings finish with their original source. Choose Automatic, Microphone or Listener BLE in Settings → Recording or the tray; saved fixed-source choices are respected. Computer wake still uses its separate optional switch, off by default. Build276 was withdrawn after real owner wake rejections; this release restores build274’s keyword/owner path and retains its known intermittent-wake limits. Includes trailing-word streaming, Volcengine automatic ending and completion-only full copying. Firmware38 is unchanged.
+Type build285 includes **automatic input selection**: use a ready Listener device first, then the computer microphone when the device disconnects. Active dictation and question recordings finish with their original source. Choose Automatic, Microphone or Listener BLE in Settings → Recording or the tray; saved fixed-source choices are respected. Computer wake still uses its separate optional switch, off by default. Build276 was withdrawn after real owner wake rejections; this release restores build274’s keyword/owner path and retains its known intermittent-wake limits. Includes trailing-word streaming, Volcengine automatic ending and completion-only full copying. Firmware38 is unchanged.
 
 [Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
