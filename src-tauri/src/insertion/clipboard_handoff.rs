@@ -471,6 +471,7 @@ pub(crate) fn publish_recording(origin: ClipboardTicket, session: uuid::Uuid,
 }
 
 const PASTE_RECEIPT_OBSERVATION_BUDGET: Duration = Duration::from_secs(5);
+const INITIAL_LOCAL_DRAFT_RESET_WINDOW: Duration = Duration::from_millis(500);
 
 struct PasteReceipt {
     ticket: u64,
@@ -489,6 +490,7 @@ struct PasteReceipt {
     observed_document: Option<String>,
     expected_session_document: Option<String>,
     strict_session_edit: bool,
+    first_guarded_local_draft: bool,
     staged_selection: bool,
     dispatch_session: Option<uuid::Uuid>,
 }
@@ -597,6 +599,29 @@ impl PasteReceipt {
         }
     }
 
+    fn initial_draft_is_current_after_reset(&self, before: &str, after: &str) -> bool {
+        if !self.first_guarded_local_draft
+            || self.dispatched_at.elapsed() > INITIAL_LOCAL_DRAFT_RESET_WINDOW
+            || self.observation.proof != Some(PasteReceiptProof::WholePayloadDocument)
+            || before.trim_end_matches(['\r', '\n']) == after.trim_end_matches(['\r', '\n'])
+        {
+            return false;
+        }
+        let Some(reader) = self.reader.as_ref() else { return false; };
+        // The first local draft can arrive just as an editor clears the
+        // previous message. A payload-shaped document by itself is not a
+        // revision permit. Re-acquire only this complete visible draft using
+        // two native views of the same focused editor and the live paste lease.
+        if reader.revisable_document_agrees(after).ok() != Some(true)
+            || reader.caret_at_end().ok() != Some(true)
+            || !reader.before().ok().is_some_and(|(document, selection)|
+                document == after && selection.is_empty())
+        {
+            return false;
+        }
+        still_owns_transport(self.ticket, *OWNER.lock(), self.revision, clipboard_revision())
+    }
+
     fn observe(&mut self) {
         if !self.observing() {
             return;
@@ -629,8 +654,14 @@ impl PasteReceipt {
                 if self.strict_session_edit && !self.session_body.as_ref().is_some_and(|(_, body)|
                     session_document_proves_range(self.expected_session_document.as_deref(), body,
                         &self.payload, self.observation.proof, &after, true)) {
-                    self.observation.consumed = false;
-                    self.observation.proof = None;
+                    if first_changed_read && self.initial_draft_is_current_after_reset(before, &after) {
+                        self.expected_session_document = Some(after.clone());
+                        log::info!("[insertion] local initial draft reacquired after editor reset ticket={} chars={}",
+                            self.ticket, after.chars().count());
+                    } else {
+                        self.observation.consumed = false;
+                        self.observation.proof = None;
+                    }
                 }
                 if first_changed_read && !self.observation.consumed {
                     log::info!("[insertion] paste readback changed without receipt ticket={} shape={:?} before_lines={} after_lines={} payload_chars={}",
@@ -868,6 +899,7 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                     })
                 });
                 let mut range_permission = SessionRangePermission::NotRequested;
+                let mut range_facts = [None; 4];
                 if revisable {
                     let identity = paste_receipt.as_ref().and_then(|prior|
                         prior.reader.as_ref().zip(reader.as_ref()).and_then(|(old,new)| old.same_target_observation(new).ok()));
@@ -881,13 +913,15 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                         .zip(before.as_ref()).map(|(fresh, old)| &fresh == old);
                     let selection = before.as_ref().map(|(_,selected)| selected.is_empty() || staged);
                     let caret = if staged { Some(true) } else { reader.as_ref().and_then(|r| r.caret_at_end().ok()) };
+                    range_facts = [current, unchanged, selection, caret];
                     range_permission = revisable_permission(scope.as_ref().is_some_and(|s| !s.previous_body.is_empty()),
-                        chain, revoked, [current, unchanged, selection, caret]);
+                        chain, revoked, range_facts);
                 }
                 if revisable && (text.is_empty() || range_permission != SessionRangePermission::Owned
                     || focus != crate::selection::FocusedInputState::Editable) {
-                    log::info!("[insertion] revisable acquisition deferred session_id={:?} permission={range_permission:?} focus={focus:?}",
-                        scope.as_ref().map(|scope| scope.session_id));
+                    log::info!("[insertion] revisable acquisition deferred session_id={:?} permission={range_permission:?} focus={focus:?} current={:?} stable={:?} selection_ok={:?} caret_at_end={:?}",
+                        scope.as_ref().map(|scope| scope.session_id),
+                        range_facts[0], range_facts[1], range_facts[2], range_facts[3]);
                     let _ = reply.send(PasteResult { status: InsertStatus::DeferredNoTarget,
                         terminal_decision: None, receipt: None, range_permission });
                     continue;
@@ -952,6 +986,8 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                 let session_body = scope.as_ref().filter(|_| chain).map(|s| (s.session_id,
                     if s.replace { text.clone() } else { format!("{}{text}", s.previous_body) }));
                 let strict_session_edit = revisable || scope.as_ref().is_some_and(|s| s.replace);
+                let first_guarded_local_draft = revisable_guard.is_some()
+                    && scope.as_ref().is_some_and(|scope| scope.previous_body.is_empty() && !scope.replace);
                 let expected_session_document = session_body.as_ref().and_then(|_| {
                     reader.as_ref()?.expected_document_after_paste(before.as_ref()?, &text).ok()
                 });
@@ -1081,6 +1117,7 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                     observed_document: None,
                     expected_session_document,
                     strict_session_edit,
+                    first_guarded_local_draft,
                     staged_selection: false,
                     dispatch_session: scope.as_ref().map(|scope| scope.session_id),
                 };
@@ -1614,7 +1651,7 @@ mod tests {
                 last_value_probe: None,
                 dispatched_at,
                 observation: PasteObservation::default(),
-                completion: Some(completion), session_body: None, observed_document: None, expected_session_document: None, strict_session_edit: false, staged_selection: false, dispatch_session: None,
+                completion: Some(completion), session_body: None, observed_document: None, expected_session_document: None, strict_session_edit: false, first_guarded_local_draft: false, staged_selection: false, dispatch_session: None,
             },
             PasteReceiptHandle {
                 ticket,
@@ -1850,7 +1887,7 @@ mod tests {
                 last_value_probe: None,
                 dispatched_at: Instant::now(),
                 observation: PasteObservation::default(),
-                completion: None, session_body: None, observed_document: None, expected_session_document: None, strict_session_edit: false, staged_selection: false, dispatch_session: None,
+                completion: None, session_body: None, observed_document: None, expected_session_document: None, strict_session_edit: false, first_guarded_local_draft: false, staged_selection: false, dispatch_session: None,
             }), || (None, crate::selection::FocusedInputState::NonEditable)));
             let (reply, results) = mpsc::channel();
             commands.send(Command::Retain(ClipboardTicket { id: ticket, revision: transport_revision }, final_body.clone(), true, reply)).unwrap();
