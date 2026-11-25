@@ -420,7 +420,7 @@ pub(crate) fn pin_bundled_vad_onnx_runtime() -> Result<(), String> {
     }).as_ref().map(|_| ()).map_err(Clone::clone)
 }
 
-fn bundled_vad_runtime_root() -> Option<PathBuf> {
+pub(crate) fn bundled_vad_runtime_root() -> Option<PathBuf> {
     #[cfg(debug_assertions)]
     {
         let development = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/vad-runtime");
@@ -503,7 +503,7 @@ fn bundled_vad_model_path_for(name: &str) -> Option<PathBuf> {
     .find(|candidate| candidate.is_file())
 }
 
-fn sha256_file(path: &Path) -> Result<String, String> {
+pub(crate) fn sha256_file(path: &Path) -> Result<String, String> {
     let file = fs::File::open(path).map_err(|err| format!("open VAD model failed: {err}"))?;
     let mut reader = BufReader::new(file);
     let mut hasher = Sha256::new();

@@ -245,6 +245,38 @@ async fn streaming_composition_update_tick(
     );
 }
 
+#[cfg(target_os = "windows")]
+async fn publish_foundry_streaming_composition(
+    inner: &Arc<Inner>, session_id: SessionId, text: &str, editor_checked: &mut bool,
+) {
+    if streaming_composition_disabled_by_env() || !inner.prefs.get().streaming_insert
+        || !crate::coordinator_state::editor_delivery_allowed(&inner.state.lock(), session_id)
+    {
+        return;
+    }
+    let Some(display) = live_delivery_display_text(inner, session_id, text, true) else {
+        return;
+    };
+    if !*editor_checked {
+        begin_streaming_composition_session(inner, session_id).await;
+        *editor_checked = true;
+    }
+    if !streaming_composition_active(inner, session_id) {
+        return;
+    }
+    let changed = streaming_update_should_send(
+        &display,
+        &inner.streaming_composition.lock().last_sent_key,
+    );
+    if changed {
+        streaming_composition_send(
+            inner,
+            session_id,
+            StreamingCompositionCommand::Update { key: display.clone(), text: display },
+        );
+    }
+}
+
 fn streaming_update_should_send(delta_key: &str, last_sent_key: &str) -> bool {
     !delta_key.is_empty() && delta_key != last_sent_key
 }

@@ -14,6 +14,8 @@ mod foundry_language;
 mod local_provider;
 pub mod models;
 pub mod paraformer;
+#[cfg(target_os = "windows")]
+pub(crate) mod punctuation;
 pub mod test_run;
 pub mod wake_helper;
 

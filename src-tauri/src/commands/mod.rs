@@ -935,6 +935,8 @@ async fn release_foundry_runtime_if_inactive(
     release_foundry: bool,
 ) {
     if release_foundry {
+        #[cfg(target_os = "windows")]
+        crate::asr::local::punctuation::release_punctuation().await;
         runtime.request_cancel_prepare();
         if let Err(error) = runtime.release_now().await {
             log::warn!("[foundry-asr] release inactive runtime failed: {error:#}");

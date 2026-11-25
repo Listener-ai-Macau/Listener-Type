@@ -1,7 +1,9 @@
 use crate::asr::volcengine::{LocalSpeechActivityState, LocalSpeechEvidence};
 
-const FOUNDRY_PREVIEW_FIRST_AUDIO_MS: u64 = 1_600;
-const FOUNDRY_PREVIEW_STEP_MS: u64 = 1_200;
+const FOUNDRY_PREVIEW_FIRST_AUDIO_MS: u64 = 1_120;
+const FOUNDRY_PREVIEW_STEP_MS: u64 = 720;
+const FOUNDRY_PREVIEW_PREFIX_MS: u64 = 16_000;
+const FOUNDRY_PREVIEW_WINDOW_MS: usize = 6_000;
 const FOUNDRY_PREVIEW_TAIL_MS: u64 = 250;
 
 struct FoundryMicrophoneConsumer {
@@ -131,24 +133,23 @@ fn spawn_foundry_microphone_tasks(
         }
     });
 
+    // Warm the final decoder independently. The already-warm Chinese preview
+    // can start while Whisper is coming back from idle eviction.
+    let runtime = Arc::clone(&inner.foundry_local_runtime);
+    let final_model = capture.asr.model_alias().to_owned();
+    async_runtime::spawn(async move {
+        if let Err(error) = runtime.ensure_cached_loaded(&final_model).await {
+            log::warn!("[foundry-asr] microphone warmup unavailable session_id={owner}: {error:#}");
+        }
+    });
     let preview_inner = Arc::clone(inner);
     async_runtime::spawn(async move {
-        // The configured idle eviction can unload the model between takes.
-        // Warm from the prepared cache while the recorder and VAD run.
-        if let Err(error) = preview_inner
-            .foundry_local_runtime
-            .ensure_cached_loaded(capture.asr.model_alias())
-            .await
-        {
-            log::warn!(
-                "[foundry-asr] microphone preview model unavailable session_id={owner}: {error:#}"
-            );
-            return;
-        }
+        let use_fast_preview = matches!(capture.asr.language_hint(), None | Some("zh"));
+        let mut editor_checked = false;
         let mut previous_end = 0;
         let mut previous_text = String::new();
         while foundry_microphone_is_active(&preview_inner, owner) {
-            tokio::time::sleep(Duration::from_millis(180)).await;
+            tokio::time::sleep(Duration::from_millis(120)).await;
             if !foundry_microphone_is_active(&preview_inner, owner) {
                 break;
             }
@@ -156,39 +157,61 @@ fn spawn_foundry_microphone_tasks(
             let Some(end) = foundry_preview_end_ms(evidence, previous_end) else {
                 continue;
             };
-            match capture
-                .asr
-                .preview_recent_audio(end, Duration::from_secs(4))
+            previous_end = end;
+            let full_prefix = end <= FOUNDRY_PREVIEW_PREFIX_MS;
+            let fast = if use_fast_preview {
+                let window = if full_prefix { end as usize } else { FOUNDRY_PREVIEW_WINDOW_MS };
+                let pcm = capture.asr.preview_pcm(end, window);
+                tokio::task::spawn_blocking(move || {
+                    crate::asr::local::wake_helper::transcribe_if_ready(
+                        &pcm,
+                        Duration::from_secs(2),
+                    )
+                    .ok()
+                    .filter(|draft| !draft.text.trim().is_empty())
+                })
                 .await
-            {
-                Ok(None) => {}
-                Ok(Some(text)) => {
-                    previous_end = end;
-                    if text.is_empty() || text == previous_text {
+                .ok()
+                .flatten()
+            } else {
+                None
+            };
+            let (text, engine, complete) = if let Some(draft) = fast {
+                (draft.text, "paraformer", full_prefix)
+            } else {
+                match capture.asr.preview_recent_audio(end, Duration::from_secs(4)).await {
+                    Ok(Some(text)) => (text, "whisper", end <= FOUNDRY_PREVIEW_WINDOW_MS as u64),
+                    Ok(None) => continue,
+                    Err(error) => {
+                        log::warn!("[foundry-asr] microphone preview skipped session_id={owner}: {error:#}");
                         continue;
                     }
-                    // Display only. The final recognizer gets full PCM, and
-                    // neither insertion nor the endpoint uses preview text.
-                    if publish_dictation_capsule(
-                        &preview_inner,
-                        owner,
-                        DictationUiState::Recording,
-                        0.0,
-                        Some(text.clone()),
-                        None,
-                    ) {
-                        log::info!(
-                            "[foundry-asr] microphone preview session_id={owner} audio_ms={end}"
-                        );
-                        previous_text = text;
-                    }
                 }
-                Err(error) => {
-                    previous_end = end;
-                    log::warn!(
-                        "[foundry-asr] microphone preview skipped session_id={owner}: {error:#}"
-                    );
+            };
+            let text = crate::asr::local::punctuation::restore_chinese_punctuation(text, true).await;
+            if !foundry_microphone_is_active(&preview_inner, owner) {
+                break;
+            }
+            if text.is_empty() || text == previous_text {
+                continue;
+            }
+            if publish_dictation_capsule(
+                &preview_inner,
+                owner,
+                DictationUiState::Recording,
+                0.0,
+                Some(text.clone()),
+                None,
+            ) {
+                log::info!(
+                    "[foundry-asr] microphone preview session_id={owner} audio_ms={end} engine={engine}"
+                );
+                if complete {
+                    publish_foundry_streaming_composition(
+                        &preview_inner, owner, &text, &mut editor_checked,
+                    ).await;
                 }
+                previous_text = text;
             }
         }
     });
@@ -206,6 +229,14 @@ mod foundry_microphone_tests {
             ..LocalSpeechEvidence::default()
         };
         assert_eq!(foundry_preview_end_ms(speech, 0), Some(1_600));
+        assert_eq!(
+            foundry_preview_end_ms(LocalSpeechEvidence { analyzed_through_ms: 1_120, ..speech }, 0),
+            Some(1_120)
+        );
+        assert_eq!(
+            foundry_preview_end_ms(LocalSpeechEvidence { analyzed_through_ms: 1_119, ..speech }, 0),
+            None
+        );
         assert_eq!(foundry_preview_end_ms(speech, 1_600), None);
         let quiet = LocalSpeechEvidence {
             state: LocalSpeechActivityState::NonSpeech,

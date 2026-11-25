@@ -3610,6 +3610,7 @@ fn schedule_foundry_local_asr_release(inner: &Arc<Inner>, session_id: SessionId)
         if !foundry_release_session_is_current(&inner, session_id) {
             return;
         }
+        crate::asr::local::punctuation::release_punctuation().await;
         if let Err(error) = runtime.release_now().await {
             log::warn!("[foundry-asr] scheduled release failed: {error:#}");
         }

@@ -156,14 +156,7 @@ impl FoundryLocalWhisperAsr {
         end_ms: u64,
         audio_timeout: std::time::Duration,
     ) -> Result<Option<String>> {
-        const BYTES_PER_MS: usize = 32;
-        const WINDOW_MS: usize = 6_000;
-        let pcm = {
-            let buffer = self.buffer.lock();
-            let end = (end_ms as usize).saturating_mul(BYTES_PER_MS).min(buffer.len());
-            let start = end.saturating_sub(WINDOW_MS * BYTES_PER_MS);
-            buffer[start..end].to_vec()
-        };
+        let pcm = self.preview_pcm(end_ms, 6_000);
         if pcm.is_empty() { return Ok(None); }
         let generation = self.cancel_generation.load(Ordering::SeqCst);
         let wav = TempWavFile::create(&pcm)?;
@@ -174,6 +167,15 @@ impl FoundryLocalWhisperAsr {
             return Ok(None);
         }
         Ok(preview.map(|text| trim_transcript_text(&text)))
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(crate) fn preview_pcm(&self, end_ms: u64, window_ms: usize) -> Vec<u8> {
+        const BYTES_PER_MS: usize = 32;
+        let buffer = self.buffer.lock();
+        let end = (end_ms as usize).saturating_mul(BYTES_PER_MS).min(buffer.len());
+        let start = end.saturating_sub(window_ms * BYTES_PER_MS);
+        buffer[start..end].to_vec()
     }
 
     pub(crate) fn mark_confirmed_no_speech(&self) {

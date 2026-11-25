@@ -3563,7 +3563,8 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                 .transcribe(foundry_audio_transcribe_timeout_duration())
                 .await
             {
-                Ok(r) => {
+                Ok(mut r) => {
+                    r.text = crate::asr::local::punctuation::restore_chinese_punctuation(r.text, false).await;
                     schedule_foundry_local_asr_release(inner, current_session_id);
                     r
                 }
