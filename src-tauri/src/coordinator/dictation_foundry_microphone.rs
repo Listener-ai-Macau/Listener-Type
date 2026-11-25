@@ -5,6 +5,9 @@ const FOUNDRY_PREVIEW_STEP_MS: u64 = 720;
 const FOUNDRY_PREVIEW_PREFIX_MS: u64 = 16_000;
 const FOUNDRY_PREVIEW_WINDOW_MS: usize = 6_000;
 const FOUNDRY_PREVIEW_TAIL_MS: u64 = 250;
+const LOCAL_PHRASE_QUIET_MS: u64 = 720;
+const LOCAL_PHRASE_TAIL_MS: u64 = 200;
+const LOCAL_PHRASE_MIN_NEW_AUDIO_MS: u64 = 500;
 
 struct FoundryMicrophoneConsumer {
     asr: Arc<FoundryLocalWhisperAsr>,
@@ -87,11 +90,124 @@ fn foundry_microphone_stop_due(
     })
 }
 
+fn local_phrase_boundary(evidence: LocalSpeechEvidence, delivered_end: u64) -> Option<u64> {
+    if evidence.state != LocalSpeechActivityState::NonSpeech {
+        return None;
+    }
+    let speech_end = evidence.last_detected_speech_end_ms?;
+    if evidence.analyzed_through_ms.saturating_sub(speech_end) < LOCAL_PHRASE_QUIET_MS {
+        return None;
+    }
+    let cut = speech_end.saturating_add(LOCAL_PHRASE_TAIL_MS);
+    (cut.saturating_sub(delivered_end) >= LOCAL_PHRASE_MIN_NEW_AUDIO_MS).then_some(cut)
+}
+
+fn spawn_companion_phrase_delivery(
+    inner: Arc<Inner>, owner: SessionId, capture: Arc<FoundryMicrophoneConsumer>,
+) {
+    async_runtime::spawn(async move {
+        let mut attempted_cut = 0;
+        while foundry_microphone_is_active(&inner, owner) {
+            tokio::time::sleep(Duration::from_millis(80)).await;
+            if !foundry_editor_target_is_listening(&inner, owner) {
+                continue;
+            }
+            let delivered_end = capture.asr.local_phrase_prefix.lock().await.end_ms;
+            let evidence = *capture.evidence.lock();
+            let Some(cut) = local_phrase_boundary(evidence, delivered_end) else {
+                continue;
+            };
+            if cut <= attempted_cut {
+                continue;
+            }
+            attempted_cut = cut;
+            let span = (cut - delivered_end) as usize;
+            if span > crate::asr::local::companion_paraformer::MAX_DICTATION_PCM_BYTES / 32 {
+                continue;
+            }
+            let pcm = capture.asr.preview_pcm(cut, span);
+            if pcm.len() != span * 32 {
+                continue;
+            }
+            let Ok(phrase) = crate::asr::local::companion_paraformer::transcribe(pcm.into()).await else {
+                continue;
+            };
+            let phrase = crate::asr::local::punctuation::restore_chinese_punctuation(phrase, false).await;
+            let delivery = Arc::clone(&inner);
+            let asr = Arc::clone(&capture.asr);
+            let _ = tokio::task::spawn_blocking(move || {
+                append_companion_phrase(&delivery, owner, &asr, delivered_end, cut, &phrase);
+            }).await;
+        }
+    });
+}
+
+fn append_companion_phrase(
+    inner: &Arc<Inner>, owner: SessionId, asr: &Arc<FoundryLocalWhisperAsr>,
+    start: u64, end: u64, phrase: &str,
+) {
+    use crate::asr::local::foundry_provider::join_local_phrases;
+
+    if phrase.trim().is_empty() || !crate::insertion::clipboard_transport_is_reversible() {
+        return;
+    }
+    let Some(origin) = inner.dictation_clipboard_origin.lock().as_ref()
+        .filter(|(session, _)| *session == owner).map(|(_, ticket)| *ticket)
+    else { return; };
+
+    // Serialize an accepted append and its audio boundary with the STOP
+    // decoder. A late phrase can't advance the cut without dispatching.
+    let mut prefix = asr.local_phrase_prefix.blocking_lock();
+    if prefix.end_ms != start || !foundry_editor_target_is_listening(inner, owner) {
+        return;
+    }
+    let raw = join_local_phrases(&prefix.raw_text, phrase.trim());
+    let Some(display) = pause_early_display_text(inner, owner, &raw) else {
+        return;
+    };
+    let (before, _) = pause_early_delivery_session_state(inner, owner);
+    let Some(delta) = display.strip_prefix(&before) else {
+        return;
+    };
+    if delta.trim().is_empty() {
+        return;
+    }
+    let key = embedded_audio_partial_preview_stability_key(&display);
+    if key.is_empty() || !foundry_editor_target_is_listening(inner, owner) {
+        return;
+    }
+    pause_early_delivery_reserve(inner, owner, display.clone(), key.clone(), key);
+    let guard = Arc::clone(inner);
+    let shortcut = inner.prefs.get().paste_shortcut;
+    let result = crate::insertion::guarded_local_append_with_receipt(
+        delta, shortcut, crate::insertion::SessionPasteScope {
+            session_id: owner, previous_body: before, replace: false,
+        }, origin, move || foundry_editor_target_is_listening(&guard, owner),
+    );
+    if matches!(result.status, InsertStatus::PasteSent | InsertStatus::Inserted) {
+        pause_early_delivery_confirm(inner, owner);
+        inner.embedded_audio_pause_early_delivery.lock().paste_delivered_session = Some(owner);
+        prefix.raw_text = raw;
+        prefix.end_ms = end;
+        log::info!("[companion-paraformer] phrase appended session_id={owner} audio_end_ms={end} chars={} status={:?}",
+            delta.chars().count(), result.status);
+    } else {
+        pause_early_delivery_rollback(inner, owner);
+        log::info!("[companion-paraformer] phrase deferred session_id={owner} status={:?}", result.status);
+    }
+}
+
 fn spawn_foundry_microphone_tasks(
     inner: &Arc<Inner>,
     owner: SessionId,
     capture: Arc<FoundryMicrophoneConsumer>,
 ) {
+    let phrase_mode = capture.asr.uses_companion_final()
+        && streaming_composition_disabled_by_env()
+        && !automatic_wake_session_active(inner, owner);
+    if phrase_mode {
+        spawn_companion_phrase_delivery(Arc::clone(inner), owner, Arc::clone(&capture));
+    }
     let endpoint_inner = Arc::clone(inner);
     let endpoint_capture = Arc::clone(&capture);
     async_runtime::spawn(async move {
@@ -115,6 +231,9 @@ fn spawn_foundry_microphone_tasks(
                     && (!no_speech || tail_analyzed)
                 {
                     let transition = claim_native_microphone_stop(&endpoint_inner, owner);
+                    if transition.is_some() {
+                        endpoint_capture.asr.mark_automatic_stop_speech_end(evidence.last_detected_speech_end_ms);
+                    }
                     if no_speech && transition.is_some() {
                         // A fully quiet take can produce captions such as
                         // "(sad music)" in Whisper. Never deliver those.
@@ -213,7 +332,7 @@ fn spawn_foundry_microphone_tasks(
                 log::info!(
                     "[foundry-asr] microphone preview session_id={owner} audio_ms={end} engine={engine}"
                 );
-                if complete {
+                if complete && !phrase_mode {
                     if streaming_composition_disabled_by_env() {
                         foundry_native_editor_preview(&preview_inner, owner, &text).await;
                     } else {
@@ -267,6 +386,30 @@ mod foundry_microphone_tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn a_confirmed_short_quiet_window_seals_each_local_phrase_once() {
+        let first = LocalSpeechEvidence {
+            state: LocalSpeechActivityState::NonSpeech,
+            analyzed_through_ms: 4_720,
+            last_detected_speech_end_ms: Some(4_000),
+            ..Default::default()
+        };
+        assert_eq!(local_phrase_boundary(first, 0), Some(4_200));
+        assert_eq!(local_phrase_boundary(first, 4_200), None);
+        assert_eq!(local_phrase_boundary(LocalSpeechEvidence {
+            analyzed_through_ms: 4_719, ..first
+        }, 0), None);
+        assert_eq!(local_phrase_boundary(LocalSpeechEvidence {
+            state: LocalSpeechActivityState::PendingSpeech, ..first
+        }, 0), None);
+        let second = LocalSpeechEvidence {
+            analyzed_through_ms: 8_720,
+            last_detected_speech_end_ms: Some(8_000),
+            ..first
+        };
+        assert_eq!(local_phrase_boundary(second, 4_200), Some(8_200));
     }
 
     #[test]

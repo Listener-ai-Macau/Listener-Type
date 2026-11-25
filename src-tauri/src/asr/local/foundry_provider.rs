@@ -29,11 +29,37 @@ const FOUNDRY_LEAD_SILENCE_PADDING_SAMPLES: usize =
 const FOUNDRY_MIN_AUDIO_CONTEXT_MS: usize = 4_000;
 const FOUNDRY_MIN_AUDIO_CONTEXT_SAMPLES: usize = 16_000 * FOUNDRY_MIN_AUDIO_CONTEXT_MS / 1_000;
 
+#[cfg(target_os = "windows")]
+#[derive(Clone, Default)]
+pub(crate) struct LocalPhrasePrefix {
+    pub end_ms: u64,
+    pub raw_text: String,
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn join_local_phrases(prefix: &str, phrase: &str) -> String {
+    if prefix.is_empty() || phrase.is_empty() {
+        return format!("{prefix}{phrase}");
+    }
+    let left = prefix.chars().next_back().expect("nonempty");
+    let right = phrase.chars().next().expect("nonempty");
+    let separator = if left.is_ascii() && right.is_ascii_alphanumeric() && !left.is_whitespace() {
+        " "
+    } else {
+        ""
+    };
+    format!("{prefix}{separator}{phrase}")
+}
+
 pub struct FoundryLocalWhisperAsr {
     #[cfg(target_os = "windows")]
     runtime: Arc<FoundryLocalRuntime>,
     #[cfg(target_os = "windows")]
     companion_final: bool,
+    #[cfg(target_os = "windows")]
+    pub(crate) local_phrase_prefix: tokio::sync::Mutex<LocalPhrasePrefix>,
+    #[cfg(target_os = "windows")]
+    automatic_stop_speech_end_ms: AtomicU64,
     model_alias: String,
     runtime_source: String,
     language_hint: Option<String>,
@@ -53,6 +79,8 @@ impl FoundryLocalWhisperAsr {
         Self {
             runtime,
             companion_final: false,
+            local_phrase_prefix: tokio::sync::Mutex::new(LocalPhrasePrefix::default()),
+            automatic_stop_speech_end_ms: AtomicU64::new(u64::MAX),
             model_alias,
             runtime_source,
             language_hint: normalize_language_hint(language_hint),
@@ -109,6 +137,9 @@ impl FoundryLocalWhisperAsr {
             });
         }
 
+        #[cfg(target_os = "windows")]
+        let result = self.transcribe_with_local_phrase_prefix(pcm, audio_timeout).await;
+        #[cfg(not(target_os = "windows"))]
         let result = self.transcribe_final_pcm(pcm, audio_timeout).await;
         if self.cancel_generation.load(Ordering::SeqCst) != cancel_generation {
             anyhow::bail!("Foundry Local Whisper transcription cancelled");
@@ -117,6 +148,35 @@ impl FoundryLocalWhisperAsr {
             self.buffer.lock().clear();
         }
         result
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(crate) fn mark_automatic_stop_speech_end(&self, last_speech_end: Option<u64>) {
+        if let Some(end_ms) = last_speech_end {
+            self.automatic_stop_speech_end_ms.store(end_ms, Ordering::Release);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    async fn transcribe_with_local_phrase_prefix(
+        &self, mut pcm: Vec<u8>, audio_timeout: std::time::Duration,
+    ) -> Result<RawTranscript> {
+        // A paste and checkpoint share this lock. The final take either sees
+        // both or sees neither, including a STOP arriving mid-dispatch.
+        let prefix = self.local_phrase_prefix.lock().await.clone();
+        if prefix.end_ms == 0 {
+            return self.transcribe_final_pcm(pcm, audio_timeout).await;
+        }
+        let duration_ms = pcm_duration_ms(&pcm);
+        let last_speech = self.automatic_stop_speech_end_ms.load(Ordering::Acquire);
+        let text = if last_speech <= prefix.end_ms || prefix.end_ms >= duration_ms {
+            prefix.raw_text
+        } else {
+            let tail = pcm.split_off(prefix.end_ms as usize * 32);
+            let result = self.transcribe_final_pcm(tail, audio_timeout).await?;
+            join_local_phrases(&prefix.raw_text, &result.text)
+        };
+        Ok(RawTranscript { text, duration_ms })
     }
 
     async fn transcribe_final_pcm(

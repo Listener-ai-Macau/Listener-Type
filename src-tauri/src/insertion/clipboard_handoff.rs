@@ -153,6 +153,7 @@ enum Command {
     RetainRecording(ClipboardTicket, uuid::Uuid, String, bool, Sender<RetentionResult>),
     PublishRecording(ClipboardTicket, uuid::Uuid, String, bool, Sender<RetentionResult>),
     Revisable(String, PasteShortcut, SessionPasteScope, Option<RevisableDispatchGuard>, Sender<PasteResult>),
+    GuardedLocalAppend(String, PasteShortcut, SessionPasteScope, RevisableDispatchGuard, Sender<PasteResult>),
 }
 
 /// One explicit, expiring handoff. Cancellation wins until the worker commits
@@ -390,6 +391,26 @@ pub(crate) fn guarded_revisable_session_with_receipt(
     request_revisable_paste(text, shortcut, scope, Some(RevisableDispatchGuard {
         current: Box::new(current), origin,
     }))
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn guarded_local_append_with_receipt(
+    text: &str,
+    shortcut: PasteShortcut,
+    scope: SessionPasteScope,
+    origin: ClipboardTicket,
+    current: impl Fn() -> bool + Send + 'static,
+) -> PasteSubmission {
+    let (reply, result) = mpsc::channel();
+    let guard = RevisableDispatchGuard { current: Box::new(current), origin };
+    if WORKER.send(Command::GuardedLocalAppend(text.into(), shortcut, scope, guard, reply)).is_err() {
+        return PasteSubmission { status: InsertStatus::Failed, receipt: None,
+            range_permission: SessionRangePermission::Revoked };
+    }
+    result.recv().map(|result| PasteSubmission {
+        status: result.status, receipt: result.receipt, range_permission: result.range_permission,
+    }).unwrap_or(PasteSubmission { status: InsertStatus::Failed, receipt: None,
+        range_permission: SessionRangePermission::Revoked })
 }
 
 fn request_revisable_paste(
@@ -768,6 +789,10 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                 revisable_guard = guard;
                 (Some(Command::Paste(text, false, shortcut, None, Some(scope), reply)), true)
             }
+            Some(Command::GuardedLocalAppend(text, shortcut, scope, guard, reply)) => {
+                revisable_guard = Some(guard);
+                (Some(Command::Paste(text, false, shortcut, None, Some(scope), reply)), false)
+            }
             Some(Command::RetainRecording(origin, session, text, needs_receipt, reply)) => {
                 // The worker's actual paste lease owns its original revision.
                 // A later user copy must not be adopted by querying the live
@@ -898,6 +923,16 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                             same_target, reader.as_ref().and_then(|r| r.caret_at_end().ok()))
                     })
                 });
+                let local_append = revisable_guard.is_some() && !revisable;
+                if local_append && (focus != crate::selection::FocusedInputState::Editable
+                    || !chain
+                    || !before.as_ref().is_some_and(|(_, selection)| selection.is_empty())
+                    || reader.as_ref().and_then(|r| r.current_observation().ok()) != Some(true))
+                {
+                    log::info!("[insertion] local phrase deferred: chain={chain} focus={focus:?}");
+                    let _ = reply.send(rejected());
+                    continue;
+                }
                 let mut range_permission = SessionRangePermission::NotRequested;
                 let mut range_facts = [None; 4];
                 if revisable {
@@ -1038,7 +1073,8 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                         continue;
                     }
                 }
-                if scope.as_ref().is_some_and(|s| s.replace) && !paste_receipt.as_ref().is_some_and(|prior|
+                if scope.as_ref().is_some_and(|s| s.replace || (local_append && !s.previous_body.is_empty()))
+                    && !paste_receipt.as_ref().is_some_and(|prior|
                     still_owns_transport(prior.ticket, *owner, prior.revision, clipboard_revision())) {
                     log::warn!("[insertion] session transport permission changed before dispatch ticket={:?} owner={} previous_revision={:?} current_revision={:?}",
                         paste_receipt.as_ref().map(|p| p.ticket), *owner,
@@ -1049,7 +1085,7 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                     continue;
                 }
                 if let Some(guard) = revisable_guard.as_ref() {
-                    let first = scope.as_ref().is_some_and(|scope| !scope.replace);
+                    let first = scope.as_ref().is_some_and(|scope| scope.previous_body.is_empty());
                     if !(guard.current)() || (first && !still_owns_transport(
                         guard.origin.id, *owner, guard.origin.revision, clipboard_revision(),
                     )) {
@@ -1220,7 +1256,8 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
             }
             None => {}
             Some(Command::ExplicitTarget(..)) => unreachable!("explicit target normalized before dispatch"),
-            Some(Command::Revisable(..)) => unreachable!("revisable command normalized before dispatch"),
+            Some(Command::Revisable(..) | Command::GuardedLocalAppend(..)) =>
+                unreachable!("guarded editor command normalized before dispatch"),
             Some(Command::RetainRecording(..)) => unreachable!("recording retention normalized before dispatch"),
         }
         if let Some(receipt) = paste_receipt.as_mut() {
