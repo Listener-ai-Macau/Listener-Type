@@ -3,6 +3,7 @@ use std::ffi::{c_char, c_void, CString};
 use std::fs;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use libloading::Library;
 use sha2::{Digest, Sha256};
 
@@ -230,6 +231,9 @@ impl VadRuntime {
         unsafe {
             let onnx = Library::new(&onnx_path)
                 .map_err(|err| format!("load VAD onnxruntime.dll failed: {err}"))?;
+            if bundled_vad_runtime_root().is_some() {
+                check_process_vad_onnx_api()?;
+            }
             let providers = Library::new(&providers_path)
                 .map_err(|err| format!("load VAD onnxruntime providers failed: {err}"))?;
             let sherpa = Library::new(&sherpa_path)
@@ -379,6 +383,41 @@ fn select_vad_runtime_root(cached: &Path, bundled: Option<&Path>) -> PathBuf {
         return root.to_path_buf();
     }
     cached.to_path_buf()
+}
+
+// Sherpa's bundled build calls ORT API 24. Windows resolves its dependent
+// DLL by basename, even though we load Sherpa and both ORT DLLs by full path.
+const BUNDLED_VAD_ORT_API: u32 = 24;
+
+#[repr(C)]
+struct OrtApiBasePrefix {
+    get_api: unsafe extern "system" fn(u32) -> *const c_void,
+}
+
+fn check_process_vad_onnx_api() -> Result<(), String> {
+    let linked = libloading::os::windows::Library::open_already_loaded("onnxruntime.dll")
+        .map_err(|err| format!("resolve active ONNX Runtime for VAD: {err}"))?;
+    unsafe {
+        let get_base = linked.get::<unsafe extern "system" fn() -> *const OrtApiBasePrefix>(
+            b"OrtGetApiBase\0",
+        ).map_err(|err| format!("resolve ONNX Runtime API: {err}"))?;
+        let base = get_base().as_ref().ok_or("ONNX Runtime has no API table")?;
+        if (base.get_api)(BUNDLED_VAD_ORT_API).is_null() {
+            return Err(format!("active ONNX Runtime does not support VAD API {BUNDLED_VAD_ORT_API}"));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn pin_bundled_vad_onnx_runtime() -> Result<(), String> {
+    static ONNX: OnceLock<Result<Library, String>> = OnceLock::new();
+    ONNX.get_or_init(|| {
+        let runtime = bundled_vad_runtime_root().ok_or("bundled speech VAD runtime is missing")?;
+        let library = unsafe { Library::new(runtime.join("onnxruntime.dll")) }
+            .map_err(|err| format!("load bundled ONNX Runtime for VAD: {err}"))?;
+        check_process_vad_onnx_api()?;
+        Ok(library)
+    }).as_ref().map(|_| ()).map_err(Clone::clone)
 }
 
 fn bundled_vad_runtime_root() -> Option<PathBuf> {

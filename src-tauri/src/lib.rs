@@ -709,7 +709,16 @@ pub fn run() {
             // cannot construct a Coordinator/BLE runtime/hotkey owner before
             // the plugin forwards it to the primary process.
             #[cfg(target_os = "windows")]
-            embedded_ble::warm_native_windows_hid_present_pairing_snapshot();
+            {
+                // Bind Sherpa's compatible ORT before Foundry can register
+                // its older copy under the same module name.
+                if let Err(error) = speech_vad_windows::pin_bundled_vad_onnx_runtime() {
+                    log::warn!("[asr] could not pin the bundled ONNX Runtime: {error}");
+                } else {
+                    log::info!("[asr] bundled ONNX Runtime pinned before speech providers");
+                }
+                embedded_ble::warm_native_windows_hid_present_pairing_snapshot();
+            }
             let (coordinator, local_asr_download_manager, foundry_local_runtime) =
                 construct_business_services_if_needed(
                     first_run_intent.as_ref(),
