@@ -1191,6 +1191,7 @@ export const en: typeof zhCN = {
         asrZhipu: 'Zhipu GLM-ASR',
         asrGroq: 'Groq Whisper-large-v3',
         asrWhisper: 'OpenAI Whisper (compatible)',
+        asrCompanionParaformer: 'Companion Paraformer Large (Local)',
         asrFoundryLocalWhisper: 'Local Whisper (Foundry Local)',
         asrLocalQwen3: 'Local Qwen3-ASR',
       },

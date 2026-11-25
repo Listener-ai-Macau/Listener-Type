@@ -297,7 +297,7 @@ async fn begin_microphone_session(inner: &Arc<Inner>, translation: bool, wake_to
     begin_embedded_audio_preview_session(inner, current_session_id);
     let active_asr = active_asr_provider_from_preferences(inner);
     #[cfg(target_os = "windows")]
-    if active_asr == "volcengine" || foundry::is_foundry_local_whisper(&active_asr) {
+    if active_asr == "volcengine" || is_windows_local_asr_provider(&active_asr) {
         register_native_microphone_endpoint(inner, current_session_id);
     } else if wake_token.is_some() {
         arm_native_microphone_body_guard(inner, current_session_id);
@@ -346,7 +346,7 @@ async fn begin_microphone_session(inner: &Arc<Inner>, translation: bool, wake_to
     // 之前在这一行就 emit 会让用户看到录音条后立刻开口，但 mic 还在 cpal init
     // 窗口（50-200ms）内 → 开头几个字物理上录不到。详见 issue 备注。
     #[cfg(target_os = "windows")]
-    if foundry::is_foundry_local_whisper(&active_asr) {
+    if is_windows_local_asr_provider(&active_asr) {
         let prefs = inner.prefs.get();
         let model_alias = if foundry::model_alias_is_known(&prefs.foundry_local_asr_model) {
             prefs.foundry_local_asr_model.clone()
@@ -364,7 +364,7 @@ async fn begin_microphone_session(inner: &Arc<Inner>, translation: bool, wake_to
             model_alias,
             prefs.foundry_local_runtime_source.clone(),
             language_hint.hint,
-        ));
+        ).with_companion_final(crate::asr::local::companion_paraformer::is_provider(&active_asr)));
         if !store_asr_for_session(
             inner,
             current_session_id,

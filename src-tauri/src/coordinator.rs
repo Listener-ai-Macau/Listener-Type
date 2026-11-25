@@ -1457,6 +1457,12 @@ impl Coordinator {
                         "[wake-phrase] isolated local confirmation helper task failed reason={reason}: {error}"
                     ),
                 }
+                if crate::asr::local::companion_paraformer::is_provider(&inner.prefs.get().active_asr_provider) {
+                    if let Err(error) = crate::asr::local::companion_paraformer::prepare().await {
+                        log::warn!("[companion-paraformer] startup warmup failed: {error}");
+                    }
+                    return;
+                }
                 if !active_foundry {
                     return;
                 }
@@ -3493,6 +3499,10 @@ fn sync_active_asr_provider_to_credentials_for_runtime(active_asr: &str) {
     }
 }
 
+fn is_windows_local_asr_provider(id: &str) -> bool {
+    foundry::is_foundry_local_whisper(id) || crate::asr::local::companion_paraformer::is_provider(id)
+}
+
 fn ensure_asr_credentials(active_asr: &str) -> Result<(), String> {
     // 本地 Qwen3-ASR 没有"凭据"概念，但需要：(a) macOS 平台 (b) 模型已下载。
     if crate::asr::local::is_local_qwen3(active_asr) {
@@ -3506,10 +3516,10 @@ fn ensure_asr_credentials(active_asr: &str) -> Result<(), String> {
         }
     }
 
-    if crate::asr::local::foundry::is_foundry_local_whisper(active_asr) {
+    if is_windows_local_asr_provider(active_asr) {
         #[cfg(not(target_os = "windows"))]
         {
-            return Err("Foundry Local Whisper 当前仅支持 Windows".to_string());
+            return Err("此本地听写引擎仅支持 Windows".to_string());
         }
         #[cfg(target_os = "windows")]
         {
@@ -3543,7 +3553,7 @@ fn is_keyless_local_asr_provider(id: &str) -> bool {
     }
     #[cfg(target_os = "windows")]
     {
-        crate::asr::local::foundry::is_foundry_local_whisper(id)
+        is_windows_local_asr_provider(id)
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -3611,6 +3621,7 @@ fn schedule_foundry_local_asr_release(inner: &Arc<Inner>, session_id: SessionId)
             return;
         }
         crate::asr::local::punctuation::release_punctuation().await;
+        crate::asr::local::companion_paraformer::release().await;
         if let Err(error) = runtime.release_now().await {
             log::warn!("[foundry-asr] scheduled release failed: {error:#}");
         }

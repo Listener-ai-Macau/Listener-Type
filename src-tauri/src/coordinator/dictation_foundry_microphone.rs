@@ -137,7 +137,14 @@ fn spawn_foundry_microphone_tasks(
     // can start while Whisper is coming back from idle eviction.
     let runtime = Arc::clone(&inner.foundry_local_runtime);
     let final_model = capture.asr.model_alias().to_owned();
+    let companion_final = capture.asr.uses_companion_final();
     async_runtime::spawn(async move {
+        if companion_final {
+            if let Err(error) = crate::asr::local::companion_paraformer::prepare().await {
+                log::warn!("[companion-paraformer] microphone warmup unavailable session_id={owner}: {error}");
+            }
+            return;
+        }
         if let Err(error) = runtime.ensure_cached_loaded(&final_model).await {
             log::warn!("[foundry-asr] microphone warmup unavailable session_id={owner}: {error:#}");
         }

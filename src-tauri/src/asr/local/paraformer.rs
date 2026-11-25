@@ -282,8 +282,23 @@ mod imp {
             verify_file(&model_path, MODEL_SHA256)?;
             verify_file(&tokens_path, TOKENS_SHA256)?;
 
-            let model = path_cstring(&model_path, "Paraformer model")?;
-            let tokens = path_cstring(&tokens_path, "Paraformer tokens")?;
+            Self::load_verified(&root, &model_path, &tokens_path, true)
+        }
+
+        pub(crate) fn load_companion(model_dir: &Path) -> Result<Self, String> {
+            let model_path = model_dir.join("model.int8.onnx");
+            let tokens_path = model_dir.join("tokens.txt");
+            verify_file(&model_path, "8234905D74DB17F7466A1CD110CE20F57C1FF9C1FC95DB0615D8931955DA5C54")?;
+            verify_file(&tokens_path, "59ABA8873A2ED1E122C25FEE421E25F283B63290EFBDE85C1F01A853D83CB6E6")?;
+            crate::speech_vad_windows::pin_bundled_vad_onnx_runtime()?;
+            let bundled = crate::speech_vad_windows::bundled_vad_runtime_root()
+                .ok_or("bundled speech recognition runtime unavailable")?;
+            Self::load_verified(&bundled, &model_path, &tokens_path, false)
+        }
+
+        fn load_verified(root: &Path, model_path: &Path, tokens_path: &Path, allow_denoiser: bool) -> Result<Self, String> {
+            let model = path_cstring(model_path, "Paraformer model")?;
+            let tokens = path_cstring(tokens_path, "Paraformer tokens")?;
             let provider = CString::new("cpu").expect("literal has no nul");
             let decoding = CString::new("greedy_search").expect("literal has no nul");
             let onnx_path = root.join("onnxruntime.dll");
@@ -339,6 +354,9 @@ mod imp {
                 // 语音增强器严格可选:模型文件缺失或符号不可用都返回 None,
                 // transcribe_wav 会回退到原始音频,唤醒不依赖它。
                 let denoiser = (|| -> Option<DenoiserBundle> {
+                    if !allow_denoiser {
+                        return None;
+                    }
                     let model_path = root.join(DENOISER_MODEL);
                     if !model_path.exists() {
                         log::info!(
@@ -491,6 +509,17 @@ mod imp {
             if pcm.is_empty() || pcm.len() % 2 != 0 || pcm.len() > 12 * 32_000 {
                 return Err("invalid bounded microphone wake PCM".into());
             }
+            self.decode_pcm16le(pcm, enhanced)
+        }
+
+        pub(crate) fn decode_companion_dictation(&self, pcm: &[u8]) -> Result<String, String> {
+            if pcm.is_empty() || pcm.len() % 2 != 0 || pcm.len() > super::super::companion_paraformer::MAX_CHUNK_PCM_BYTES {
+                return Err("Paraformer Large requires chunks of at most 20 seconds".into());
+            }
+            self.decode_pcm16le(pcm, false)
+        }
+
+        fn decode_pcm16le(&self, pcm: &[u8], enhanced: bool) -> Result<String, String> {
             let samples = pcm.chunks_exact(2)
                 .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / 32768.0).collect();
             let samples = if enhanced { self.denoise_samples(samples) } else { samples };

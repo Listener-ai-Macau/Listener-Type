@@ -78,4 +78,5 @@ export type AsrPresetId =
   | 'groq'
   | 'whisper'
   | 'foundry-local-whisper'
+  | 'companion-paraformer-large'
   | 'local-qwen3';

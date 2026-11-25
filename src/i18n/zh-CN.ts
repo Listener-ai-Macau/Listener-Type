@@ -1186,6 +1186,7 @@ export const zhCN = {
         asrZhipu: '智谱 GLM-ASR',
         asrGroq: 'Groq Whisper-large-v3',
         asrWhisper: 'OpenAI Whisper（兼容）',
+        asrCompanionParaformer: 'Companion Paraformer Large（本地）',
         asrFoundryLocalWhisper: '本地 Whisper（Foundry Local）',
         asrLocalQwen3: '本地 Qwen3-ASR',
       },

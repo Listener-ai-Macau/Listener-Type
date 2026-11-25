@@ -2386,7 +2386,7 @@ async fn build_embedded_audio_asr_consumer(
         return Ok(None);
     }
     #[cfg(target_os = "windows")]
-    if foundry::is_foundry_local_whisper(active_asr) {
+    if is_windows_local_asr_provider(active_asr) {
         let prefs = inner.prefs.get();
         let model_alias = if foundry::model_alias_is_known(&prefs.foundry_local_asr_model) {
             prefs.foundry_local_asr_model.clone()
@@ -2404,7 +2404,7 @@ async fn build_embedded_audio_asr_consumer(
             model_alias,
             prefs.foundry_local_runtime_source.clone(),
             language_hint.hint,
-        ));
+        ).with_companion_final(crate::asr::local::companion_paraformer::is_provider(active_asr)));
         if !store_asr_for_session(
             inner,
             session_id,

@@ -81,6 +81,7 @@ export function LocalAsr() {
   const [foundryCatalog, setFoundryCatalog] = useState<FoundryLocalAsrCatalogModel[]>([]);
   const [selectedFoundryAlias, setSelectedFoundryAlias] = useState<FoundryLocalAsrModelAlias>('whisper-small');
   const [foundryBusy, setFoundryBusy] = useState<'enable' | 'prepare' | 'release' | null>(null);
+  const [companionEnabling, setCompanionEnabling] = useState(false);
   const [foundryProgress, setFoundryProgress] = useState<FoundryPrepareProgress | null>(null);
   const [foundryCancelRequested, setFoundryCancelRequested] = useState(false);
   const [foundryActivateAfterPrepare, setFoundryActivateAfterPrepare] = useState(false);
@@ -307,6 +308,20 @@ export function LocalAsr() {
       activeAsrProvider: enableProvider ? 'foundry-local-whisper' : current.activeAsrProvider,
       foundryLocalAsrModel: modelAlias,
     }));
+  };
+
+  const handleEnableCompanion = async () => {
+    if (!prefs || companionEnabling || foundryBusy !== null) return;
+    setCompanionEnabling(true);
+    try {
+      setError(null);
+      await setActiveAsrProvider('companion-paraformer-large', undefined, prefs.activeAsrProvider);
+      await updatePrefs(current => ({ ...current, activeAsrProvider: 'companion-paraformer-large' }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCompanionEnabling(false);
+    }
   };
 
   const handleFoundryLanguageChange = async (languageHint: FoundryLocalAsrLanguageHint) => {
@@ -579,6 +594,19 @@ export function LocalAsr() {
         <Card style={{ border: '1px solid var(--ol-err)' }}>
           <div role="alert" style={{ fontSize: 13, color: 'var(--ol-err)', lineHeight: 1.5 }}>{error}</div>
         </Card>
+      )}
+      {IS_WINDOWS && (
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+          <strong>{t('settings.providers.presets.asrCompanionParaformer')}</strong>
+          {prefs?.activeAsrProvider === 'companion-paraformer-large'
+            ? <Pill tone="blue" size="sm">{t('localAsr.activeBadge')}</Pill>
+            : <Btn size="sm" variant="blue" disabled={!prefs || companionEnabling || foundryBusy !== null}
+                onClick={() => void handleEnableCompanion()}>
+                {t(companionEnabling ? 'localAsr.foundryEnabling' : 'localAsr.foundryPrepareAndUse')}
+              </Btn>}
+        </div>
+      </Card>
       )}
       {IS_WINDOWS && (
       <Card style={{ marginBottom: 16 }}>

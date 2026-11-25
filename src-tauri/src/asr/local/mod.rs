@@ -14,6 +14,7 @@ mod foundry_language;
 mod local_provider;
 pub mod models;
 pub mod paraformer;
+pub(crate) mod companion_paraformer;
 #[cfg(target_os = "windows")]
 pub(crate) mod punctuation;
 pub mod test_run;

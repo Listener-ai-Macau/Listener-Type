@@ -855,7 +855,7 @@ fn asr_configured_for_provider(provider: &str, snap: &CredentialsSnapshot) -> bo
     if provider == "volcengine" {
         return volcengine_configured(snap);
     }
-    if provider == crate::asr::local::PROVIDER_ID || active_foundry_asr_is_supported(provider) {
+    if active_asr_is_keyless_for_validation(provider) {
         // 本地 ASR 不依赖云端凭据。
         return true;
     }
@@ -970,6 +970,13 @@ pub async fn set_active_asr_provider(
     if provider == FOUNDRY_LOCAL_PROVIDER_ID && !active_foundry_asr_is_supported(&provider) {
         return Err("Foundry Local Whisper is only available on Windows".to_string());
     }
+    let companion = crate::asr::local::companion_paraformer::is_provider(&provider);
+    if companion {
+        #[cfg(target_os = "windows")]
+        crate::asr::local::companion_paraformer::prepare().await?;
+        #[cfg(not(target_os = "windows"))]
+        return Err("Companion Paraformer Large is only available on Windows".into());
+    }
     // Commit a local provider/model only after its existing files can actually
     // load. Bare activation never starts a hidden first-time download, and a
     // failed load cannot replace the customer's working cloud configuration.
@@ -1021,6 +1028,10 @@ pub async fn set_active_asr_provider(
         coord.release_local_asr_engine();
     }
     release_foundry_runtime_if_inactive(runtime.inner(), release_plan.foundry).await;
+    #[cfg(target_os = "windows")]
+    if !companion {
+        crate::asr::local::companion_paraformer::release().await;
+    }
     Ok(())
 }
 
@@ -1388,6 +1399,7 @@ async fn validate_bailian_asr_provider() -> Result<(), String> {
 
 fn active_asr_is_keyless_for_validation(provider: &str) -> bool {
     provider == crate::asr::local::PROVIDER_ID || active_foundry_asr_is_supported(provider)
+        || (cfg!(target_os = "windows") && crate::asr::local::companion_paraformer::is_provider(provider))
 }
 
 fn active_foundry_asr_is_supported(provider: &str) -> bool {
