@@ -78,6 +78,10 @@ fn begin_microphone_endpoint_stop(
         || !microphone_endpoint_silence_qualified(admission) { return None; }
     if !admission.stop_state.lock().begin_sending(admission.ticket) || !admission.is_valid(inner)
         || !microphone_endpoint_silence_qualified(admission) { return None; }
+    claim_native_microphone_stop(inner, session)
+}
+
+fn claim_native_microphone_stop(inner: &Arc<Inner>, session: SessionId) -> Option<DictationTransition> {
     let transition = {
         let mut state = inner.state.lock();
         // Keep the phase, session and native-recorder owner in one admission

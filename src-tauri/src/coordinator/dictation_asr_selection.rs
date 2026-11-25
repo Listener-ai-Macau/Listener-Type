@@ -80,7 +80,9 @@ fn dictation_asr_uses_core_accurate_engine(active_asr: &str) -> bool {
 }
 
 fn dictation_asr_quality_warning(active_asr: &str) -> Option<String> {
-    if dictation_asr_uses_core_accurate_engine(active_asr) {
+    if dictation_asr_uses_core_accurate_engine(active_asr)
+        || crate::asr::local::foundry::is_foundry_local_whisper(active_asr)
+    {
         return None;
     }
     Some(format!(
@@ -97,7 +99,7 @@ fn log_dictation_asr_engine_selection(session_id: SessionId, active_asr: &str) {
         "[coord] dictation ASR engine selected: session_id={session_id} provider={} backend={backend} label=\"{label}\" core_accurate={core_accurate}",
         active_asr.trim()
     );
-    if !core_accurate {
+    if !core_accurate && !crate::asr::local::foundry::is_foundry_local_whisper(active_asr) {
         log::warn!(
             "[coord] dictation ASR non-core accuracy warning: session_id={session_id} provider={} backend={backend}",
             active_asr.trim()

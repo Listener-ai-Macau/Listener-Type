@@ -297,7 +297,7 @@ async fn begin_microphone_session(inner: &Arc<Inner>, translation: bool, wake_to
     begin_embedded_audio_preview_session(inner, current_session_id);
     let active_asr = active_asr_provider_from_preferences(inner);
     #[cfg(target_os = "windows")]
-    if active_asr == "volcengine" {
+    if active_asr == "volcengine" || foundry::is_foundry_local_whisper(&active_asr) {
         register_native_microphone_endpoint(inner, current_session_id);
     } else if wake_token.is_some() {
         arm_native_microphone_body_guard(inner, current_session_id);
@@ -370,9 +370,11 @@ async fn begin_microphone_session(inner: &Arc<Inner>, translation: bool, wake_to
             current_session_id,
             ActiveAsr::FoundryLocalWhisper(Arc::clone(&local)),
         ) { return Ok(()); }
-        let consumer: Arc<dyn crate::recorder::AudioConsumer> = local;
-        start_recorder_and_enter_listening(inner, current_session_id, &active_asr, consumer)
-            .await?;
+        let capture = Arc::new(FoundryMicrophoneConsumer::new(local));
+        if start_recorder_for_starting(inner, current_session_id, &active_asr, capture.clone()).await? {
+            spawn_foundry_microphone_tasks(inner, current_session_id, capture);
+            finish_starting_session(inner, current_session_id).await;
+        }
         return Ok(());
     }
 

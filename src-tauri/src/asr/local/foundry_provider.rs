@@ -6,7 +6,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 #[cfg(target_os = "windows")]
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(target_os = "windows")]
 use std::sync::Arc;
 
@@ -37,6 +37,7 @@ pub struct FoundryLocalWhisperAsr {
     language_hint: Option<String>,
     buffer: Mutex<Vec<u8>>,
     cancel_generation: AtomicU64,
+    confirmed_no_speech: AtomicBool,
 }
 
 impl FoundryLocalWhisperAsr {
@@ -54,6 +55,7 @@ impl FoundryLocalWhisperAsr {
             language_hint: normalize_language_hint(language_hint),
             buffer: Mutex::new(Vec::new()),
             cancel_generation: AtomicU64::new(0),
+            confirmed_no_speech: AtomicBool::new(false),
         }
     }
 
@@ -65,6 +67,7 @@ impl FoundryLocalWhisperAsr {
             language_hint: normalize_language_hint(language_hint),
             buffer: Mutex::new(Vec::new()),
             cancel_generation: AtomicU64::new(0),
+            confirmed_no_speech: AtomicBool::new(false),
         }
     }
 
@@ -78,6 +81,12 @@ impl FoundryLocalWhisperAsr {
 
     pub async fn transcribe(&self, audio_timeout: std::time::Duration) -> Result<RawTranscript> {
         let cancel_generation = self.cancel_generation.load(Ordering::SeqCst);
+        if self.confirmed_no_speech.load(Ordering::Acquire) {
+            let mut pcm = self.buffer.lock();
+            let duration_ms = pcm_duration_ms(&pcm);
+            pcm.clear();
+            return Ok(RawTranscript { text: String::new(), duration_ms });
+        }
         let pcm = self.buffer.lock().clone();
         if pcm.is_empty() {
             return Ok(RawTranscript {
@@ -139,6 +148,36 @@ impl FoundryLocalWhisperAsr {
                 duration_ms,
             })
         }
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(crate) async fn preview_recent_audio(
+        &self,
+        end_ms: u64,
+        audio_timeout: std::time::Duration,
+    ) -> Result<Option<String>> {
+        const BYTES_PER_MS: usize = 32;
+        const WINDOW_MS: usize = 6_000;
+        let pcm = {
+            let buffer = self.buffer.lock();
+            let end = (end_ms as usize).saturating_mul(BYTES_PER_MS).min(buffer.len());
+            let start = end.saturating_sub(WINDOW_MS * BYTES_PER_MS);
+            buffer[start..end].to_vec()
+        };
+        if pcm.is_empty() { return Ok(None); }
+        let generation = self.cancel_generation.load(Ordering::SeqCst);
+        let wav = TempWavFile::create(&pcm)?;
+        let preview = self.runtime.try_preview_loaded_audio_file(
+            &self.model_alias, self.language_hint(), wav.path(), audio_timeout,
+        ).await?;
+        if self.cancel_generation.load(Ordering::SeqCst) != generation {
+            return Ok(None);
+        }
+        Ok(preview.map(|text| trim_transcript_text(&text)))
+    }
+
+    pub(crate) fn mark_confirmed_no_speech(&self) {
+        self.confirmed_no_speech.store(true, Ordering::Release);
     }
 
     pub fn cancel(&self) {

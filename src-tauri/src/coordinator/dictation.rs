@@ -577,6 +577,8 @@ fn polish_prefetch_adoptable(prefetch: &PolishPrefetch, final_text: &str) -> boo
 include!("dictation_target_speaker_update.rs");
 #[cfg(target_os = "windows")]
 include!("dictation_microphone_endpoint.rs");
+#[cfg(target_os = "windows")]
+include!("dictation_foundry_microphone.rs");
 
 fn qualified_owner_speech_end_ms(
     update: &crate::asr::volcengine::TargetSpeakerUpdate,
@@ -1656,6 +1658,10 @@ async fn request_embedded_ble_recording_stop_from_host_for_session(
     session_id: SessionId,
     reason: &'static str,
 ) -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    if native_microphone_endpoint_owns(inner, session_id) {
+        return Ok(false);
+    }
     if !embedded_ble_host_recording_control_context_active(inner) {
         return Ok(false);
     }
@@ -5339,7 +5345,13 @@ fn finish_cancel_session_after_transition(
     native_composition_retire(inner, session_id);
     cancel_asr_for_session(inner, session_id);
     restore_prepared_windows_ime_session(inner, session_id);
-    let capture_cancelled = if embedded_ble_actor_owned {
+    #[cfg(target_os = "windows")]
+    let native_capture = native_microphone_endpoint_owns(inner, session_id);
+    #[cfg(not(target_os = "windows"))]
+    let native_capture = false;
+    let capture_cancelled = if native_capture {
+        false
+    } else if embedded_ble_actor_owned {
         request_embedded_ble_capture_cancel_flag(inner)
     } else {
         request_embedded_ble_capture_cancel(inner)

@@ -69,6 +69,13 @@ fn embedded_ble_host_recording_control_context_active(inner: &Arc<Inner>) -> boo
 }
 
 fn embedded_ble_host_cancel_context_active(inner: &Arc<Inner>) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        let session_id = inner.state.lock().session_id;
+        if native_microphone_endpoint_owns(inner, session_id) {
+            return false;
+        }
+    }
     if embedded_ble_actor_context_active(inner) {
         return true;
     }

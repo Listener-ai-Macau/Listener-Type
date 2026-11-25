@@ -177,6 +177,22 @@ mod imp {
                 .with_context(|| format!("transcribe cached audio with Foundry model {alias}"))
         }
 
+        pub(crate) async fn try_preview_loaded_audio_file(
+            &self,
+            alias: &str,
+            language_hint: Option<&str>,
+            audio_path: &Path,
+            audio_timeout: std::time::Duration,
+        ) -> Result<Option<String>> {
+            // Preview skips a busy or warming runtime. It never queues ahead
+            // of a final decode or initiates a download.
+            let Ok(_lifecycle) = self.lifecycle.try_lock() else { return Ok(None); };
+            let Some(loaded) = self.cached_loaded_model(alias) else { return Ok(None); };
+            transcribe_loaded(&loaded.model, language_hint, audio_path, audio_timeout)
+                .await
+                .map(Some)
+        }
+
         pub async fn release_now(&self) -> Result<()> {
             let _lifecycle = self.lifecycle.lock().await;
             self.release_now_locked().await
