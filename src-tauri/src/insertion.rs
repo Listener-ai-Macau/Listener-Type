@@ -34,6 +34,8 @@ pub(crate) use clipboard_handoff::{
     PasteReceiptPoll, PasteReceiptProof, PasteSubmission, RetentionResult, SessionRangePermission,
 };
 pub(crate) use clipboard_handoff::revisable_session_with_receipt;
+#[cfg(target_os = "windows")]
+pub(crate) use clipboard_handoff::guarded_revisable_session_with_receipt;
 pub(crate) use clipboard_handoff::TerminalAppendDecision;
 pub(crate) use clipboard_handoff::{ExplicitPastePermit, explicit_external_target, paste_explicit_target};
 #[cfg(test)]

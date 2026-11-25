@@ -254,6 +254,66 @@ async fn native_composition_update_tick(
     }
 }
 
+#[cfg(target_os = "windows")]
+async fn foundry_native_editor_preview(inner: &Arc<Inner>, session_id: SessionId, text: &str) {
+    if std::env::var("LISTENER_DISABLE_REVISABLE_EDITOR").as_deref() == Ok("1")
+        || !inner.prefs.get().streaming_insert
+    {
+        return;
+    }
+    let Some(display) = live_delivery_display_text(inner, session_id, text, true) else {
+        return;
+    };
+    if embedded_audio_partial_preview_stability_key(&display).chars().take(2).count() < 2 {
+        return;
+    }
+    let Some(origin) = inner.dictation_clipboard_origin.lock().as_ref()
+        .filter(|(owner, _)| *owner == session_id).map(|(_, ticket)| *ticket)
+    else { return; };
+
+    let inner = Arc::clone(inner);
+    let _ = tokio::task::spawn_blocking(move || {
+        // Hold the draft reservation across the worker request. Finalization
+        // observes a dispatch that already won, or a draft refused after STOP.
+        let mut draft = inner.native_composition.lock();
+        if !foundry_editor_target_is_listening(&inner, session_id) {
+            return;
+        }
+        if draft.session_id != Some(session_id) {
+            *draft = NativeCompositionState { session_id: Some(session_id), ..Default::default() };
+        }
+        if draft.rendered == display {
+            return;
+        }
+        let shortcut = inner.prefs.get().paste_shortcut;
+        if draft.submit_with(session_id, "", &display, shortcut, |text, shortcut, scope| {
+            let inner = Arc::clone(&inner);
+            crate::insertion::guarded_revisable_session_with_receipt(
+                text, shortcut, scope, origin, move || foundry_editor_target_is_listening(&inner, session_id),
+            )
+        }) {
+            log::info!("[native-composition] local draft dispatched session_id={session_id} chars={}",
+                display.chars().count());
+        }
+    }).await;
+}
+
+#[cfg(target_os = "windows")]
+fn foundry_editor_target_is_listening(inner: &Arc<Inner>, session_id: SessionId) -> bool {
+    let focus = {
+        let state = inner.state.lock();
+        if !crate::coordinator_state::editor_delivery_allowed(&state, session_id)
+            || state.phase != SessionPhase::Listening
+        {
+            return false;
+        }
+        state.focus_target
+    };
+    delivery_target_is_current(focus)
+        && focus == crate::insertion::explicit_external_target()
+        && inner.prefs.get().streaming_insert
+}
+
 async fn native_composition_wait(
     inner: &Arc<Inner>,
     session_id: SessionId,

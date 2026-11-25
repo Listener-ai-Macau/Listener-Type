@@ -207,9 +207,13 @@ fn spawn_foundry_microphone_tasks(
                     "[foundry-asr] microphone preview session_id={owner} audio_ms={end} engine={engine}"
                 );
                 if complete {
-                    publish_foundry_streaming_composition(
-                        &preview_inner, owner, &text, &mut editor_checked,
-                    ).await;
+                    if streaming_composition_disabled_by_env() {
+                        foundry_native_editor_preview(&preview_inner, owner, &text).await;
+                    } else {
+                        publish_foundry_streaming_composition(
+                            &preview_inner, owner, &text, &mut editor_checked,
+                        ).await;
+                    }
                 }
                 previous_text = text;
             }

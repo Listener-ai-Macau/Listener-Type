@@ -138,6 +138,12 @@ pub(crate) enum SessionRangePermission {
     Revoked,
 }
 
+struct RevisableDispatchGuard {
+    /// Rechecked in the worker so a queued draft cannot paste after STOP.
+    current: Box<dyn Fn() -> bool + Send>,
+    origin: ClipboardTicket,
+}
+
 enum Command {
     Paste(String, bool, PasteShortcut, Option<String>, Option<SessionPasteScope>, Sender<PasteResult>),
     ExplicitTarget(String, PasteShortcut, ExplicitTargetGuard, Sender<PasteResult>),
@@ -146,7 +152,7 @@ enum Command {
     Retain(ClipboardTicket, String, bool, Sender<RetentionResult>),
     RetainRecording(ClipboardTicket, uuid::Uuid, String, bool, Sender<RetentionResult>),
     PublishRecording(ClipboardTicket, uuid::Uuid, String, bool, Sender<RetentionResult>),
-    Revisable(String, PasteShortcut, SessionPasteScope, Sender<PasteResult>),
+    Revisable(String, PasteShortcut, SessionPasteScope, Option<RevisableDispatchGuard>, Sender<PasteResult>),
 }
 
 /// One explicit, expiring handoff. Cancellation wins until the worker commits
@@ -370,8 +376,30 @@ pub(crate) fn paste_scoped_with_receipt(text: &str, restore: bool, shortcut: Pas
 /// select precisely this session's range, including on the first dispatch.
 pub(crate) fn revisable_session_with_receipt(text: &str, shortcut: PasteShortcut,
     scope: SessionPasteScope) -> PasteSubmission {
+    request_revisable_paste(text, shortcut, scope, None)
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn guarded_revisable_session_with_receipt(
+    text: &str,
+    shortcut: PasteShortcut,
+    scope: SessionPasteScope,
+    origin: ClipboardTicket,
+    current: impl Fn() -> bool + Send + 'static,
+) -> PasteSubmission {
+    request_revisable_paste(text, shortcut, scope, Some(RevisableDispatchGuard {
+        current: Box::new(current), origin,
+    }))
+}
+
+fn request_revisable_paste(
+    text: &str,
+    shortcut: PasteShortcut,
+    scope: SessionPasteScope,
+    guard: Option<RevisableDispatchGuard>,
+) -> PasteSubmission {
     let (reply, result) = mpsc::channel();
-    if WORKER.send(Command::Revisable(text.into(), shortcut, scope, reply)).is_err() {
+    if WORKER.send(Command::Revisable(text.into(), shortcut, scope, guard, reply)).is_err() {
         return PasteSubmission { status: InsertStatus::Failed, receipt: None,
             range_permission: SessionRangePermission::Revoked };
     }
@@ -699,13 +727,16 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                 }
             };
         let mut explicit_target = None;
+        let mut revisable_guard = None;
         let (command, revisable) = match command {
             Some(Command::ExplicitTarget(text, shortcut, guard, reply)) => {
                 explicit_target = Some(guard);
                 (Some(Command::Paste(text, false, shortcut, None, None, reply)), false)
             }
-            Some(Command::Revisable(text, shortcut, scope, reply)) =>
-                (Some(Command::Paste(text, false, shortcut, None, Some(scope), reply)), true),
+            Some(Command::Revisable(text, shortcut, scope, guard, reply)) => {
+                revisable_guard = guard;
+                (Some(Command::Paste(text, false, shortcut, None, Some(scope), reply)), true)
+            }
             Some(Command::RetainRecording(origin, session, text, needs_receipt, reply)) => {
                 // The worker's actual paste lease owns its original revision.
                 // A later user copy must not be adopted by querying the live
@@ -759,6 +790,10 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                 let rejected = || PasteResult { status: InsertStatus::DeferredNoTarget,
                     terminal_decision: None, receipt: None, range_permission: SessionRangePermission::NotRequested };
                 if explicit_target.as_ref().is_some_and(|guard| !guard.current(*OWNER.lock())) {
+                    let _ = reply.send(rejected());
+                    continue;
+                }
+                if revisable_guard.as_ref().is_some_and(|guard| !(guard.current)()) {
                     let _ = reply.send(rejected());
                     continue;
                 }
@@ -882,6 +917,10 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                         terminal_decision: None, receipt: Some(PasteReceiptHandle::completed(completion)), range_permission });
                     continue;
                 }
+                if revisable_guard.as_ref().is_some_and(|guard| !(guard.current)()) {
+                    let _ = reply.send(rejected());
+                    continue;
+                }
                 if let Some(scope) = scope.as_ref().filter(|s| s.replace) {
                     // A failed revision has no append/Unicode fallback. Those
                     // would duplicate the body instead of supplementing it.
@@ -973,6 +1012,17 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                             SessionRangePermission::Revoked } else { range_permission } });
                     continue;
                 }
+                if let Some(guard) = revisable_guard.as_ref() {
+                    let first = scope.as_ref().is_some_and(|scope| !scope.replace);
+                    if !(guard.current)() || (first && !still_owns_transport(
+                        guard.origin.id, *owner, guard.origin.revision, clipboard_revision(),
+                    )) {
+                        let _ = reply.send(PasteResult { status: InsertStatus::DeferredNoTarget,
+                            terminal_decision: None, receipt: None,
+                            range_permission: SessionRangePermission::Revoked });
+                        continue;
+                    }
+                }
                 // A value changed while preparing this paste is not its baseline.
                 if value_before.as_ref().is_some_and(|baseline|
                     reader.as_ref().and_then(|r| r.paste_value().ok()).as_ref() != Some(baseline)) {
@@ -983,6 +1033,9 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                 #[cfg(not(target_os = "macos"))]
                 let result = if let Some(guard) = explicit_target.as_ref() {
                     super::insert_explicit_target_now(&text, shortcut, || guard.dispatch_current()
+                        && reader.as_ref().and_then(|reader| reader.current_observation().ok()) == Some(true))
+                } else if let Some(guard) = revisable_guard.as_ref() {
+                    super::insert_explicit_target_now(&text, shortcut, || (guard.current)()
                         && reader.as_ref().and_then(|reader| reader.current_observation().ok()) == Some(true))
                 } else { dispatch(&text, restore, shortcut) };
                 #[cfg(target_os = "macos")]
@@ -1488,6 +1541,32 @@ mod tests {
     }
 
     #[test]
+    fn stopped_local_draft_does_not_capture_or_write_the_target() {
+        let (send, receive) = mpsc::channel();
+        let worker = std::thread::spawn(move || run_with_capture(receive, None,
+            || panic!("a stopped recording cannot acquire an editor")));
+        let origin = ticket();
+        let (reply, result) = mpsc::channel();
+        send.send(Command::Revisable(
+            "local microphone draft".into(),
+            PasteShortcut::CtrlV,
+            SessionPasteScope {
+                session_id: uuid::Uuid::new_v4(),
+                previous_body: String::new(),
+                replace: false,
+            },
+            Some(RevisableDispatchGuard { origin, current: Box::new(|| false) }),
+            reply,
+        )).unwrap();
+        let outcome = result.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(outcome.status, InsertStatus::DeferredNoTarget);
+        assert!(outcome.receipt.is_none());
+        assert_eq!(ticket(), origin);
+        drop(send);
+        worker.join().unwrap();
+    }
+
+    #[test]
     fn unavailable_first_target_does_not_revoke_a_range_that_was_never_written() {
         let (send, receive) = mpsc::channel();
         let worker = std::thread::spawn(move || run_with_capture(receive, None,
@@ -1497,7 +1576,7 @@ mod tests {
             ("previously written body", SessionRangePermission::Revoked)] {
             let (reply, result) = mpsc::channel();
             send.send(Command::Revisable("next body".into(), PasteShortcut::CtrlV,
-                SessionPasteScope { session_id, previous_body: body.into(), replace: !body.is_empty() }, reply)).unwrap();
+                SessionPasteScope { session_id, previous_body: body.into(), replace: !body.is_empty() }, None, reply)).unwrap();
             let result = result.recv().unwrap();
             assert_eq!(result.status, InsertStatus::DeferredNoTarget);
             assert_eq!(result.range_permission, permission);
