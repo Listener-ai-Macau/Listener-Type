@@ -201,11 +201,15 @@ fn spawn_foundry_microphone_tasks(
     inner: &Arc<Inner>,
     owner: SessionId,
     capture: Arc<FoundryMicrophoneConsumer>,
+    manual_trigger: bool,
 ) {
+    // Native Ctrl sessions use the wake body's endpoint guard too. The
+    // actual trigger tells us whether source zero belongs to manual speech.
     let phrase_mode = capture.asr.uses_companion_final()
         && streaming_composition_disabled_by_env()
-        && !automatic_wake_session_active(inner, owner);
+        && manual_trigger;
     if phrase_mode {
+        log::info!("[companion-paraformer] manual phrase delivery enabled session_id={owner}");
         spawn_companion_phrase_delivery(Arc::clone(inner), owner, Arc::clone(&capture));
     }
     let endpoint_inner = Arc::clone(inner);

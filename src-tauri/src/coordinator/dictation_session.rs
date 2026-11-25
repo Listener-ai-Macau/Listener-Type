@@ -372,7 +372,7 @@ async fn begin_microphone_session(inner: &Arc<Inner>, translation: bool, wake_to
         ) { return Ok(()); }
         let capture = Arc::new(FoundryMicrophoneConsumer::new(local));
         if start_recorder_for_starting(inner, current_session_id, &active_asr, capture.clone()).await? {
-            spawn_foundry_microphone_tasks(inner, current_session_id, capture);
+            spawn_foundry_microphone_tasks(inner, current_session_id, capture, wake_token.is_none());
             finish_starting_session(inner, current_session_id).await;
         }
         return Ok(());
