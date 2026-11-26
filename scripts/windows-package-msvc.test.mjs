@@ -189,6 +189,7 @@ assert.doesNotMatch(script, /preferences\.json/i, "MSI packaging and install val
 assert.doesNotMatch(script, /APPDATA[\s\S]{0,240}Remove-Item|Remove-Item[\s\S]{0,240}APPDATA/i, "MSI packaging and install validation must not delete or clean the user AppData settings directory");
 assert.doesNotMatch(ciWorkflow, /windows-ime-install-smoke\.ps1/, "release CI does not run the interactive TSF install smoke");
 assert.match(ciWorkflow, /node scripts\/windows-package-msvc\.test\.mjs/, "release CI should run the static packaging guard");
+assert.match(script, /if \(\$ReleaseBuildNumber -gt 0 -and !\$ExportOnly\) \{\s+throw "A numbered Windows release requires -CompanionModelDirectory/, "a numbered MSI must include the local model");
 
 assert.match(imeBuild, /\[string\]\$OutputDirectory/, "standalone IME build should support a package-specific output directory");
 assert.match(imeBuild, /\[string\]\$IntermediateDirectory/, "standalone IME build should support a package-specific intermediate directory");

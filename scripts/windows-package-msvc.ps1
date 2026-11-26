@@ -4,6 +4,7 @@ param(
   [int]$CargoBuildJobs = 0,
   [ValidateRange(0, 2147483647)]
   [int]$ReleaseBuildNumber = 0,
+  [string]$CompanionModelDirectory = "",
   [switch]$SkipRustInstall,
   [switch]$SkipNpmCi,
   [switch]$IncludePortable,
@@ -354,6 +355,53 @@ function Invoke-CmdWithHeartbeat {
   }
 }
 
+function Stage-CompanionModelForBundle {
+  if ([string]::IsNullOrWhiteSpace($CompanionModelDirectory)) {
+    if ($ReleaseBuildNumber -gt 0 -and !$ExportOnly) {
+      throw "A numbered Windows release requires -CompanionModelDirectory so local dictation works at first launch."
+    }
+    return
+  }
+  if ($ExportOnly -or $ReuseExistingExe) {
+    throw "Bundling the Companion model requires a new MSI build."
+  }
+  $tauriRoot = Join-Path $appRoot "src-tauri"
+  $modelRoot = Join-Path $tauriRoot "resources/models/companion-paraformer-large"
+  $override = Join-Path $tauriRoot "companion-model-bundle.generated.json"
+  if ((Test-Path -LiteralPath $modelRoot) -or (Test-Path -LiteralPath $override)) {
+    throw "A Companion model staging path already exists. The packaging script will not replace it."
+  }
+  $hashes = @{
+    "model.int8.onnx" = "8234905D74DB17F7466A1CD110CE20F57C1FF9C1FC95DB0615D8931955DA5C54"
+    "tokens.txt" = "59ABA8873A2ED1E122C25FEE421E25F283B63290EFBDE85C1F01A853D83CB6E6"
+  }
+  foreach ($name in $hashes.Keys) {
+    $inputFile = Join-Path $CompanionModelDirectory $name
+    if ((Get-FileHash -LiteralPath $inputFile -Algorithm SHA256).Hash -ne $hashes[$name]) {
+      throw "Companion model artifact does not match the verified copy: $name"
+    }
+  }
+  New-Item -ItemType Directory -Path $modelRoot | Out-Null
+  $script:stagedCompanionModelRoot = $modelRoot
+  foreach ($name in $hashes.Keys) {
+    Copy-Item -LiteralPath (Join-Path $CompanionModelDirectory $name) -Destination (Join-Path $modelRoot $name)
+  }
+  Copy-Item -LiteralPath (Join-Path $tauriRoot "resources/vad-runtime/sherpa-onnx.APACHE-2.0.txt") -Destination (Join-Path $modelRoot "LICENSE.txt")
+  $notice = @(
+    "FunASR Paraformer Large INT8, as used by Companion Type."
+    "Upstream: https://www.modelscope.cn/models/iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
+    "Model and token files are copied from the verified Companion Type cache."
+  )
+  [IO.File]::WriteAllLines((Join-Path $modelRoot "NOTICE.txt"), $notice)
+  $baseConfig = Get-Content -LiteralPath (Join-Path $tauriRoot "tauri.conf.json") -Raw | ConvertFrom-Json
+  $resourceList = @($baseConfig.bundle.resources) + @("resources/models/companion-paraformer-large/*")
+  $script:companionBundleResources = $resourceList
+  $script:companionBundleOverride = $override
+  $json = @{ bundle = @{ resources = $resourceList } } | ConvertTo-Json -Depth 4
+  [IO.File]::WriteAllText($override, $json, (New-Object Text.UTF8Encoding($false)))
+  Write-Host "[ok] Staged verified Companion Paraformer files for the installer."
+}
+
 function Invoke-MsvcBuild {
   param(
     [string]$VsDevCmd,
@@ -393,7 +441,11 @@ function Invoke-MsvcBuild {
     Write-Host "[info] CARGO_INCREMENTAL=1 enabled for this release build"
   }
 
-  $commandParts += "npm.cmd run tauri build -- --target x86_64-pc-windows-msvc --bundles msi"
+  $tauriBuild = "npm.cmd run tauri build -- --target x86_64-pc-windows-msvc --bundles msi"
+  if ($script:companionBundleOverride) {
+    $tauriBuild += " --config src-tauri/companion-model-bundle.generated.json"
+  }
+  $commandParts += $tauriBuild
   $buildCommand = $commandParts -join " && "
   $buildStartedAt = Get-Date
   $exitCode = Invoke-CmdWithHeartbeat -Command $buildCommand -Label "Tauri Windows MSI build" -TimeoutSeconds $CommandTimeoutSeconds
@@ -516,7 +568,8 @@ function Copy-PortableTauriResources {
   $sourcePrefix = $tauriRoot.TrimEnd([char[]]'\/') + [System.IO.Path]::DirectorySeparatorChar
   $config = Get-Content -LiteralPath (Join-Path $tauriRoot "tauri.conf.json") -Raw | ConvertFrom-Json
   $copied = @{}
-  foreach ($resource in $config.bundle.resources) {
+  $resources = if ($script:companionBundleResources) { $script:companionBundleResources } else { $config.bundle.resources }
+  foreach ($resource in $resources) {
     if ($resource -isnot [string]) {
       throw "Portable resource export requires the configured resource path list."
     }
@@ -862,6 +915,7 @@ try {
     Remove-Item Env:VITE_APP_BUILD_NUMBER -ErrorAction SilentlyContinue
   }
   Write-Host "[info] App root: $appRoot"
+  Stage-CompanionModelForBundle
   if ($ExportOnly.IsPresent) {
     Copy-WindowsArtifacts
     return
@@ -910,6 +964,15 @@ try {
   Update-DesktopShortcut
   Start-InstalledListenerType
 } finally {
+  if ($script:companionBundleOverride) {
+    Remove-Item -LiteralPath $script:companionBundleOverride -Force -ErrorAction SilentlyContinue
+  }
+  if ($script:stagedCompanionModelRoot) {
+    foreach ($name in @("model.int8.onnx", "tokens.txt", "LICENSE.txt", "NOTICE.txt")) {
+      Remove-Item -LiteralPath (Join-Path $script:stagedCompanionModelRoot $name) -Force -ErrorAction SilentlyContinue
+    }
+    [IO.Directory]::Delete($script:stagedCompanionModelRoot, $false)
+  }
   if ($null -eq $previousReleaseBuild) {
     Remove-Item Env:VITE_APP_BUILD_NUMBER -ErrorAction SilentlyContinue
   } else {

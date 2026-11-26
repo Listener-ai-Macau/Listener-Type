@@ -110,7 +110,7 @@ impl FoundryLocalWhisperAsr {
 
     #[cfg(target_os = "windows")]
     pub(crate) fn uses_companion_final(&self) -> bool {
-        self.companion_final && matches!(self.language_hint(), None | Some("zh" | "en"))
+        self.companion_final
     }
 
     pub fn model_alias(&self) -> &str {
@@ -142,7 +142,7 @@ impl FoundryLocalWhisperAsr {
         #[cfg(not(target_os = "windows"))]
         let result = self.transcribe_final_pcm(pcm, audio_timeout).await;
         if self.cancel_generation.load(Ordering::SeqCst) != cancel_generation {
-            anyhow::bail!("Foundry Local Whisper transcription cancelled");
+            anyhow::bail!("Local transcription cancelled");
         }
         if foundry_transcribe_attempt_consumes_buffer(&result) {
             self.buffer.lock().clear();
@@ -184,25 +184,11 @@ impl FoundryLocalWhisperAsr {
     ) -> Result<RawTranscript> {
         #[cfg(target_os = "windows")]
         if self.uses_companion_final() {
-            if super::companion_paraformer::is_digital_silence(&pcm) {
-                return Ok(RawTranscript {
-                    text: String::new(),
-                    duration_ms: pcm_duration_ms(&pcm),
-                });
-            }
-        }
-        #[cfg(target_os = "windows")]
-        if self.uses_companion_final() && pcm.len() <= super::companion_paraformer::MAX_DICTATION_PCM_BYTES {
-            let pcm: Arc<[u8]> = pcm.into();
-            match super::companion_paraformer::transcribe(Arc::clone(&pcm)).await {
-                Ok(text) if !text.trim().is_empty() => return Ok(RawTranscript {
-                    text: trim_transcript_text(&text),
-                    duration_ms: pcm_duration_ms(&pcm),
-                }),
-                Ok(_) => log::info!("[companion-paraformer] empty final; falling back to Whisper"),
-                Err(error) => log::warn!("[companion-paraformer] final unavailable; falling back to Whisper: {error}"),
-            }
-            return self.transcribe_inner(&pcm, audio_timeout).await;
+            let duration_ms = pcm_duration_ms(&pcm);
+            let text = super::companion_paraformer::transcribe(pcm.into(), audio_timeout)
+                .await
+                .map_err(anyhow::Error::msg)?;
+            return Ok(RawTranscript { text: trim_transcript_text(&text), duration_ms });
         }
         self.transcribe_inner(&pcm, audio_timeout).await
     }
@@ -258,6 +244,9 @@ impl FoundryLocalWhisperAsr {
         end_ms: u64,
         audio_timeout: std::time::Duration,
     ) -> Result<Option<String>> {
+        if self.uses_companion_final() {
+            anyhow::bail!("Whisper preview is unavailable for Companion dictation");
+        }
         let pcm = self.preview_pcm(end_ms, 6_000);
         if pcm.is_empty() { return Ok(None); }
         let generation = self.cancel_generation.load(Ordering::SeqCst);
@@ -287,7 +276,9 @@ impl FoundryLocalWhisperAsr {
     pub fn cancel(&self) {
         self.cancel_generation.fetch_add(1, Ordering::SeqCst);
         #[cfg(target_os = "windows")]
-        self.runtime.request_cancel_prepare();
+        if !self.uses_companion_final() {
+            self.runtime.request_cancel_prepare();
+        }
         self.buffer.lock().clear();
     }
 }

@@ -122,14 +122,17 @@ fn spawn_companion_phrase_delivery(
             }
             attempted_cut = cut;
             let span = (cut - delivered_end) as usize;
-            if span > crate::asr::local::companion_paraformer::MAX_DICTATION_PCM_BYTES / 32 {
+            if span > crate::asr::local::companion_paraformer::MAX_LIVE_PHRASE_PCM_BYTES / 32 {
                 continue;
             }
             let pcm = capture.asr.preview_pcm(cut, span);
             if pcm.len() != span * 32 {
                 continue;
             }
-            let Ok(phrase) = crate::asr::local::companion_paraformer::transcribe(pcm.into()).await else {
+            let Ok(phrase) = crate::asr::local::companion_paraformer::transcribe(
+                pcm.into(),
+                foundry_audio_transcribe_timeout_duration(),
+            ).await else {
                 continue;
             };
             let phrase = crate::asr::local::punctuation::restore_chinese_punctuation(phrase, false).await;
@@ -256,25 +259,14 @@ fn spawn_foundry_microphone_tasks(
         }
     });
 
-    // Warm the final decoder independently. The already-warm Chinese preview
-    // can start while Whisper is coming back from idle eviction.
-    let runtime = Arc::clone(&inner.foundry_local_runtime);
-    let final_model = capture.asr.model_alias().to_owned();
-    let companion_final = capture.asr.uses_companion_final();
+    // Keep recording while the dictation model warms up.
     async_runtime::spawn(async move {
-        if companion_final {
-            if let Err(error) = crate::asr::local::companion_paraformer::prepare().await {
-                log::warn!("[companion-paraformer] microphone warmup unavailable session_id={owner}: {error}");
-            }
-            return;
-        }
-        if let Err(error) = runtime.ensure_cached_loaded(&final_model).await {
-            log::warn!("[foundry-asr] microphone warmup unavailable session_id={owner}: {error:#}");
+        if let Err(error) = crate::asr::local::companion_paraformer::prepare().await {
+            log::warn!("[companion-paraformer] microphone warmup unavailable session_id={owner}: {error}");
         }
     });
     let preview_inner = Arc::clone(inner);
     async_runtime::spawn(async move {
-        let use_fast_preview = matches!(capture.asr.language_hint(), None | Some("zh"));
         let mut editor_checked = false;
         let mut previous_end = 0;
         let mut previous_text = String::new();
@@ -288,34 +280,15 @@ fn spawn_foundry_microphone_tasks(
                 continue;
             };
             previous_end = end;
-            let full_prefix = end <= FOUNDRY_PREVIEW_PREFIX_MS;
-            let fast = if use_fast_preview {
-                let window = if full_prefix { end as usize } else { FOUNDRY_PREVIEW_WINDOW_MS };
-                let pcm = capture.asr.preview_pcm(end, window);
-                tokio::task::spawn_blocking(move || {
-                    crate::asr::local::wake_helper::transcribe_if_ready(
-                        &pcm,
-                        Duration::from_secs(2),
-                    )
-                    .ok()
-                    .filter(|draft| !draft.text.trim().is_empty())
-                })
-                .await
-                .ok()
-                .flatten()
-            } else {
-                None
-            };
-            let (text, engine, complete) = if let Some(draft) = fast {
-                (draft.text, "paraformer", full_prefix)
-            } else {
-                match capture.asr.preview_recent_audio(end, Duration::from_secs(4)).await {
-                    Ok(Some(text)) => (text, "whisper", end <= FOUNDRY_PREVIEW_WINDOW_MS as u64),
-                    Ok(None) => continue,
-                    Err(error) => {
-                        log::warn!("[foundry-asr] microphone preview skipped session_id={owner}: {error:#}");
-                        continue;
-                    }
+            let complete = end <= FOUNDRY_PREVIEW_PREFIX_MS;
+            let window = if complete { end as usize } else { FOUNDRY_PREVIEW_WINDOW_MS };
+            let pcm = capture.asr.preview_pcm(end, window);
+            let text = match crate::asr::local::companion_paraformer::preview(pcm).await {
+                Ok(Some(text)) => text,
+                Ok(None) => continue,
+                Err(error) => {
+                    log::warn!("[companion-paraformer] microphone preview skipped session_id={owner}: {error}");
+                    continue;
                 }
             };
             let text = crate::asr::local::punctuation::restore_chinese_punctuation(text, true).await;
@@ -334,7 +307,7 @@ fn spawn_foundry_microphone_tasks(
                 None,
             ) {
                 log::info!(
-                    "[foundry-asr] microphone preview session_id={owner} audio_ms={end} engine={engine}"
+                    "[foundry-asr] microphone preview session_id={owner} audio_ms={end} engine=companion-paraformer"
                 );
                 if complete && !phrase_mode {
                     if streaming_composition_disabled_by_env() {

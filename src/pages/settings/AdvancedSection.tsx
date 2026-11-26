@@ -26,8 +26,8 @@ export function AdvancedSection({ onOpenRecording }: { onOpenRecording?: () => v
 
   const activeAsrProvider = (prefs?.activeAsrProvider ?? 'volcengine') as AsrPresetId;
   const isOnLocalQwen3 = activeAsrProvider === 'local-qwen3';
-  const isOnFoundry = activeAsrProvider === 'foundry-local-whisper';
-  const isOnAnyLocal = isOnLocalQwen3 || isOnFoundry;
+  const isOnCompanion = activeAsrProvider === 'companion-paraformer-large';
+  const isOnAnyLocal = isOnLocalQwen3 || isOnCompanion;
 
   const requestEnable = (target: AsrPresetId) => {
     setPendingTarget(target);
@@ -55,7 +55,7 @@ export function AdvancedSection({ onOpenRecording }: { onOpenRecording?: () => v
 
   const pendingNameKey =
     pendingTarget === 'local-qwen3' ? 'asrLocalQwen3'
-    : pendingTarget === 'foundry-local-whisper' ? 'asrFoundryLocalWhisper'
+    : pendingTarget === 'companion-paraformer-large' ? 'asrCompanionParaformer'
     : null;
 
   return (
@@ -165,17 +165,17 @@ export function AdvancedSection({ onOpenRecording }: { onOpenRecording?: () => v
               </div>
             </SettingRow>}
 
-            {/* Foundry 行 —— 仅 Windows 露出（macOS 不展示 Windows 端模型内容）。 */}
+            {/* Paraformer 行 —— 仅 Windows 露出（macOS 不展示 Windows 端模型内容）。 */}
             {isWin && (
               <SettingRow
-                label={t('settings.providers.presets.asrFoundryLocalWhisper')}
-                desc={t('settings.advanced.foundryDesc')}>
+                label={t('settings.providers.presets.asrCompanionParaformer')}
+                desc={t('settings.advanced.localAsrWarningShort')}>
                 <div style={{ display: 'flex', justifyContent: 'flex-end', width: '100%' }}>
                   <Toggle
-                    on={isOnFoundry}
+                    on={isOnCompanion}
                     disabled={busy || pendingTarget !== null}
                     onToggle={!busy && pendingTarget === null ? (next) => {
-                      if (next) requestEnable('foundry-local-whisper');
+                      if (next) requestEnable('companion-paraformer-large');
                       else void performSwitch('volcengine');
                     } : undefined}
                   />
@@ -187,10 +187,10 @@ export function AdvancedSection({ onOpenRecording }: { onOpenRecording?: () => v
 
         {/* 「禁用本地 ASR」逃生入口——只在行内 Toggle 关不掉的场景露出：
             - Linux / 不支持平台：根本没有任何引擎行
-            - 跨平台异常（macOS profile 同步到 foundry / Windows profile 同步到 qwen3）：
+            - 跨平台异常（macOS profile 同步到 Paraformer / Windows profile 同步到 qwen3）：
               本机引擎 Toggle 是 off，关不动异常 active 的对方引擎
             否则平台本机 Toggle 自身就能 off → 关停，重复 disable 行徒增视觉。 */}
-        {isOnAnyLocal && !((isMac && isOnLocalQwen3) || (isWin && isOnFoundry)) && (
+        {isOnAnyLocal && !((isMac && isOnLocalQwen3) || (isWin && isOnCompanion)) && (
           <SettingRow
             label={t('settings.advanced.disableLocalLabel')}
             desc={t('settings.advanced.disableLocalDesc')}>
@@ -207,7 +207,7 @@ export function AdvancedSection({ onOpenRecording }: { onOpenRecording?: () => v
         )}
       </Card>
 
-      {/* 模型管理 UI（镜像源 / 模型列表 / 下载 / 删除 / 设为默认 / Foundry Local）
+      {/* 模型管理 UI（镜像源 / 模型列表 / 下载 / 删除 / 设为默认 / Paraformer）
           inline 渲染——「模型设置」独立页已删，这里是唯一入口。 */}
       {platformSupported && <LocalAsr />}
     </>

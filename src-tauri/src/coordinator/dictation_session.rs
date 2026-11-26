@@ -364,7 +364,7 @@ async fn begin_microphone_session(inner: &Arc<Inner>, translation: bool, wake_to
             model_alias,
             prefs.foundry_local_runtime_source.clone(),
             language_hint.hint,
-        ).with_companion_final(crate::asr::local::companion_paraformer::is_provider(&active_asr)));
+        ).with_companion_final(true));
         if !store_asr_for_session(
             inner,
             current_session_id,

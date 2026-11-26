@@ -2404,7 +2404,7 @@ async fn build_embedded_audio_asr_consumer(
             model_alias,
             prefs.foundry_local_runtime_source.clone(),
             language_hint.hint,
-        ).with_companion_final(crate::asr::local::companion_paraformer::is_provider(active_asr)));
+        ).with_companion_final(true));
         if !store_asr_for_session(
             inner,
             session_id,

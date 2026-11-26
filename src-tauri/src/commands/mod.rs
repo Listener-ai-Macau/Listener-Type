@@ -960,15 +960,15 @@ pub async fn set_active_asr_provider(
     coord: CoordinatorState<'_>,
     runtime: State<'_, Arc<FoundryLocalRuntime>>,
     provider: String,
-    model_alias: Option<String>,
     expected_provider: Option<String>,
 ) -> Result<(), String> {
-    let provider = provider.trim().to_string();
+    let provider = crate::asr::local::companion_paraformer::canonical_provider(provider.trim())
+        .to_owned();
     if provider.is_empty() {
         return Err("ASR provider id is empty".to_string());
     }
-    if provider == FOUNDRY_LOCAL_PROVIDER_ID && !active_foundry_asr_is_supported(&provider) {
-        return Err("Foundry Local Whisper is only available on Windows".to_string());
+    if provider == FOUNDRY_LOCAL_PROVIDER_ID {
+        return Err("Foundry Local Whisper is no longer a Listener Type dictation provider".to_string());
     }
     let companion = crate::asr::local::companion_paraformer::is_provider(&provider);
     if companion {
@@ -977,39 +977,21 @@ pub async fn set_active_asr_provider(
         #[cfg(not(target_os = "windows"))]
         return Err("Companion Paraformer Large is only available on Windows".into());
     }
-    // Commit a local provider/model only after its existing files can actually
-    // load. Bare activation never starts a hidden first-time download, and a
-    // failed load cannot replace the customer's working cloud configuration.
-    let prepared_model = if provider == FOUNDRY_LOCAL_PROVIDER_ID {
-        let alias = model_alias
-            .unwrap_or_else(|| active_foundry_model_from_prefs(&coord.prefs().get()));
-        validate_foundry_model_alias(&alias)?;
-        runtime.ensure_cached_loaded(&alias).await.map_err(|error| {
-            format!("Local recognition is not ready. Open Settings > Local recognition and prepare the model first: {error:#}")
-        })?;
-        Some(alias)
-    } else {
-        None
-    };
     {
         let _settings_guard = settings_update_lock().lock();
         let mut prefs = coord.prefs().get();
-        if expected_provider.as_ref().is_some_and(|expected| &prefs.active_asr_provider != expected) {
+        if expected_provider.as_deref().is_some_and(|expected| {
+            prefs.active_asr_provider != crate::asr::local::companion_paraformer::canonical_provider(expected)
+        }) {
             return Err("Recognition settings changed during preparation. The prepared model was not selected; your latest choice is preserved.".into());
         }
         CredentialsVault::set_active_asr_provider(&provider).map_err(|e| e.to_string())?;
         if prefs.active_asr_provider != provider
             || !prefs.active_asr_provider_default_migrated
-            || prepared_model
-                .as_ref()
-                .is_some_and(|alias| &prefs.foundry_local_asr_model != alias)
         {
             let previous_provider = prefs.active_asr_provider.clone();
             prefs.active_asr_provider = provider.clone();
             prefs.active_asr_provider_default_migrated = true;
-            if let Some(alias) = prepared_model {
-                prefs.foundry_local_asr_model = alias;
-            }
             if let Err(err) = coord.prefs().set(prefs) {
                 let _ = CredentialsVault::set_active_asr_provider(&previous_provider);
                 return Err(err.to_string());

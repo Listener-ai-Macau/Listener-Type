@@ -204,7 +204,6 @@ const ASR_PRESETS: ReadonlyArray<{ id: AsrPresetId; nameKey: string; baseUrl: st
   { id: 'groq',         nameKey: 'asrGroq',         baseUrl: 'https://api.groq.com/openai/v1',                 model: 'whisper-large-v3-turbo'      },
   { id: 'whisper',      nameKey: 'asrWhisper',      baseUrl: 'https://api.openai.com/v1',                      model: 'whisper-1'                   },
   { id: 'companion-paraformer-large', nameKey: 'asrCompanionParaformer', baseUrl: '', model: '' },
-  { id: 'foundry-local-whisper', nameKey: 'asrFoundryLocalWhisper', baseUrl: '',                              model: ''                              },
   // 本地 Qwen3-ASR：无 baseUrl/model 配置，模型在「模型设置」页下载与切换。
   { id: 'local-qwen3',  nameKey: 'asrLocalQwen3',   baseUrl: '',                                              model: ''                              },
 ];
@@ -230,10 +229,10 @@ export function ProvidersSection({ onOpenLocalAsr, prioritizeTextService = false
   const [llmModelRevision, setLlmModelRevision] = useState(0);
   const [asrModelRevision, setAsrModelRevision] = useState(0);
   const os = detectOS();
-  // 主 ASR 下拉只列云端选项；本地推理（local-qwen3 / foundry-local-whisper）
+  // 主 ASR 下拉只列云端选项；本地推理（本机识别）
   // 移到「高级」标签页，防止新手误开 CPU 推理。详见 AdvancedSection。
   const visibleAsrPresets = ASR_PRESETS.filter(
-    p => !['foundry-local-whisper', 'companion-paraformer-large', 'local-qwen3'].includes(p.id),
+    p => !['companion-paraformer-large', 'local-qwen3'].includes(p.id),
   );
 
   useEffect(() => {
@@ -378,7 +377,6 @@ export function ProvidersSection({ onOpenLocalAsr, prioritizeTextService = false
           {(() => {
             const isLocked =
               committedAsrProvider === 'local-qwen3' ||
-              committedAsrProvider === 'foundry-local-whisper' ||
               committedAsrProvider === 'companion-paraformer-large';
             const selectedValue: AsrPresetId = isLocked ? committedAsrProvider : asrProvider;
             // 跨机器同步异常兜底：committed 是本地但不在 visibleAsrPresets 里时，受控
@@ -462,7 +460,7 @@ export function ProvidersSection({ onOpenLocalAsr, prioritizeTextService = false
             <ProviderTools kind="asr" modelAccount="asr.model" onModelSelected={() => {}} canListModels={false} />
           </>
         ) : committedAsrProvider === 'companion-paraformer-large' ? null
-          : committedAsrProvider === 'local-qwen3' || committedAsrProvider === 'foundry-local-whisper' ? (
+          : committedAsrProvider === 'local-qwen3' ? (
           <LocalAsrProviderHint provider={committedAsrProvider} selectedProvider={committedAsrProvider} />
         ) : (
           <>
@@ -1008,7 +1006,7 @@ function LocalAsrProviderHint({
   provider,
   selectedProvider,
 }: {
-  provider: 'local-qwen3' | 'foundry-local-whisper';
+  provider: 'local-qwen3';
   selectedProvider: AsrPresetId;
 }) {
   const { t } = useTranslation();
@@ -1054,10 +1052,6 @@ function LocalAsrProviderHint({
       setLoading(true);
       return;
     }
-    if (provider === 'foundry-local-whisper') {
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     void refresh(seq);
   };
@@ -1090,9 +1084,7 @@ function LocalAsrProviderHint({
     }
   };
 
-  const hintKey = provider === 'foundry-local-whisper'
-    ? 'settings.providers.foundryLocalAsrHint'
-    : 'settings.providers.localAsrHint';
+  const hintKey = 'settings.providers.localAsrHint';
 
   if (loading) {
     return (
@@ -1105,16 +1097,6 @@ function LocalAsrProviderHint({
   const active = models.find(m => m.id === settings?.activeModel);
   const isReady = active?.isDownloaded ?? false;
   const downloaded = models.filter(m => m.isDownloaded);
-
-  if (provider === 'foundry-local-whisper') {
-    return (
-      <div style={{ padding: '8px 0 4px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ fontSize: 12.5, color: 'var(--ol-ink-3)', lineHeight: 1.6 }}>
-          {t(hintKey)}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div style={{ padding: '8px 0 4px', display: 'flex', flexDirection: 'column', gap: 12 }}>

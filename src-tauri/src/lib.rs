@@ -921,7 +921,7 @@ pub fn run() {
             // Spin up hotkey listener; coordinator owns the lifecycle.
             coordinator.start_hotkey_listener();
             coordinator.auto_select_embedded_ble_input_source_in_background();
-            coordinator.preload_foundry_local_asr_in_background("startup");
+            coordinator.preload_windows_local_asr_in_background("startup");
             // QA / custom combo hotkeys use `global-hotkey` (Carbon on macOS).
             // Start those after RunEvent::Ready, when the AppKit event loop is live.
             if should_force_show_main_on_start() {
@@ -1120,14 +1120,6 @@ pub fn run() {
             commands::local_asr_release_engine,
             commands::local_asr_preload,
             commands::local_asr_set_keep_loaded_secs,
-            commands::foundry_local_asr_status,
-            commands::foundry_local_asr_catalog,
-            commands::foundry_local_asr_set_model,
-            commands::foundry_local_asr_set_language_hint,
-            commands::foundry_local_asr_set_runtime_source,
-            commands::foundry_local_asr_prepare,
-            commands::foundry_local_asr_cancel_prepare,
-            commands::foundry_local_asr_release,
             commands::export_error_log,
             commands::export_diagnostic_package,
             restart_app,

@@ -1434,14 +1434,12 @@ impl Coordinator {
         }
     }
 
-    pub fn preload_foundry_local_asr_in_background(self: &Arc<Self>, reason: &'static str) {
+    pub fn preload_windows_local_asr_in_background(self: &Arc<Self>, reason: &'static str) {
         #[cfg(target_os = "windows")]
         {
             start_companion_paraformer_idle_reaper(&self.inner);
             let inner = Arc::clone(&self.inner);
             tauri::async_runtime::spawn(async move {
-                let prefs = inner.prefs.get();
-                let active_foundry = foundry::is_foundry_local_whisper(&prefs.active_asr_provider);
                 // Local confirmation helper is needed for automatic wake whether or not
                 // a voiceprint is enrolled (phrase-only open gate after delete voiceprint).
                 let helper_result =
@@ -1462,29 +1460,6 @@ impl Coordinator {
                     if let Err(error) = crate::asr::local::companion_paraformer::prepare().await {
                         log::warn!("[companion-paraformer] startup warmup failed: {error}");
                     }
-                    return;
-                }
-                if !active_foundry {
-                    return;
-                }
-                let model_alias = if foundry::model_alias_is_known(&prefs.foundry_local_asr_model) {
-                    prefs.foundry_local_asr_model.clone()
-                } else {
-                    foundry::DEFAULT_MODEL_ALIAS.to_string()
-                };
-                let runtime_source = prefs.foundry_local_runtime_source.clone();
-                let runtime = Arc::clone(&inner.foundry_local_runtime);
-                log::info!(
-                    "[foundry-asr] background preload started reason={reason} model={model_alias} source={runtime_source} cached_only=false"
-                );
-                let result = runtime.ensure_loaded(&model_alias, &runtime_source).await;
-                match result {
-                    Ok(model_id) => log::info!(
-                        "[foundry-asr] background preload ready reason={reason} model={model_alias} model_id={model_id}"
-                    ),
-                    Err(error) => log::warn!(
-                        "[foundry-asr] background preload failed reason={reason} model={model_alias}: {error:#}"
-                    ),
                 }
             });
         }
@@ -3480,9 +3455,10 @@ fn active_asr_provider_from_preferences(inner: &Arc<Inner>) -> String {
     let prefs_provider = inner.prefs.get().active_asr_provider;
     let prefs_provider = prefs_provider.trim();
     if prefs_provider.is_empty() {
-        return CredentialsVault::get_active_asr();
+        let stored = CredentialsVault::get_active_asr();
+        return crate::asr::local::companion_paraformer::canonical_provider(&stored).to_owned();
     }
-    prefs_provider.to_string()
+    crate::asr::local::companion_paraformer::canonical_provider(prefs_provider).to_owned()
 }
 
 fn sync_active_asr_provider_to_credentials_for_runtime(active_asr: &str) {
@@ -3501,7 +3477,8 @@ fn sync_active_asr_provider_to_credentials_for_runtime(active_asr: &str) {
 }
 
 fn is_windows_local_asr_provider(id: &str) -> bool {
-    foundry::is_foundry_local_whisper(id) || crate::asr::local::companion_paraformer::is_provider(id)
+    let provider = crate::asr::local::companion_paraformer::canonical_provider(id);
+    crate::asr::local::companion_paraformer::is_provider(provider)
 }
 
 fn ensure_asr_credentials(active_asr: &str) -> Result<(), String> {

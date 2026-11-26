@@ -481,6 +481,11 @@ fn read_preferences(path: &Path) -> Result<UserPreferences> {
     // The streaming switch is retired. Persist the normalized value even when
     // an old client had already written its migration marker alongside false.
     let raw_prefs = serde_json::from_slice::<serde_json::Value>(&bytes).ok();
+    let local_provider_migrated = raw_prefs
+        .as_ref()
+        .and_then(|value| value.get("activeAsrProvider"))
+        .and_then(|provider| provider.as_str())
+        .is_some_and(|provider| provider != prefs.active_asr_provider);
     let streaming_default_migrated = raw_prefs
         .as_ref()
         .and_then(|value| {
@@ -548,6 +553,7 @@ fn read_preferences(path: &Path) -> Result<UserPreferences> {
         || !device_key_led_default_migrated
         || !device_led_brightness_102_default_migrated
         || !active_asr_provider_default_migrated
+        || local_provider_migrated
         || !remove_filler_words_default_migrated
     {
         match serde_json::to_vec_pretty(&prefs)
@@ -3273,7 +3279,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_asr_provider_marker_migration_preserves_existing_provider() {
+    fn legacy_windows_whisper_selection_migrates_to_the_companion_provider() {
         let tmp: PathBuf = std::env::temp_dir().join(format!(
             "listener-type-asr-provider-prefs-test-{}",
             uuid::Uuid::new_v4()
@@ -3290,9 +3296,14 @@ mod tests {
         .expect("write legacy prefs");
 
         let prefs = read_preferences(&path).expect("read prefs");
+        let expected = if cfg!(target_os = "windows") {
+            crate::asr::local::companion_paraformer::PROVIDER_ID
+        } else {
+            crate::asr::local::foundry::PROVIDER_ID
+        };
         assert_eq!(
             prefs.active_asr_provider,
-            crate::asr::local::foundry::PROVIDER_ID
+            expected
         );
         assert!(prefs.active_asr_provider_default_migrated);
 
@@ -3303,7 +3314,7 @@ mod tests {
             saved
                 .get("activeAsrProvider")
                 .and_then(|value| value.as_str()),
-            Some(crate::asr::local::foundry::PROVIDER_ID)
+            Some(expected)
         );
         assert_eq!(
             saved

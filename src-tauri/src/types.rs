@@ -1569,7 +1569,11 @@ fn deserialize_optional_translation_engine<'de, D: serde::Deserializer<'de>>(des
 }
 
 fn default_active_asr_provider() -> String {
-    "volcengine".into()
+    if crate::asr::local::companion_paraformer::bundled_available() {
+        crate::asr::local::companion_paraformer::PROVIDER_ID.into()
+    } else {
+        "volcengine".into()
+    }
 }
 
 fn default_voice_wake_phrase() -> String {
@@ -1946,7 +1950,10 @@ impl<'de> Deserialize<'de> for UserPreferences {
             microphone_wake_enabled: wire.microphone_wake_enabled,
             dictation_input_source,
             dictation_input_source_user_overridden: wire.dictation_input_source_user_overridden.unwrap_or(false),
-            active_asr_provider: wire.active_asr_provider,
+            active_asr_provider: crate::asr::local::companion_paraformer::canonical_provider(
+                &wire.active_asr_provider,
+            )
+            .to_owned(),
             cloud_owner_voiceprint: wire.cloud_owner_voiceprint,
             owner_activity_only: wire.owner_activity_only,
             owner_content_recovery_locale: wire.owner_content_recovery_locale,
@@ -2403,7 +2410,11 @@ impl Default for UserPreferences {
             mute_during_recording: false,
             microphone_device_name: String::new(),
             microphone_wake_enabled: false,
-            dictation_input_source: DictationInputSource::EmbeddedBle,
+            dictation_input_source: if crate::asr::local::companion_paraformer::bundled_available() {
+                DictationInputSource::Microphone
+            } else {
+                DictationInputSource::EmbeddedBle
+            },
             dictation_input_source_user_overridden: false,
             active_asr_provider: default_active_asr_provider(),
             cloud_owner_voiceprint: None,
