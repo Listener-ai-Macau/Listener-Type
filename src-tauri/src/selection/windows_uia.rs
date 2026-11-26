@@ -10,13 +10,48 @@ use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
 };
 use windows::Win32::UI::Accessibility::{
-    CUIAutomation, CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationElement, IUIAutomationTextPattern, IUIAutomationValuePattern, UIA_EditControlTypeId, UIA_ButtonControlTypeId, UIA_CheckBoxControlTypeId, UIA_RadioButtonControlTypeId, UIA_HyperlinkControlTypeId,
+    CUIAutomation, CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationElement, IUIAutomationTextPattern, IUIAutomationTextRange, IUIAutomationValuePattern, UIA_EditControlTypeId, UIA_ButtonControlTypeId, UIA_CheckBoxControlTypeId, UIA_RadioButtonControlTypeId, UIA_HyperlinkControlTypeId,
     UIA_TextPatternId, UIA_WindowControlTypeId, UIA_CONTROLTYPE_ID,
     UIA_ValuePatternId, UIA_PATTERN_ID, UIA_DocumentControlTypeId, UIA_IsReadOnlyAttributeId,
     TextPatternRangeEndpoint_Start, TextPatternRangeEndpoint_End,
 };
 use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 use super::FocusedInputState;
+
+const PASTE_SELECTION_LIMIT: usize = 8_192;
+// Paste receipts verify the actual edit, including any earlier user text.
+// Long drafts need more room than selection reads, but a native provider may
+// still expose a much larger document. Keep every read bounded.
+const PASTE_DOCUMENT_LIMIT: usize = 65_536;
+
+fn checked_paste_text(value: &[u16], limit: usize, overflow: &str) -> Result<String, String> {
+    if value.len() > limit {
+        return Err(overflow.into());
+    }
+    String::from_utf16(value).map_err(|_| "native paste readback is not valid UTF-16".into())
+}
+
+fn read_paste_range(
+    range: &IUIAutomationTextRange, limit: usize, overflow: &str,
+) -> Result<String, String> {
+    // Some empty ranges return an accessible label instead of empty text.
+    if unsafe { range.CompareEndpoints(TextPatternRangeEndpoint_Start, range, TextPatternRangeEndpoint_End) }
+        .map_err(|err| err.to_string())? == 0
+    {
+        return Ok(String::new());
+    }
+    // An extra code unit distinguishes a complete read from a truncated one.
+    let value = unsafe { range.GetText((limit + 1) as i32) }.map_err(|err| err.to_string())?;
+    checked_paste_text(value.as_wide(), limit, overflow)
+}
+
+fn read_paste_document_range(range: &IUIAutomationTextRange) -> Result<String, String> {
+    read_paste_range(range, PASTE_DOCUMENT_LIMIT, "paste document exceeds readback limit")
+}
+
+pub(super) fn local_append_fits_readback(document: &str, payload: &str) -> bool {
+    document.encode_utf16().count() + payload.encode_utf16().count() <= PASTE_DOCUMENT_LIMIT
+}
 
 fn native_boolean_attribute(value: &windows::core::VARIANT) -> Option<bool> {
     // VARIANT equality first checks the native type. Do not coerce numbers,
@@ -278,22 +313,14 @@ impl WindowsSelectionReader {
             return Err("paste selection is not one contiguous range".into());
         }
         let range = unsafe { ranges.GetElement(0) }.map_err(|err| err.to_string())?;
-        // Empty means an ordinary caret, not an unavailable selection.
-        let selected = if unsafe { range.CompareEndpoints(TextPatternRangeEndpoint_Start, &range, TextPatternRangeEndpoint_End) }
-            .map_err(|err| err.to_string())? == 0 { String::new() }
-            else { unsafe { range.GetText(8_193) }.map_err(|err| err.to_string())?.to_string() };
-        if selected.chars().count() > 8_192 {
-            return Err("paste selection exceeds readback limit".into());
-        }
+        let selected = read_paste_range(&range, PASTE_SELECTION_LIMIT, "paste selection exceeds readback limit")?;
         Ok((document, selected))
     }
 
     pub(crate) fn bounded_document(&self) -> Result<String, String> {
-        let value = self.read_document_text()?;
-        if value.chars().count() > 8_192 {
-            return Err("paste document exceeds readback limit".into());
-        }
-        Ok(value)
+        let range = unsafe { self.pattern.DocumentRange() }
+            .map_err(|err| format!("accessibility editor text unavailable: {err}"))?;
+        read_paste_document_range(&range)
     }
 
     /// Compare the held and freshly obtained text patterns for the same still
@@ -308,10 +335,7 @@ impl WindowsSelectionReader {
         let cached = self.bounded_document().map_err(|_| "unavailable")?;
         let pattern: IUIAutomationTextPattern = unsafe { self.focused.GetCurrentPatternAs(UIA_TextPatternId) }.map_err(|_| "unavailable")?;
         let range = unsafe { pattern.DocumentRange() }.map_err(|_| "unavailable")?;
-        let fresh = if unsafe { range.CompareEndpoints(TextPatternRangeEndpoint_Start, &range, TextPatternRangeEndpoint_End) }.map_err(|_| "unavailable")? == 0 {
-            String::new()
-        } else { unsafe { range.GetText(8_193) }.map_err(|_| "unavailable")?.to_string() };
-        if fresh.chars().count() > 8_192 { return Err("unavailable"); }
+        let fresh = read_paste_document_range(&range).map_err(|_| "unavailable")?;
         check_current()?;
         Ok((cached.chars().count(), fresh.chars().count(), cached == fresh))
     }
@@ -346,8 +370,8 @@ impl WindowsSelectionReader {
         if !self.current_observation()? { return Err("paste editor is no longer current".into()); }
         let value: IUIAutomationValuePattern = unsafe { self.focused.GetCurrentPatternAs(UIA_ValuePatternId) }
             .map_err(|error| error.to_string())?;
-        let text = unsafe { value.CurrentValue() }.map_err(|error| error.to_string())?.to_string();
-        if text.chars().count() > 8_192 { return Err("paste value exceeds readback limit".into()); }
+        let value = unsafe { value.CurrentValue() }.map_err(|error| error.to_string())?;
+        let text = checked_paste_text(value.as_wide(), PASTE_DOCUMENT_LIMIT, "paste value exceeds readback limit")?;
         if !self.current_observation()? { return Err("paste editor changed during value read".into()); }
         Ok(text)
     }
@@ -356,7 +380,8 @@ impl WindowsSelectionReader {
         if self.paste_observation_only { return Ok(false); }
         let value: IUIAutomationValuePattern = unsafe { self.focused.GetCurrentPatternAs(UIA_ValuePatternId) }
             .map_err(|error| error.to_string())?;
-        let value = unsafe { value.CurrentValue() }.map_err(|error| error.to_string())?.to_string();
+        let value = unsafe { value.CurrentValue() }.map_err(|error| error.to_string())?;
+        let value = checked_paste_text(value.as_wide(), PASTE_DOCUMENT_LIMIT, "paste value exceeds readback limit")?;
         Ok(native_text_matches_value(document, &value)
             && self.bounded_document()? == document && self.current_observation()?)
     }
@@ -376,12 +401,10 @@ impl WindowsSelectionReader {
             let suffix = document.Clone().map_err(|e| e.to_string())?;
             suffix.MoveEndpointByRange(TextPatternRangeEndpoint_Start, &selection, TextPatternRangeEndpoint_End)
                 .map_err(|e| e.to_string())?;
-            let read = |range: &windows::Win32::UI::Accessibility::IUIAutomationTextRange| -> Result<String, String> {
-                if range.CompareEndpoints(TextPatternRangeEndpoint_Start, range, TextPatternRangeEndpoint_End)
-                    .map_err(|e| e.to_string())? == 0 { return Ok(String::new()); }
-                range.GetText(8_193).map(|s| s.to_string()).map_err(|e| e.to_string())
-            };
-            let expected = super::native_edit_result(&before.0, &before.1, &read(&prefix)?, &read(&suffix)?, payload)?;
+            let expected = super::native_edit_result(
+                &before.0, &before.1, &read_paste_document_range(&prefix)?,
+                &read_paste_document_range(&suffix)?, payload,
+            )?;
             if self.paste_snapshot()? != *before { return Err("native document changed during edit prediction".into()); }
             Ok(expected)
         }
@@ -465,7 +488,7 @@ impl WindowsSelectionReader {
                 .map_err(|err| err.to_string())?;
             if tail.CompareEndpoints(TextPatternRangeEndpoint_Start, &tail, TextPatternRangeEndpoint_End)
                 .map_err(|err| err.to_string())? == 0 { return Ok(true); }
-            let text = tail.GetText(8_193).map_err(|err| err.to_string())?.to_string();
+            let text = read_paste_range(&tail, PASTE_SELECTION_LIMIT, "paste caret tail exceeds readback limit")?;
             Ok(text.chars().all(|ch| matches!(ch, '\r' | '\n')))
         }
     }
@@ -481,6 +504,22 @@ fn native_text_matches_value(document: &str, value: &str) -> bool {
 #[cfg(test)]
 mod focus_tests {
     use super::*;
+
+    #[test]
+    fn windows_paste_readback_accepts_long_drafts_but_never_truncated_utf16() {
+        let document = format!("{}\r\n", "既有草稿🙂".repeat(3_000));
+        let utf16: Vec<u16> = document.encode_utf16().collect();
+        assert!(utf16.len() > PASTE_SELECTION_LIMIT);
+        assert_eq!(checked_paste_text(&utf16, PASTE_DOCUMENT_LIMIT, "overflow").unwrap(), document);
+        assert!(checked_paste_text(&utf16, PASTE_SELECTION_LIMIT, "overflow").is_err());
+        assert!(checked_paste_text(&vec![b'x' as u16; PASTE_DOCUMENT_LIMIT + 1],
+            PASTE_DOCUMENT_LIMIT, "overflow").is_err());
+        assert!(checked_paste_text(&[0xD83D], PASTE_DOCUMENT_LIMIT, "overflow").is_err());
+        assert!(local_append_fits_readback(&document, "接着说的一段。"));
+        let near_limit = "a".repeat(PASTE_DOCUMENT_LIMIT - 1);
+        assert!(local_append_fits_readback(&near_limit, "。"));
+        assert!(!local_append_fits_readback(&near_limit, "🙂"));
+    }
 
     #[test]
     fn saved_writable_document_supports_paste_receipts_without_value_pattern() {

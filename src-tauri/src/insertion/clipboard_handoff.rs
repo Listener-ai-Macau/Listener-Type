@@ -933,6 +933,16 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                     let _ = reply.send(rejected());
                     continue;
                 }
+                #[cfg(target_os = "windows")]
+                if local_append && before.as_ref().is_some_and(|(document, _)| {
+                    !crate::selection::PasteReader::local_append_fits_readback(document, &text)
+                }) {
+                    // Keep the session's previous receipt and audio boundary;
+                    // finalization still has the complete undelivered audio.
+                    log::info!("[insertion] local phrase deferred: resulting document exceeds readback limit");
+                    let _ = reply.send(rejected());
+                    continue;
+                }
                 let mut range_permission = SessionRangePermission::NotRequested;
                 let mut range_facts = [None; 4];
                 if revisable {
@@ -1473,8 +1483,11 @@ fn paste_consumption_proof(
         .take_while(|(a, b)| a == b)
         .map(|(a, _)| a.len_utf8())
         .sum::<usize>();
-    // Verify the entire edit rather than searching for a matching phrase that
-    // may already have existed in this document before the shortcut was sent.
+    // Verify the unchanged suffix once. Long drafts can have many plausible
+    // edit offsets when a dictated phrase happens to repeat existing text.
+    let suffix_bytes = before.bytes().rev().zip(after.bytes().rev())
+        .take_while(|(a, b)| a == b).count();
+    // A matching phrase already present in the document is not a receipt.
     for offset in before
         .char_indices()
         .map(|(offset, _)| offset)
@@ -1485,7 +1498,7 @@ fn paste_consumption_proof(
         }
         if before[offset..].starts_with(&selected)
             && after[offset..].starts_with(&payload)
-            && before[offset + selected.len()..] == after[offset + payload.len()..]
+            && before.len() - offset - selected.len() <= suffix_bytes
         {
             return Some(PasteReceiptProof::ExactEdit);
         }
@@ -1695,6 +1708,30 @@ mod tests {
                 receiver: Some(receiver),
             },
         )
+    }
+
+    #[test]
+    fn long_draft_appends_confirm_only_the_exact_same_editor() {
+        let session = uuid::Uuid::new_v4();
+        let document = "既有的草稿🙂\r\n".repeat(2_000);
+        let first = "第一段内容。";
+        let tail = "停顿后的下一段。";
+        let after_first = format!("{document}{first}");
+        let after_tail = format!("{after_first}{tail}");
+        assert_eq!(paste_consumption_proof(&document, "", first, &after_first),
+            Some(PasteReceiptProof::ExactEdit));
+        assert_eq!(paste_consumption_proof(&after_first, "", tail, &after_tail),
+            Some(PasteReceiptProof::ExactEdit));
+        let owns = |current, same_target, caret| session_range_owned(
+            Some((session, first)), true, Some(&after_first), session, first,
+            Some((current, "")), same_target, caret,
+        );
+        assert!(owns(&after_first, true, Some(true)));
+        assert!(!owns(&after_first, false, Some(true)));
+        assert!(!owns(&after_first, true, Some(false)));
+        let changed_before_first = format!("用户改过开头{after_first}");
+        assert!(!owns(&changed_before_first, true, Some(true)));
+        assert_eq!(paste_consumption_proof(&after_first, "", tail, &format!("改变了原文{after_tail}")), None);
     }
 
     #[test]

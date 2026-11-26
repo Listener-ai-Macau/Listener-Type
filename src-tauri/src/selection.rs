@@ -346,6 +346,11 @@ impl PasteReader {
         { None }
     }
 
+    #[cfg(target_os = "windows")]
+    pub(crate) fn local_append_fits_readback(document: &str, payload: &str) -> bool {
+        windows_uia::local_append_fits_readback(document, payload)
+    }
+
     pub(crate) fn before(&self) -> Result<(String, String), String> {
         #[cfg(target_os = "windows")]
         { self.reader.paste_snapshot() }
