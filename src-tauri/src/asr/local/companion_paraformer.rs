@@ -44,14 +44,23 @@ fn segment_end(pcm: &[u8]) -> usize {
 #[cfg(target_os = "windows")]
 mod windows {
     use std::path::PathBuf;
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
     use parking_lot::Mutex;
 
     use super::{is_digital_silence, segment_end, MAX_DICTATION_PCM_BYTES};
     use crate::asr::local::paraformer::ParaformerRuntime;
 
-    struct LocalModel(ParaformerRuntime);
+    struct LocalModel {
+        runtime: ParaformerRuntime,
+        last_used: Instant,
+    }
+
+    impl LocalModel {
+        fn is_idle(&self, limit: Duration) -> bool {
+            self.last_used.elapsed() >= limit
+        }
+    }
 
     // Sherpa's recognizer and streams are used serially under MODEL with the
     // bundled CPU runtime. No stream or pointer leaves the blocking worker.
@@ -71,10 +80,16 @@ mod windows {
             }
             let model = ParaformerRuntime::load_companion(&path)?;
             model.warm_up()?;
-            *slot = Some(LocalModel(model));
+            *slot = Some(LocalModel {
+                runtime: model,
+                last_used: Instant::now(),
+            });
             log::info!("[companion-paraformer] verified CPU model ready");
         }
-        run(&slot.as_ref().expect("local model initialized").0)
+        let model = slot.as_mut().expect("local model initialized");
+        let result = run(&model.runtime);
+        model.last_used = Instant::now();
+        result
     }
 
     pub(crate) async fn prepare() -> Result<(), String> {
@@ -114,10 +129,33 @@ mod windows {
     pub(crate) async fn release() {
         let _ = tokio::task::spawn_blocking(|| drop(MODEL.lock().take())).await;
     }
+
+    pub(crate) async fn release_if_idle(
+        limit: Duration,
+        can_release: impl FnOnce() -> bool + Send + 'static,
+    ) -> bool {
+        // Avoid dispatching work when the cache is empty, busy, or still warm.
+        if !MODEL
+            .try_lock()
+            .is_some_and(|slot| slot.as_ref().is_some_and(|model| model.is_idle(limit)))
+        {
+            return false;
+        }
+        tokio::task::spawn_blocking(move || {
+            let mut slot = MODEL.lock();
+            if !slot.as_ref().is_some_and(|model| model.is_idle(limit)) || !can_release() {
+                return false;
+            }
+            drop(slot.take());
+            true
+        })
+        .await
+        .unwrap_or(false)
+    }
 }
 
 #[cfg(target_os = "windows")]
-pub(crate) use windows::{prepare, release, transcribe};
+pub(crate) use windows::{prepare, release, release_if_idle, transcribe};
 
 #[cfg(all(test, target_os = "windows"))]
 mod tests {

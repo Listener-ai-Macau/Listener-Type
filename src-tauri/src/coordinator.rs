@@ -1437,6 +1437,7 @@ impl Coordinator {
     pub fn preload_foundry_local_asr_in_background(self: &Arc<Self>, reason: &'static str) {
         #[cfg(target_os = "windows")]
         {
+            start_companion_paraformer_idle_reaper(&self.inner);
             let inner = Arc::clone(&self.inner);
             tauri::async_runtime::spawn(async move {
                 let prefs = inner.prefs.get();
@@ -3599,6 +3600,33 @@ fn schedule_local_asr_release(inner: &Arc<Inner>) {
 }
 
 #[cfg(target_os = "windows")]
+fn start_companion_paraformer_idle_reaper(inner: &Arc<Inner>) {
+    const MAX_IDLE_SECS: u32 = 120;
+    const CHECK_INTERVAL: Duration = Duration::from_secs(10);
+
+    let coordinator = Arc::downgrade(inner);
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(CHECK_INTERVAL).await;
+            let Some(inner) = coordinator.upgrade() else {
+                break;
+            };
+            let limit = Duration::from_secs(
+                foundry_local_asr_release_keep_secs(&inner).min(MAX_IDLE_SECS).into(),
+            );
+            // Check the phase under the model lock, immediately before dropping it.
+            if crate::asr::local::companion_paraformer::release_if_idle(limit, move || {
+                inner.state.lock().phase == SessionPhase::Idle
+            })
+            .await
+            {
+                log::info!("[companion-paraformer] released idle dictation model");
+            }
+        }
+    });
+}
+
+#[cfg(target_os = "windows")]
 fn foundry_local_asr_release_keep_secs(inner: &Arc<Inner>) -> u32 {
     inner.prefs.get().foundry_local_asr_keep_loaded_secs
 }
@@ -3621,7 +3649,6 @@ fn schedule_foundry_local_asr_release(inner: &Arc<Inner>, session_id: SessionId)
             return;
         }
         crate::asr::local::punctuation::release_punctuation().await;
-        crate::asr::local::companion_paraformer::release().await;
         if let Err(error) = runtime.release_now().await {
             log::warn!("[foundry-asr] scheduled release failed: {error:#}");
         }

@@ -771,7 +771,7 @@ pub fn run() {
                 }
                 #[cfg(target_os = "macos")]
                 make_qa_window_draggable_macos(&qa);
-                let _ = qa.hide();
+                hide_qa_window(app.handle());
             } else {
                 log::info!("[qa] qa 窗口未在 tauri.conf.json 中声明，前端 agent 会补上");
             }
@@ -3428,7 +3428,43 @@ fn set_qa_window_visibility_no_activate<R: tauri::Runtime>(window: &tauri::Webvi
             let _ = ShowWindow(hwnd, if visible { SW_SHOWNOACTIVATE } else { SW_HIDE });
             log::info!("[qa] native visibility requested={visible} actual={} generation={generation}", IsWindowVisible(hwnd).as_bool());
         }
+        set_qa_webview_memory_target(&target, visible, generation);
     }).is_ok()
+}
+
+#[cfg(target_os = "windows")]
+fn set_qa_webview_memory_target<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    visible: bool,
+    generation: u64,
+) {
+    use std::sync::atomic::Ordering;
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW,
+        COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL,
+    };
+    use windows_core::Interface;
+
+    let _ = window.with_webview(move |webview| {
+        if QA_WINDOW_VISIBILITY_GENERATION.load(Ordering::SeqCst) != generation {
+            return;
+        }
+        let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else {
+            return;
+        };
+        let Ok(core) = core.cast::<ICoreWebView2_19>() else {
+            return;
+        };
+        let target = if visible {
+            COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL
+        } else {
+            COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW
+        };
+        match unsafe { core.SetMemoryUsageTargetLevel(target) } {
+            Ok(()) => log::info!("[qa] WebView memory target low={}", !visible),
+            Err(error) => log::debug!("[qa] WebView memory target unavailable: {error}"),
+        }
+    });
 }
 
 /// 选择胶囊应落位的显示器：优先光标所在屏（用户正在看的屏幕），其次胶囊窗口

@@ -104,6 +104,8 @@ bzip2 = "0.4"
 foundry-local-sdk = { version = "1.1.0", features = ["winml"] }
 libloading = "0.8"
 raw-window-handle = "0.6"
+webview2-com = "0.38"
+windows-core = "0.61"
 tar = "0.4"
 windows = { version = "0.58", features = [
   "Devices_Bluetooth",
