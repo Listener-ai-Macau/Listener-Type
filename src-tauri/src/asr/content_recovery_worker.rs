@@ -384,7 +384,7 @@ pub(crate) async fn recover(
     want_activity: bool,
 ) -> Result<RecoveredAudio, String> {
     if want_activity {
-        super::content_recovery_assets::prepare_in_background("zh-CN");
+        super::content_recovery_assets::prepare_in_background();
         // Never wait for an 890 MB network transfer in finalization. The
         // model-independent empty-final extraction route still works offline.
         super::content_recovery_assets::ready_model()?;

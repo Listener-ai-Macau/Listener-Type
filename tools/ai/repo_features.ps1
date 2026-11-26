@@ -35,13 +35,13 @@ function New-FeatureSnapshot {
         major_features = @(
             "Recording workflow: press once to start and press once to stop; no hold-to-talk product mode.",
             "Input sources: microphone and Listener BLE, including embedded BLE audio from VKA1-style devices.",
-            "ASR providers: Volcengine streaming, OpenAI batch, Apple Speech, Bailian realtime, macOS Qwen local, and Windows Foundry Local Whisper.",
+            "ASR providers: Volcengine streaming, OpenAI batch, Apple Speech, Bailian realtime, macOS Qwen local, and Windows Companion Paraformer.",
             "Text pipeline: coordinator-driven dictation, correction, polish, vocabulary hotwords, translation, QA selection ask, and insertion.",
             "Windows insertion: direct/clipboard fallback paths are default; optional native TSF IME bridge remains available for explicit validation.",
             "Device controls: Listener keyboard KEY1-KEY4 fallback shortcuts and EC11 click map to configurable safe actions, with KEY1 RightCtrl, KEY2 Ctrl+C, KEY3 Ctrl+V, KEY4 Ctrl+Z, and EC11 click as the default recording key; EC11 rotation can be set to system volume, screen brightness, or disabled and is synced to firmware over BLE. Fresh device-setting defaults are plugged brightness 80%, battery brightness 50%, low-power idle 1 minute, and BLE name listener.",
             "Release shell: Tauri updater, background update gate, tray menu, autostart, single-instance behavior, and package metadata.",
             "Settings and diagnostics: shortcuts, provider credentials in OS keyring/local storage, language, permissions, advanced logs, diagnostic export, dark mode, and device health.",
-            "Developer/product tools: embedded audio file/BLE CLI replay, firmware OTA package/preflight validation, BLE stream smoke, Foundry runtime probes, and updater manifest checks."
+            "Developer/product tools: embedded audio file/BLE CLI replay, firmware OTA package/preflight validation, BLE stream smoke, and updater manifest checks."
         )
         key_paths = @(
             [ordered]@{ path = "src/App.tsx"; purpose = "Top-level React app state, shell, settings modal, capsule wiring." },
@@ -68,11 +68,10 @@ function New-FeatureSnapshot {
             [ordered]@{ path = "src-tauri/src/firmware_ota.rs"; purpose = "Shared firmware OTA package validation and headless release-gate runner." },
             [ordered]@{ path = "src-tauri/src/marketplace_backend.rs"; purpose = "Style marketplace REST contract and Rust HTTP client error handling." },
             [ordered]@{ path = "src-tauri/src/github_oauth.rs"; purpose = "GitHub OAuth device-flow, token refresh, and authenticated user lookup for marketplace identity." },
-            [ordered]@{ path = "src/lib/localAsr.ts"; purpose = "Frontend wrappers for Qwen3-ASR and Foundry Local runtime/model commands." },
+            [ordered]@{ path = "src/lib/localAsr.ts"; purpose = "Frontend wrappers for macOS Qwen3-ASR model commands." },
             [ordered]@{ path = "tools/collect_ai_diagnostics.ps1"; purpose = "One-command AI diagnostic bundle collector for logs, artifacts, BLE/audio summaries, workflow metadata, and optional firmware diagnostic input." },
             [ordered]@{ path = "tools/firmware_ota_headless/"; purpose = "Standalone firmware OTA package/preflight validation helper for release-gate artifacts." },
             [ordered]@{ path = "tools/embedded_audio_replay/"; purpose = "BLE/audio replay and smoke tools for desktop-device integration." },
-            [ordered]@{ path = "tools/foundry_asr_probe/"; purpose = "Foundry Local Whisper diagnostic probe outside the full Tauri app." },
             [ordered]@{ path = "docs/features/"; purpose = "Human-readable feature index and per-feature source maps." }
         )
         platform_assumptions = @(

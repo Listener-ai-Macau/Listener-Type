@@ -1,4 +1,4 @@
-// Local / Foundry ASR settings and prepare commands.
+// Qwen3-ASR settings and model management.
 // Included into `commands` via `include!`.
 
 
@@ -13,6 +13,7 @@ pub fn local_asr_get_settings(coord: CoordinatorState<'_>) -> LocalAsrSettings {
     }
 }
 
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub fn local_asr_set_active_model(
     coord: CoordinatorState<'_>,
@@ -26,6 +27,7 @@ pub fn local_asr_set_active_model(
     coord.prefs().set(prefs).map_err(|e| e.to_string())
 }
 
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub fn local_asr_set_mirror(coord: CoordinatorState<'_>, mirror: String) -> Result<(), String> {
     let _normalized = Mirror::from_str(&mirror);
@@ -34,6 +36,7 @@ pub fn local_asr_set_mirror(coord: CoordinatorState<'_>, mirror: String) -> Resu
     coord.prefs().set(prefs).map_err(|e| e.to_string())
 }
 
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub fn local_asr_list_models() -> Vec<ModelStatus> {
     crate::asr::local::models::list_status()
@@ -41,6 +44,7 @@ pub fn local_asr_list_models() -> Vec<ModelStatus> {
 
 /// 实时去 HuggingFace API 拉某个模型的真实文件清单 + 总尺寸；
 /// 前端在显示模型卡时调一次，避免硬编码尺寸过期。
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn local_asr_fetch_remote_info(
     model_id: String,
@@ -51,6 +55,7 @@ pub async fn local_asr_fetch_remote_info(
     fetch_remote_info(id, m).await.map_err(|e| format!("{e:#}"))
 }
 
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub fn local_asr_download_model(
     app: AppHandle,
@@ -64,6 +69,7 @@ pub fn local_asr_download_model(
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub fn local_asr_cancel_download(
     manager: State<'_, Arc<DownloadManager>>,
@@ -74,6 +80,7 @@ pub fn local_asr_cancel_download(
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub fn local_asr_delete_model(coord: CoordinatorState<'_>, model_id: String) -> Result<(), String> {
     let id = ModelId::from_str(&model_id).ok_or_else(|| format!("unknown model id: {model_id}"))?;
@@ -85,6 +92,7 @@ pub fn local_asr_delete_model(coord: CoordinatorState<'_>, model_id: String) -> 
     crate::asr::local::models::delete_model(id).map_err(|e| e.to_string())
 }
 
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn local_asr_test_model(
     model_id: String,
@@ -95,6 +103,7 @@ pub async fn local_asr_test_model(
         .map_err(|e| format!("{e:#}"))
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalAsrEngineStatus {
@@ -103,6 +112,7 @@ pub struct LocalAsrEngineStatus {
     pub keep_loaded_secs: u32,
 }
 
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub fn local_asr_engine_status(coord: CoordinatorState<'_>) -> LocalAsrEngineStatus {
     let prefs = coord.prefs().get();
@@ -113,16 +123,19 @@ pub fn local_asr_engine_status(coord: CoordinatorState<'_>) -> LocalAsrEngineSta
     }
 }
 
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub fn local_asr_release_engine(coord: CoordinatorState<'_>) {
     coord.release_local_asr_engine();
 }
 
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub fn local_asr_preload(coord: tauri::State<'_, std::sync::Arc<crate::coordinator::Coordinator>>) {
     coord.preload_local_asr_in_background();
 }
 
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub fn local_asr_set_keep_loaded_secs(
     coord: CoordinatorState<'_>,
@@ -131,147 +144,4 @@ pub fn local_asr_set_keep_loaded_secs(
     let mut prefs = coord.prefs().get();
     prefs.local_asr_keep_loaded_secs = seconds;
     coord.prefs().set(prefs).map_err(|e| e.to_string())
-}
-
-// ───────────────────── Windows local ASR (Foundry Local Whisper) ─────────────────────
-
-fn active_foundry_model_from_prefs(prefs: &UserPreferences) -> String {
-    if model_alias_is_known(&prefs.foundry_local_asr_model) {
-        prefs.foundry_local_asr_model.clone()
-    } else {
-        DEFAULT_MODEL_ALIAS.to_string()
-    }
-}
-
-fn validate_foundry_model_alias(model_alias: &str) -> Result<(), String> {
-    if model_alias_is_known(model_alias) {
-        Ok(())
-    } else {
-        Err(format!(
-            "unknown Foundry Whisper model alias: {model_alias}"
-        ))
-    }
-}
-
-fn normalize_foundry_language_hint(language_hint: &str) -> Result<String, String> {
-    let normalized = language_hint.trim().to_string();
-    if normalized.is_empty()
-        || (normalized.len() == 2 && normalized.bytes().all(|b| b.is_ascii_lowercase()))
-    {
-        Ok(normalized)
-    } else {
-        Err("language hint must be empty or ISO 639-1 lowercase code".to_string())
-    }
-}
-
-fn normalize_foundry_runtime_source(source: &str) -> String {
-    crate::asr::local::foundry_native::normalize_runtime_source_str(source)
-}
-
-#[tauri::command]
-pub async fn foundry_local_asr_status(
-    coord: CoordinatorState<'_>,
-    runtime: State<'_, Arc<FoundryLocalRuntime>>,
-) -> Result<FoundryRuntimeStatus, String> {
-    let prefs = coord.prefs().get();
-    let active_model = active_foundry_model_from_prefs(&prefs);
-    Ok(runtime
-        .status_snapshot(&active_model, &prefs.foundry_local_runtime_source)
-        .await)
-}
-
-#[tauri::command]
-pub async fn foundry_local_asr_catalog(
-    runtime: State<'_, Arc<FoundryLocalRuntime>>,
-) -> Result<Vec<FoundryCatalogModel>, String> {
-    runtime
-        .catalog_snapshot()
-        .await
-        .map_err(|e| format!("{e:#}"))
-}
-
-#[tauri::command]
-pub fn foundry_local_asr_set_model(
-    coord: CoordinatorState<'_>,
-    model_alias: String,
-) -> Result<(), String> {
-    validate_foundry_model_alias(&model_alias)?;
-    let mut prefs = coord.prefs().get();
-    prefs.foundry_local_asr_model = model_alias;
-    coord.prefs().set(prefs).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn foundry_local_asr_set_language_hint(
-    coord: CoordinatorState<'_>,
-    language_hint: String,
-) -> Result<(), String> {
-    let normalized = normalize_foundry_language_hint(&language_hint)?;
-    let mut prefs = coord.prefs().get();
-    prefs.foundry_local_asr_language_hint = normalized;
-    coord.prefs().set(prefs).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn foundry_local_asr_set_runtime_source(
-    coord: CoordinatorState<'_>,
-    source: String,
-) -> Result<(), String> {
-    let mut prefs = coord.prefs().get();
-    prefs.foundry_local_runtime_source = normalize_foundry_runtime_source(&source);
-    coord.prefs().set(prefs).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn foundry_local_asr_prepare(
-    app: AppHandle,
-    coord: CoordinatorState<'_>,
-    runtime: State<'_, Arc<FoundryLocalRuntime>>,
-    model_alias: String,
-) -> Result<String, String> {
-    validate_foundry_model_alias(&model_alias)?;
-    let prefs = coord.prefs().get();
-    let runtime_source = prefs.foundry_local_runtime_source.clone();
-    let progress_app = app.clone();
-    let result = runtime
-        .ensure_loaded_with_progress(&model_alias, &runtime_source, move |payload| {
-            emit_foundry_prepare_progress(&progress_app, payload);
-        })
-        .await;
-    match result {
-        Ok(model_id) => Ok(model_id),
-        Err(error) => {
-            let message = format!("{error:#}");
-            emit_foundry_prepare_progress(
-                &app,
-                FoundryPrepareProgressPayload::failed(
-                    model_alias,
-                    "Foundry Local Whisper prepare failed",
-                    message.clone(),
-                ),
-            );
-            Err(message)
-        }
-    }
-}
-
-#[tauri::command]
-pub fn foundry_local_asr_cancel_prepare(
-    runtime: State<'_, Arc<FoundryLocalRuntime>>,
-) -> Result<(), String> {
-    runtime.request_cancel_prepare();
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn foundry_local_asr_release(
-    runtime: State<'_, Arc<FoundryLocalRuntime>>,
-) -> Result<(), String> {
-    runtime.release_now().await.map_err(|e| format!("{e:#}"))
-}
-
-fn emit_foundry_prepare_progress(app: &AppHandle, payload: FoundryPrepareProgressPayload) {
-    if let Err(error) = app.emit("foundry-local-asr-prepare-progress", payload) {
-        log::warn!("[foundry-asr] emit prepare progress failed: {error}");
-    }
 }

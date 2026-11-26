@@ -2,7 +2,7 @@ param(
   [string]$ExePath = "",
   [ValidateSet("notepad", "browser", "wt-cmd", "wt-powershell", "win32edit")]
   [string]$Target = "notepad",
-  [ValidateSet("volcengine", "foundry-local-whisper")]
+  [ValidateSet("volcengine", "companion-paraformer-large")]
   [string]$AsrProvider = "volcengine",
   [string]$Phrase = "Listener Type Windows real regression",
   [int]$TimeoutSeconds = 120,
@@ -894,7 +894,7 @@ if ($RequireJsonCredentials) {
   if ($AsrProvider -eq "volcengine" -and (-not $credentialStatus.VolcengineConfigured -or -not $credentialStatus.ArkConfigured)) {
     throw "Real ASR regression requires configured Volcengine ASR and Ark LLM credentials when ASR=volcengine."
   }
-  if ($AsrProvider -eq "foundry-local-whisper" -and -not $credentialStatus.ArkConfigured) {
+  if ($AsrProvider -eq "companion-paraformer-large" -and -not $credentialStatus.ArkConfigured) {
     Write-Warning "Ark LLM credentials are not configured; local ASR smoke accepts the existing raw transcript fallback when LLM is unconfigured."
   }
 }
@@ -905,7 +905,7 @@ if (-not $credentialStatus.VolcengineConfigured -or -not $credentialStatus.ArkCo
   $providerCredentialNote = if ($AsrProvider -eq "volcengine") {
     "ASR=volcengine needs Volcengine ASR and Ark LLM credentials unless the app resolves them from the OS credential vault."
   } else {
-    "ASR=foundry-local-whisper does not require Volcengine credentials; Ark LLM is optional because raw transcript fallback is accepted."
+    "ASR=companion-paraformer-large does not require Volcengine credentials; Ark LLM is optional because raw transcript fallback is accepted."
   }
   Write-Warning "Legacy credentials.json is incomplete ($($missingCredentialParts -join ', ')); $providerCredentialNote Continuing because the app may use the OS credential vault."
 }

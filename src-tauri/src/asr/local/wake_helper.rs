@@ -20,7 +20,7 @@ mod imp {
     use serde::{Deserialize, Serialize};
     use uuid::Uuid;
 
-    use super::super::foundry_provider::TempWavFile;
+    use super::super::wake_audio::TempWavFile;
     use super::super::paraformer::ParaformerRuntime;
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;

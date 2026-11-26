@@ -5,7 +5,7 @@
 //  - 模型列表：每行模型 = 真实尺寸 / 进度 / [下载|取消|删除|设为默认]
 //  - 真实尺寸通过 fetchLocalAsrRemoteInfo 实时从 HuggingFace API 拉，**不硬编码**
 //  - 监听 `local-asr-download-progress` 事件实时刷新进度
-//  - Win 端引擎不可用时禁用下载按钮，提示见 issue #256
+//  - Windows 使用随附的 Paraformer，macOS 提供 Qwen3 模型管理。
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -206,7 +206,7 @@ export function LocalAsr() {
     setCompanionEnabling(true);
     try {
       setError(null);
-      await setActiveAsrProvider('companion-paraformer-large', undefined, prefs.activeAsrProvider);
+      await setActiveAsrProvider('companion-paraformer-large', prefs.activeAsrProvider);
       await updatePrefs(current => ({ ...current, activeAsrProvider: 'companion-paraformer-large' }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -367,7 +367,7 @@ export function LocalAsr() {
             ? <Pill tone="blue" size="sm">{t('localAsr.activeBadge')}</Pill>
             : <Btn size="sm" variant="blue" disabled={!prefs || companionEnabling}
                 onClick={() => void handleEnableCompanion()}>
-                {t(companionEnabling ? 'localAsr.foundryEnabling' : 'localAsr.foundryPrepareAndUse')}
+                {t(companionEnabling ? 'localAsr.companionEnabling' : 'localAsr.companionEnable')}
               </Btn>}
         </div>
       </Card>

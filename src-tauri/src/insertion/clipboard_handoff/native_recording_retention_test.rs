@@ -170,7 +170,7 @@ fn recording_retention_uses_only_its_own_paste_lease() {
                 proof: consumed.then_some(PasteReceiptProof::ExactEdit),
                 ..Default::default() },
             completion: None, session_body: None, observed_document: None,
-            expected_session_document: None, strict_session_edit: false,
+            expected_session_document: None, strict_session_edit: false, first_guarded_local_draft: false,
             staged_selection: false,
             dispatch_session: Some(if foreign { uuid::Uuid::new_v4() } else { session }),
         };
@@ -238,7 +238,7 @@ fn completion_first_waiting_handoff_preserves_new_user_copy() {
                 last_value_probe: None,
                 dispatched_at: Instant::now() - (PASTE_RECEIPT_OBSERVATION_BUDGET - Duration::from_millis(600)),
                 observation: PasteObservation::default(), completion: None, session_body: None,
-                observed_document: None, expected_session_document: None, strict_session_edit: false,
+                observed_document: None, expected_session_document: None, strict_session_edit: false, first_guarded_local_draft: false,
                 staged_selection: false, dispatch_session: Some(session),
             };
             run_with_capture_and_dispatch(receiver, Some(receipt),

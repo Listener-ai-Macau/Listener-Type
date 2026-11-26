@@ -85,7 +85,7 @@ fn same_asr_connection(first: &ActiveAsr, second: &ActiveAsr) -> bool {
         (ActiveAsr::Whisper(a), ActiveAsr::Whisper(b)) => Arc::ptr_eq(a, b),
         (ActiveAsr::Bailian(a), ActiveAsr::Bailian(b)) => Arc::ptr_eq(a, b),
         #[cfg(target_os = "windows")]
-        (ActiveAsr::FoundryLocalWhisper(a), ActiveAsr::FoundryLocalWhisper(b)) => Arc::ptr_eq(a, b),
+        (ActiveAsr::CompanionParaformer(a), ActiveAsr::CompanionParaformer(b)) => Arc::ptr_eq(a, b),
         #[cfg(target_os = "macos")]
         (ActiveAsr::Local(a), ActiveAsr::Local(b)) => Arc::ptr_eq(a, b),
         _ => false,
@@ -141,7 +141,7 @@ pub(super) fn cancel_active_asr(asr: ActiveAsr) {
         ActiveAsr::Whisper(w) => w.cancel(),
         ActiveAsr::Bailian(b) => b.cancel(),
         #[cfg(target_os = "windows")]
-        ActiveAsr::FoundryLocalWhisper(local) => local.cancel(),
+        ActiveAsr::CompanionParaformer(local) => local.cancel(),
         #[cfg(target_os = "macos")]
         ActiveAsr::Local(local) => local.cancel(),
     }

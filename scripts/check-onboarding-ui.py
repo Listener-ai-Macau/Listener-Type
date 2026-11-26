@@ -51,8 +51,8 @@ with sync_playwright() as pw:
             page.get_by_role('button', name='Providers', exact=True).click()
             page.get_by_role('button', name='Set up local recognition', exact=True).click()
             expect(page.locator('.ol-settings-nav .ol-nav-btn-active')).to_have_text('Local recognition')
-            expect(page.get_by_text('Windows Foundry Local Whisper', exact=True)).to_be_visible()
-            check('Local setup starts directly at its model preparation, not insertion internals', page.get_by_text('Streaming insertion', exact=True).count() == 0)
+            expect(page.get_by_text('Companion Paraformer Large (Local)', exact=True)).to_be_visible()
+            check('Local setup starts directly at the bundled model', page.get_by_text('Streaming insertion', exact=True).count() == 0)
             if a.screenshot:
                 a.screenshot.parent.mkdir(parents=True, exist_ok=True)
                 page.screenshot(path=str(a.screenshot), full_page=True)

@@ -158,9 +158,17 @@ fn publish_verified(cache: &Path, input: impl Read, bytes: u64, hash: &str) -> R
     Ok(())
 }
 
-pub(crate) fn prepare_in_background(locale: &str) {
-    if locale != "zh-CN"
-        || (PREPARED.load(Ordering::Acquire) && cache_path().is_ok_and(|p| p.is_file()))
+pub(crate) fn prepare_for_preferences(prefs: &crate::types::UserPreferences) {
+    if prefs.active_asr_provider == "volcengine"
+        && prefs.owner_activity_only
+        && prefs.owner_content_recovery_locale == "zh-CN"
+    {
+        prepare_in_background();
+    }
+}
+
+pub(crate) fn prepare_in_background() {
+    if (PREPARED.load(Ordering::Acquire) && cache_path().is_ok_and(|p| p.is_file()))
         || PREPARING
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_err()

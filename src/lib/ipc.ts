@@ -282,10 +282,7 @@ let mockSettings: UserPreferences = {
   localAsrActiveModel: 'qwen3-asr-0.6b',
   localAsrMirror: 'huggingface',
   localAsrKeepLoadedSecs: 300,
-  foundryLocalAsrModel: 'whisper-small',
-  foundryLocalRuntimeSource: 'auto',
-  foundryLocalAsrLanguageHint: '',
-  foundryLocalAsrKeepLoadedSecs: 300,
+  localDictationKeepLoadedSecs: 300,
   historyRetentionDays: 7,
   polishContextWindowMinutes: 5,
   startMinimized: true,
@@ -1001,8 +998,8 @@ export async function setCredential(account: string, value: string): Promise<voi
   notifyCredentialsStatusChanged();
 }
 
-export async function setActiveAsrProvider(provider: string, modelAlias?: string, expectedProvider?: string): Promise<void> {
-  await invokeOrMock('set_active_asr_provider', { provider, ...(modelAlias ? { modelAlias } : {}), ...(expectedProvider ? { expectedProvider } : {}) }, () => undefined);
+export async function setActiveAsrProvider(provider: string, expectedProvider?: string): Promise<void> {
+  await invokeOrMock('set_active_asr_provider', { provider, ...(expectedProvider ? { expectedProvider } : {}) }, () => undefined);
   notifyCredentialsStatusChanged();
 }
 

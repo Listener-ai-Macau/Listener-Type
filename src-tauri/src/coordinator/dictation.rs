@@ -340,11 +340,6 @@ fn claim_post_dictation_key(inner: &Arc<Inner>, session_id: SessionId) -> bool {
     true
 }
 
-struct FoundryLanguageHintSelection {
-    hint: Option<String>,
-    source: &'static str,
-}
-
 include!("dictation_asr_selection.rs");
 
 fn note_embedded_asr_speech_activity(inner: &Arc<Inner>, session_id: SessionId) {
@@ -578,7 +573,7 @@ include!("dictation_target_speaker_update.rs");
 #[cfg(target_os = "windows")]
 include!("dictation_microphone_endpoint.rs");
 #[cfg(target_os = "windows")]
-include!("dictation_foundry_microphone.rs");
+include!("dictation_local_microphone.rs");
 
 fn qualified_owner_speech_end_ms(
     update: &crate::asr::volcengine::TargetSpeakerUpdate,
@@ -2387,28 +2382,11 @@ async fn build_embedded_audio_asr_consumer(
     }
     #[cfg(target_os = "windows")]
     if is_windows_local_asr_provider(active_asr) {
-        let prefs = inner.prefs.get();
-        let model_alias = if foundry::model_alias_is_known(&prefs.foundry_local_asr_model) {
-            prefs.foundry_local_asr_model.clone()
-        } else {
-            foundry::DEFAULT_MODEL_ALIAS.to_string()
-        };
-        let language_hint = foundry_language_hint_from_preferences(&prefs);
-        log::info!(
-            "[foundry-asr] language hint selected source={} hint={}",
-            language_hint.source,
-            language_hint.hint.as_deref().unwrap_or("auto")
-        );
-        let local = Arc::new(FoundryLocalWhisperAsr::new(
-            Arc::clone(&inner.foundry_local_runtime),
-            model_alias,
-            prefs.foundry_local_runtime_source.clone(),
-            language_hint.hint,
-        ).with_companion_final(true));
+        let local = Arc::new(CompanionDictationAsr::new());
         if !store_asr_for_session(
             inner,
             session_id,
-            ActiveAsr::FoundryLocalWhisper(Arc::clone(&local)),
+            ActiveAsr::CompanionParaformer(Arc::clone(&local)),
         ) { return Ok(None); }
         let consumer: Arc<dyn crate::recorder::AudioConsumer> = local;
         return Ok(Some((consumer, None)));
@@ -3557,28 +3535,28 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             }
         }
         #[cfg(target_os = "windows")]
-        ActiveAsr::FoundryLocalWhisper(local) => {
+        ActiveAsr::CompanionParaformer(local) => {
             debug_assert!(!uses_global_timeout);
             match local
-                .transcribe(foundry_audio_transcribe_timeout_duration())
+                .transcribe(local_dictation_transcribe_timeout())
                 .await
             {
                 Ok(mut r) => {
                     r.text = crate::asr::local::punctuation::restore_chinese_punctuation(r.text, false).await;
-                    schedule_foundry_local_asr_release(inner, current_session_id);
+                    schedule_local_punctuation_release(inner, current_session_id);
                     r
                 }
                 Err(e) => {
                     if inner.state.lock().cancelled {
                         log::info!(
-                            "[coord] Foundry Local Whisper transcribe cancelled — discarding transcript"
+                            "[coord] Companion Paraformer transcribe cancelled — discarding transcript"
                         );
-                        schedule_foundry_local_asr_release(inner, current_session_id);
+                        schedule_local_punctuation_release(inner, current_session_id);
                         restore_prepared_windows_ime_session(inner, current_session_id);
                         transition_pipeline_error_if_session_matches(inner, current_session_id);
                         return Ok(());
                     }
-                    log::error!("[coord] Foundry Local Whisper transcribe failed: {e:#}");
+                    log::error!("[coord] Companion Paraformer transcribe failed: {e:#}");
                     if source_integrity_must_stop(
                         inner,
                         current_session_id,
@@ -3587,7 +3565,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                     ) {
                         return Ok(());
                     }
-                    schedule_foundry_local_asr_release(inner, current_session_id);
+                    schedule_local_punctuation_release(inner, current_session_id);
                     finish_asr_failure_with_history(
                         inner,
                         current_session_id,

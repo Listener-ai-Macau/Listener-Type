@@ -1,22 +1,22 @@
 use crate::asr::volcengine::{LocalSpeechActivityState, LocalSpeechEvidence};
 
-const FOUNDRY_PREVIEW_FIRST_AUDIO_MS: u64 = 1_120;
-const FOUNDRY_PREVIEW_STEP_MS: u64 = 720;
-const FOUNDRY_PREVIEW_PREFIX_MS: u64 = 16_000;
-const FOUNDRY_PREVIEW_WINDOW_MS: usize = 6_000;
-const FOUNDRY_PREVIEW_TAIL_MS: u64 = 250;
+const LOCAL_PREVIEW_FIRST_AUDIO_MS: u64 = 1_120;
+const LOCAL_PREVIEW_STEP_MS: u64 = 720;
+const LOCAL_PREVIEW_PREFIX_MS: u64 = 16_000;
+const LOCAL_PREVIEW_WINDOW_MS: usize = 6_000;
+const LOCAL_PREVIEW_TAIL_MS: u64 = 250;
 const LOCAL_PHRASE_QUIET_MS: u64 = 720;
 const LOCAL_PHRASE_TAIL_MS: u64 = 200;
 const LOCAL_PHRASE_MIN_NEW_AUDIO_MS: u64 = 500;
 
-struct FoundryMicrophoneConsumer {
-    asr: Arc<FoundryLocalWhisperAsr>,
+struct LocalMicrophoneConsumer {
+    asr: Arc<CompanionDictationAsr>,
     capture: Mutex<(LocalSpeechActivity, u64)>,
     evidence: Arc<Mutex<LocalSpeechEvidence>>,
 }
 
-impl FoundryMicrophoneConsumer {
-    fn new(asr: Arc<FoundryLocalWhisperAsr>) -> Self {
+impl LocalMicrophoneConsumer {
+    fn new(asr: Arc<CompanionDictationAsr>) -> Self {
         let evidence = Arc::new(Mutex::new(LocalSpeechEvidence::default()));
         let activity = LocalSpeechActivity::with_native_endpoint_quality_timeline(
             Arc::clone(&evidence),
@@ -32,7 +32,7 @@ impl FoundryMicrophoneConsumer {
     }
 }
 
-impl crate::recorder::AudioConsumer for FoundryMicrophoneConsumer {
+impl crate::recorder::AudioConsumer for LocalMicrophoneConsumer {
     fn consume_pcm_chunk(&self, pcm: &[u8]) {
         if pcm.is_empty() || pcm.len() % 2 != 0 {
             return;
@@ -46,21 +46,21 @@ impl crate::recorder::AudioConsumer for FoundryMicrophoneConsumer {
     }
 }
 
-fn foundry_preview_end_ms(evidence: LocalSpeechEvidence, previous_end: u64) -> Option<u64> {
+fn local_preview_end_ms(evidence: LocalSpeechEvidence, previous_end: u64) -> Option<u64> {
     let end = match evidence.state {
         LocalSpeechActivityState::Speech => evidence.analyzed_through_ms,
         LocalSpeechActivityState::NonSpeech => evidence
             .last_detected_speech_end_ms?
-            .saturating_add(FOUNDRY_PREVIEW_TAIL_MS)
+            .saturating_add(LOCAL_PREVIEW_TAIL_MS)
             .min(evidence.analyzed_through_ms),
         LocalSpeechActivityState::Unknown | LocalSpeechActivityState::PendingSpeech => return None,
     };
-    (end >= FOUNDRY_PREVIEW_FIRST_AUDIO_MS
-        && end.saturating_sub(previous_end) >= FOUNDRY_PREVIEW_STEP_MS)
+    (end >= LOCAL_PREVIEW_FIRST_AUDIO_MS
+        && end.saturating_sub(previous_end) >= LOCAL_PREVIEW_STEP_MS)
         .then_some(end)
 }
 
-fn foundry_microphone_is_active(inner: &Arc<Inner>, owner: SessionId) -> bool {
+fn local_microphone_is_active(inner: &Arc<Inner>, owner: SessionId) -> bool {
     let state = inner.state.lock();
     state.session_id == owner
         && !state.cancelled
@@ -70,7 +70,7 @@ fn foundry_microphone_is_active(inner: &Arc<Inner>, owner: SessionId) -> bool {
         )
 }
 
-fn foundry_microphone_stop_due(
+fn local_microphone_stop_due(
     observation: &LocalVadStopObservation,
     captured_ms: u64,
     now: Instant,
@@ -103,13 +103,13 @@ fn local_phrase_boundary(evidence: LocalSpeechEvidence, delivered_end: u64) -> O
 }
 
 fn spawn_companion_phrase_delivery(
-    inner: Arc<Inner>, owner: SessionId, capture: Arc<FoundryMicrophoneConsumer>,
+    inner: Arc<Inner>, owner: SessionId, capture: Arc<LocalMicrophoneConsumer>,
 ) {
     async_runtime::spawn(async move {
         let mut attempted_cut = 0;
-        while foundry_microphone_is_active(&inner, owner) {
+        while local_microphone_is_active(&inner, owner) {
             tokio::time::sleep(Duration::from_millis(80)).await;
-            if !foundry_editor_target_is_listening(&inner, owner) {
+            if !local_editor_target_is_listening(&inner, owner) {
                 continue;
             }
             let delivered_end = capture.asr.local_phrase_prefix.lock().await.end_ms;
@@ -131,7 +131,7 @@ fn spawn_companion_phrase_delivery(
             }
             let Ok(phrase) = crate::asr::local::companion_paraformer::transcribe(
                 pcm.into(),
-                foundry_audio_transcribe_timeout_duration(),
+                local_dictation_transcribe_timeout(),
             ).await else {
                 continue;
             };
@@ -146,10 +146,10 @@ fn spawn_companion_phrase_delivery(
 }
 
 fn append_companion_phrase(
-    inner: &Arc<Inner>, owner: SessionId, asr: &Arc<FoundryLocalWhisperAsr>,
+    inner: &Arc<Inner>, owner: SessionId, asr: &Arc<CompanionDictationAsr>,
     start: u64, end: u64, phrase: &str,
 ) {
-    use crate::asr::local::foundry_provider::join_local_phrases;
+    use crate::asr::local::companion_provider::join_local_phrases;
 
     if phrase.trim().is_empty() || !crate::insertion::clipboard_transport_is_reversible() {
         return;
@@ -161,7 +161,7 @@ fn append_companion_phrase(
     // Serialize an accepted append and its audio boundary with the STOP
     // decoder. A late phrase can't advance the cut without dispatching.
     let mut prefix = asr.local_phrase_prefix.blocking_lock();
-    if prefix.end_ms != start || !foundry_editor_target_is_listening(inner, owner) {
+    if prefix.end_ms != start || !local_editor_target_is_listening(inner, owner) {
         return;
     }
     let raw = join_local_phrases(&prefix.raw_text, phrase.trim());
@@ -176,7 +176,7 @@ fn append_companion_phrase(
         return;
     }
     let key = embedded_audio_partial_preview_stability_key(&display);
-    if key.is_empty() || !foundry_editor_target_is_listening(inner, owner) {
+    if key.is_empty() || !local_editor_target_is_listening(inner, owner) {
         return;
     }
     pause_early_delivery_reserve(inner, owner, display.clone(), key.clone(), key);
@@ -185,7 +185,7 @@ fn append_companion_phrase(
     let result = crate::insertion::guarded_local_append_with_receipt(
         delta, shortcut, crate::insertion::SessionPasteScope {
             session_id: owner, previous_body: before, replace: false,
-        }, origin, move || foundry_editor_target_is_listening(&guard, owner),
+        }, origin, move || local_editor_target_is_listening(&guard, owner),
     );
     if matches!(result.status, InsertStatus::PasteSent | InsertStatus::Inserted) {
         pause_early_delivery_confirm(inner, owner);
@@ -200,16 +200,15 @@ fn append_companion_phrase(
     }
 }
 
-fn spawn_foundry_microphone_tasks(
+fn spawn_local_microphone_tasks(
     inner: &Arc<Inner>,
     owner: SessionId,
-    capture: Arc<FoundryMicrophoneConsumer>,
+    capture: Arc<LocalMicrophoneConsumer>,
     manual_trigger: bool,
 ) {
     // Native Ctrl sessions use the wake body's endpoint guard too. The
     // actual trigger tells us whether source zero belongs to manual speech.
-    let phrase_mode = capture.asr.uses_companion_final()
-        && streaming_composition_disabled_by_env()
+    let phrase_mode = streaming_composition_disabled_by_env()
         && manual_trigger;
     if phrase_mode {
         log::info!("[companion-paraformer] manual phrase delivery enabled session_id={owner}");
@@ -220,7 +219,7 @@ fn spawn_foundry_microphone_tasks(
     async_runtime::spawn(async move {
         let mut observation =
             LocalVadStopObservation::new(LocalSpeechEvidence::default(), Instant::now());
-        while foundry_microphone_is_active(&endpoint_inner, owner) {
+        while local_microphone_is_active(&endpoint_inner, owner) {
             tokio::time::sleep(Duration::from_millis(50)).await;
             let transition = {
                 // Use the latest analyzed window and the PCM frontier at the
@@ -234,7 +233,7 @@ fn spawn_foundry_microphone_tasks(
                     evidence.activity_epoch == 0 && evidence.last_detected_speech_end_ms.is_none();
                 let tail_analyzed = captured.1.saturating_sub(evidence.analyzed_through_samples)
                     <= 2 * crate::speech_vad_windows::VAD_WINDOW_SAMPLES as u64;
-                if foundry_microphone_stop_due(&observation, captured.1 / 16, now)
+                if local_microphone_stop_due(&observation, captured.1 / 16, now)
                     && (!no_speech || tail_analyzed)
                 {
                     let transition = claim_native_microphone_stop(&endpoint_inner, owner);
@@ -252,7 +251,7 @@ fn spawn_foundry_microphone_tasks(
                 }
             };
             if let Some(transition) = transition {
-                log::info!("[foundry-asr] microphone quiet stop session_id={owner}");
+                log::info!("[companion-paraformer] microphone quiet stop session_id={owner}");
                 let _ = finish_end_session_after_stop_transition(&endpoint_inner, transition).await;
                 break;
             }
@@ -270,18 +269,18 @@ fn spawn_foundry_microphone_tasks(
         let mut editor_checked = false;
         let mut previous_end = 0;
         let mut previous_text = String::new();
-        while foundry_microphone_is_active(&preview_inner, owner) {
+        while local_microphone_is_active(&preview_inner, owner) {
             tokio::time::sleep(Duration::from_millis(120)).await;
-            if !foundry_microphone_is_active(&preview_inner, owner) {
+            if !local_microphone_is_active(&preview_inner, owner) {
                 break;
             }
             let evidence = *capture.evidence.lock();
-            let Some(end) = foundry_preview_end_ms(evidence, previous_end) else {
+            let Some(end) = local_preview_end_ms(evidence, previous_end) else {
                 continue;
             };
             previous_end = end;
-            let complete = end <= FOUNDRY_PREVIEW_PREFIX_MS;
-            let window = if complete { end as usize } else { FOUNDRY_PREVIEW_WINDOW_MS };
+            let complete = end <= LOCAL_PREVIEW_PREFIX_MS;
+            let window = if complete { end as usize } else { LOCAL_PREVIEW_WINDOW_MS };
             let pcm = capture.asr.preview_pcm(end, window);
             let text = match crate::asr::local::companion_paraformer::preview(pcm).await {
                 Ok(Some(text)) => text,
@@ -292,7 +291,7 @@ fn spawn_foundry_microphone_tasks(
                 }
             };
             let text = crate::asr::local::punctuation::restore_chinese_punctuation(text, true).await;
-            if !foundry_microphone_is_active(&preview_inner, owner) {
+            if !local_microphone_is_active(&preview_inner, owner) {
                 break;
             }
             if text.is_empty() || text == previous_text {
@@ -307,13 +306,13 @@ fn spawn_foundry_microphone_tasks(
                 None,
             ) {
                 log::info!(
-                    "[foundry-asr] microphone preview session_id={owner} audio_ms={end} engine=companion-paraformer"
+                    "[companion-paraformer] microphone preview session_id={owner} audio_ms={end} engine=companion-paraformer"
                 );
                 if complete && !phrase_mode {
                     if streaming_composition_disabled_by_env() {
-                        foundry_native_editor_preview(&preview_inner, owner, &text).await;
+                        local_native_editor_preview(&preview_inner, owner, &text).await;
                     } else {
-                        publish_foundry_streaming_composition(
+                        publish_local_streaming_composition(
                             &preview_inner, owner, &text, &mut editor_checked,
                         ).await;
                     }
@@ -325,7 +324,7 @@ fn spawn_foundry_microphone_tasks(
 }
 
 #[cfg(test)]
-mod foundry_microphone_tests {
+mod local_microphone_tests {
     use super::*;
 
     #[test]
@@ -335,26 +334,26 @@ mod foundry_microphone_tests {
             analyzed_through_ms: 1_600,
             ..LocalSpeechEvidence::default()
         };
-        assert_eq!(foundry_preview_end_ms(speech, 0), Some(1_600));
+        assert_eq!(local_preview_end_ms(speech, 0), Some(1_600));
         assert_eq!(
-            foundry_preview_end_ms(LocalSpeechEvidence { analyzed_through_ms: 1_120, ..speech }, 0),
+            local_preview_end_ms(LocalSpeechEvidence { analyzed_through_ms: 1_120, ..speech }, 0),
             Some(1_120)
         );
         assert_eq!(
-            foundry_preview_end_ms(LocalSpeechEvidence { analyzed_through_ms: 1_119, ..speech }, 0),
+            local_preview_end_ms(LocalSpeechEvidence { analyzed_through_ms: 1_119, ..speech }, 0),
             None
         );
-        assert_eq!(foundry_preview_end_ms(speech, 1_600), None);
+        assert_eq!(local_preview_end_ms(speech, 1_600), None);
         let quiet = LocalSpeechEvidence {
             state: LocalSpeechActivityState::NonSpeech,
             analyzed_through_ms: 5_000,
             last_detected_speech_end_ms: Some(3_000),
             ..speech
         };
-        assert_eq!(foundry_preview_end_ms(quiet, 1_600), Some(3_250));
-        assert_eq!(foundry_preview_end_ms(quiet, 3_250), None);
+        assert_eq!(local_preview_end_ms(quiet, 1_600), Some(3_250));
+        assert_eq!(local_preview_end_ms(quiet, 3_250), None);
         assert_eq!(
-            foundry_preview_end_ms(
+            local_preview_end_ms(
                 LocalSpeechEvidence {
                     state: LocalSpeechActivityState::PendingSpeech,
                     ..quiet
@@ -410,8 +409,8 @@ mod foundry_microphone_tests {
             ..observation.evidence
         };
         observation.observe(quiet, now);
-        assert!(foundry_microphone_stop_due(&observation, 5_020, now));
-        assert!(!foundry_microphone_stop_due(&observation, 5_251, now));
+        assert!(local_microphone_stop_due(&observation, 5_020, now));
+        assert!(!local_microphone_stop_due(&observation, 5_251, now));
         observation.observe(
             LocalSpeechEvidence {
                 state: LocalSpeechActivityState::PendingSpeech,
@@ -422,7 +421,7 @@ mod foundry_microphone_tests {
             },
             now,
         );
-        assert!(!foundry_microphone_stop_due(&observation, 5_040, now));
+        assert!(!local_microphone_stop_due(&observation, 5_040, now));
         let initial = LocalVadStopObservation::new(
             LocalSpeechEvidence {
                 state: LocalSpeechActivityState::NonSpeech,
@@ -432,6 +431,6 @@ mod foundry_microphone_tests {
             },
             now,
         );
-        assert!(foundry_microphone_stop_due(&initial, 8_000, now));
+        assert!(local_microphone_stop_due(&initial, 8_000, now));
     }
 }

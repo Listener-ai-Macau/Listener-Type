@@ -170,6 +170,12 @@ fn merge_punctuation(original: &str, proposed: &str, preview: bool) -> String {
     out
 }
 
+fn punctuation_model_path() -> Option<std::path::PathBuf> {
+    crate::persistence::chinese_punctuation_model()
+        .ok()
+        .filter(|path| path.is_file())
+}
+
 static PUNCTUATION: Mutex<Option<Punctuation>> = Mutex::new(None);
 
 pub(crate) async fn release_punctuation() {
@@ -184,13 +190,7 @@ pub(crate) async fn restore_chinese_punctuation(text: String, preview: bool) -> 
     match tokio::task::spawn_blocking(move || {
         let mut slot = PUNCTUATION.lock();
         if slot.is_none() {
-            let path = crate::persistence::foundry_local_root()
-                .ok()?
-                .join("punctuation")
-                .join("model.int8.onnx");
-            if !path.is_file() {
-                return None;
-            }
+            let path = punctuation_model_path()?;
             static LOAD_FAILED: OnceLock<()> = OnceLock::new();
             if LOAD_FAILED.get().is_some() {
                 return None;
@@ -252,9 +252,9 @@ mod tests {
     #[test]
     #[ignore = "requires the verified optional CT-Transformer model in the local cache"]
     fn local_punctuation_runtime_restores_chinese() {
-        let model = crate::persistence::foundry_local_root()
-            .unwrap()
-            .join("punctuation/model.int8.onnx");
+        let Some(model) = punctuation_model_path() else {
+            return;
+        };
         let punctuator = Punctuation::open(&model).unwrap();
         let raw = "你好现在有用吗就是在这个预览那些东西能出得来吗";
         let suggestion = punctuator.propose(raw).unwrap();

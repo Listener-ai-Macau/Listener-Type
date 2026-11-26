@@ -54,7 +54,7 @@ pub(super) const CAPSULE_RECORDING_FRONTEND_TICK_MS: u64 = 50;
 pub(super) const COORDINATOR_GLOBAL_TIMEOUT_SECS: u64 = 15;
 
 #[cfg(target_os = "windows")]
-pub(super) fn foundry_audio_transcribe_timeout_duration() -> std::time::Duration {
+pub(super) fn local_dictation_transcribe_timeout() -> std::time::Duration {
     std::time::Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS)
 }
 

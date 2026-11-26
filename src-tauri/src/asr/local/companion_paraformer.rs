@@ -1,4 +1,5 @@
 pub(crate) const PROVIDER_ID: &str = "companion-paraformer-large";
+pub(crate) const RETIRED_WHISPER_PROVIDER_ID: &str = "foundry-local-whisper";
 
 pub(crate) fn is_provider(id: &str) -> bool {
     id.trim().eq_ignore_ascii_case(PROVIDER_ID)
@@ -6,7 +7,7 @@ pub(crate) fn is_provider(id: &str) -> bool {
 
 pub(crate) fn canonical_provider(id: &str) -> &str {
     if cfg!(target_os = "windows")
-        && (super::foundry::is_foundry_local_whisper(id) || super::is_local_qwen3(id))
+        && (id.trim().eq_ignore_ascii_case(RETIRED_WHISPER_PROVIDER_ID) || super::is_local_qwen3(id))
     {
         PROVIDER_ID
     } else {

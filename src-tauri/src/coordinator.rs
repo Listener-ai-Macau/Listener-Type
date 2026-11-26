@@ -24,7 +24,7 @@ use tokio::sync::Notify;
 use uuid::Uuid;
 
 #[cfg(target_os = "windows")]
-use crate::asr::local::{foundry, FoundryLocalRuntime, FoundryLocalWhisperAsr};
+use crate::asr::local::companion_provider::CompanionDictationAsr;
 use crate::asr::{
     BailianCredentials, BailianRealtimeASR, DictionaryHotword, RawTranscript,
     VolcengineCredentials, VolcengineStreamingASR, WhisperBatchASR,
@@ -177,7 +177,7 @@ use support::{
 #[allow(unused_imports)]
 use support::{
     capture_ime_submit_target, capture_ime_submit_target_for_window,
-    foundry_audio_transcribe_timeout_duration, windows_hwnd_is_present,
+    local_dictation_transcribe_timeout, windows_hwnd_is_present,
 };
 // Tests still need these symbols in the parent namespace.
 #[allow(unused_imports)]
@@ -198,7 +198,7 @@ enum ActiveAsr {
     Whisper(Arc<WhisperBatchASR>),
     Bailian(Arc<BailianRealtimeASR>),
     #[cfg(target_os = "windows")]
-    FoundryLocalWhisper(Arc<FoundryLocalWhisperAsr>),
+    CompanionParaformer(Arc<CompanionDictationAsr>),
     /// 本地 Qwen3-ASR；只在 macOS + 模型已下载时可达。
     #[cfg(target_os = "macos")]
     Local(Arc<crate::asr::local::LocalQwenAsr>),
@@ -257,7 +257,7 @@ struct PendingDeviceKeyBleAction {
 fn asr_transcribe_uses_global_timeout(asr: &ActiveAsr) -> bool {
     match asr {
         #[cfg(target_os = "windows")]
-        ActiveAsr::FoundryLocalWhisper(_) => false,
+        ActiveAsr::CompanionParaformer(_) => false,
         _ => true,
     }
 }
@@ -327,8 +327,6 @@ struct Inner {
     /// 本地 Qwen3-ASR 引擎缓存。跨会话复用，避免每次重加载 1.2GB+ 模型。
     /// 释放时机由 prefs.local_asr_keep_loaded_secs 决定。
     local_asr_cache: Arc<crate::asr::local::LocalAsrCache>,
-    #[cfg(target_os = "windows")]
-    foundry_local_runtime: Arc<FoundryLocalRuntime>,
     recorder: Mutex<Option<SessionResource<Recorder>>>,
     #[cfg(target_os = "windows")]
     microphone_wake: Arc<microphone_wake::Runtime>,
@@ -1127,7 +1125,7 @@ impl Coordinator {
     pub fn new() -> Self {
         #[cfg(target_os = "windows")]
         {
-            Self::new_with_foundry_runtime(Arc::new(FoundryLocalRuntime::new()))
+            Self::new_windows()
         }
 
         #[cfg(not(target_os = "windows"))]
@@ -1227,7 +1225,7 @@ impl Coordinator {
     }
 
     #[cfg(target_os = "windows")]
-    pub fn new_with_foundry_runtime(foundry_local_runtime: Arc<FoundryLocalRuntime>) -> Self {
+    fn new_windows() -> Self {
         let history = HistoryStore::new_or_empty();
         let prefs = PreferencesStore::new().expect("preferences store init");
         crate::embedded_ble::set_configured_bluetooth_target_name(&prefs.get().device_ble_name);
@@ -1320,7 +1318,6 @@ impl Coordinator {
                 qa_recorder: Mutex::new(None),
                 qa_stream_cancelled: Arc::new(AtomicBool::new(false)),
                 local_asr_cache: Arc::new(crate::asr::local::LocalAsrCache::new()),
-                foundry_local_runtime,
                 shutdown: AtomicBool::new(false),
             }),
         }
@@ -3589,7 +3586,7 @@ fn start_companion_paraformer_idle_reaper(inner: &Arc<Inner>) {
                 break;
             };
             let limit = Duration::from_secs(
-                foundry_local_asr_release_keep_secs(&inner).min(MAX_IDLE_SECS).into(),
+                local_dictation_keep_loaded_secs(&inner).min(MAX_IDLE_SECS).into(),
             );
             // Check the phase under the model lock, immediately before dropping it.
             if crate::asr::local::companion_paraformer::release_if_idle(limit, move || {
@@ -3604,31 +3601,27 @@ fn start_companion_paraformer_idle_reaper(inner: &Arc<Inner>) {
 }
 
 #[cfg(target_os = "windows")]
-fn foundry_local_asr_release_keep_secs(inner: &Arc<Inner>) -> u32 {
-    inner.prefs.get().foundry_local_asr_keep_loaded_secs
+fn local_dictation_keep_loaded_secs(inner: &Arc<Inner>) -> u32 {
+    inner.prefs.get().local_dictation_keep_loaded_secs
 }
 
 #[cfg(target_os = "windows")]
-fn foundry_release_session_is_current(inner: &Arc<Inner>, session_id: SessionId) -> bool {
+fn local_dictation_session_is_current(inner: &Arc<Inner>, session_id: SessionId) -> bool {
     inner.state.lock().session_id == session_id
 }
 
 #[cfg(target_os = "windows")]
-fn schedule_foundry_local_asr_release(inner: &Arc<Inner>, session_id: SessionId) {
-    let keep_secs = foundry_local_asr_release_keep_secs(inner);
-    let runtime = Arc::clone(&inner.foundry_local_runtime);
+fn schedule_local_punctuation_release(inner: &Arc<Inner>, session_id: SessionId) {
+    let keep_secs = local_dictation_keep_loaded_secs(inner);
     let inner = Arc::clone(inner);
     tauri::async_runtime::spawn(async move {
         if keep_secs > 0 {
             tokio::time::sleep(std::time::Duration::from_secs(keep_secs as u64)).await;
         }
-        if !foundry_release_session_is_current(&inner, session_id) {
+        if !local_dictation_session_is_current(&inner, session_id) {
             return;
         }
         crate::asr::local::punctuation::release_punctuation().await;
-        if let Err(error) = runtime.release_now().await {
-            log::warn!("[foundry-asr] scheduled release failed: {error:#}");
-        }
     });
 }
 

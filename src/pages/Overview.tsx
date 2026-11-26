@@ -52,7 +52,6 @@ const ASR_NAME_KEY_BY_ID: Record<string, string> = {
   zhipu: 'asrZhipu',
   groq: 'asrGroq',
   whisper: 'asrWhisper',
-  'foundry-local-whisper': 'asrFoundryLocalWhisper',
   'companion-paraformer-large': 'asrCompanionParaformer',
   'local-qwen3': 'asrLocalQwen3',
 };

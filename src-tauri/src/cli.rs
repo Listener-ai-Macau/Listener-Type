@@ -62,7 +62,7 @@ pub enum CliIntent {
     PromptEmbeddedBlePairingOnly { expected_name: Option<String> },
     /// 调试 / 自动化入口：清理 Windows 里残留的 Listener 配对和 PnP 缓存。
     CleanupEmbeddedBlePairing { expected_name: Option<String> },
-    /// 内部隔离进程：加载缓存的 Foundry 模型并通过 stdin/stdout 确认唤醒词。
+    /// 内部隔离进程：使用语音唤醒模型并通过 stdin/stdout 确认唤醒词。
     LocalWakeHelper,
     /// 内部隔离进程：内存中的整段音频补漏，不参与UI、声纹登记或结束钟。
     ContentRecoveryHelper,

@@ -1434,18 +1434,9 @@ pub struct UserPreferences {
     /// 默认 300（5 分钟）：兼顾连续听写不重加载、长时间不用释放 1.2GB+ RAM。
     #[serde(default = "default_local_asr_keep_loaded_secs")]
     pub local_asr_keep_loaded_secs: u32,
-    /// Windows Foundry Local Whisper 当前激活的模型 alias。
-    #[serde(default = "default_foundry_local_asr_model")]
-    pub foundry_local_asr_model: String,
-    /// Windows Foundry Local native runtime 下载源："auto" / "nuget" / "ort-nightly"。
-    #[serde(default = "default_foundry_local_runtime_source")]
-    pub foundry_local_runtime_source: String,
-    /// Windows Foundry Local Whisper 语言 hint。空字符串 = 自动检测。
-    #[serde(default)]
-    pub foundry_local_asr_language_hint: String,
-    /// Windows Foundry Local Whisper 模型在 runtime 中保持加载多久。
+    /// Windows Paraformer model idle retention preference.
     #[serde(default = "default_local_asr_keep_loaded_secs")]
-    pub foundry_local_asr_keep_loaded_secs: u32,
+    pub local_dictation_keep_loaded_secs: u32,
     /// Auto-update 渠道偏好。当前固定为 stable，保留字段用于兼容旧配置。
     #[serde(default)]
     pub update_channel: UpdateChannel,
@@ -1537,14 +1528,6 @@ fn default_local_asr_mirror() -> String {
 
 fn default_local_asr_keep_loaded_secs() -> u32 {
     300
-}
-
-fn default_foundry_local_asr_model() -> String {
-    crate::asr::local::foundry::DEFAULT_MODEL_ALIAS.into()
-}
-
-fn default_foundry_local_runtime_source() -> String {
-    "auto".into()
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1695,14 +1678,10 @@ struct UserPreferencesWire {
     local_asr_mirror: String,
     #[serde(default = "default_local_asr_keep_loaded_secs")]
     local_asr_keep_loaded_secs: u32,
-    #[serde(default = "default_foundry_local_asr_model")]
-    foundry_local_asr_model: String,
-    #[serde(default = "default_foundry_local_runtime_source")]
-    foundry_local_runtime_source: String,
     #[serde(default)]
-    foundry_local_asr_language_hint: String,
-    #[serde(default = "default_local_asr_keep_loaded_secs")]
-    foundry_local_asr_keep_loaded_secs: u32,
+    local_dictation_keep_loaded_secs: Option<u32>,
+    #[serde(default)]
+    foundry_local_asr_keep_loaded_secs: Option<u32>,
     #[serde(default)]
     update_channel: UpdateChannel,
     #[serde(default = "default_history_retention_days")]
@@ -1806,10 +1785,8 @@ impl Default for UserPreferencesWire {
             local_asr_active_model: prefs.local_asr_active_model,
             local_asr_mirror: prefs.local_asr_mirror,
             local_asr_keep_loaded_secs: prefs.local_asr_keep_loaded_secs,
-            foundry_local_asr_model: prefs.foundry_local_asr_model,
-            foundry_local_runtime_source: prefs.foundry_local_runtime_source,
-            foundry_local_asr_language_hint: prefs.foundry_local_asr_language_hint,
-            foundry_local_asr_keep_loaded_secs: prefs.foundry_local_asr_keep_loaded_secs,
+            local_dictation_keep_loaded_secs: None,
+            foundry_local_asr_keep_loaded_secs: None,
             update_channel: prefs.update_channel,
             history_retention_days: prefs.history_retention_days,
             polish_context_window_minutes: prefs.polish_context_window_minutes,
@@ -2029,13 +2006,9 @@ impl<'de> Deserialize<'de> for UserPreferences {
             local_asr_active_model: wire.local_asr_active_model,
             local_asr_mirror: wire.local_asr_mirror,
             local_asr_keep_loaded_secs: wire.local_asr_keep_loaded_secs,
-            foundry_local_asr_model: wire.foundry_local_asr_model,
-            foundry_local_runtime_source:
-                crate::asr::local::foundry_native::normalize_runtime_source_str(
-                    &wire.foundry_local_runtime_source,
-                ),
-            foundry_local_asr_language_hint: wire.foundry_local_asr_language_hint,
-            foundry_local_asr_keep_loaded_secs: wire.foundry_local_asr_keep_loaded_secs,
+            local_dictation_keep_loaded_secs: wire.local_dictation_keep_loaded_secs
+                .or(wire.foundry_local_asr_keep_loaded_secs)
+                .unwrap_or_else(default_local_asr_keep_loaded_secs),
             update_channel: wire.update_channel,
             history_retention_days: wire.history_retention_days,
             polish_context_window_minutes: wire.polish_context_window_minutes,
@@ -2468,10 +2441,7 @@ impl Default for UserPreferences {
             local_asr_active_model: default_local_asr_model(),
             local_asr_mirror: default_local_asr_mirror(),
             local_asr_keep_loaded_secs: default_local_asr_keep_loaded_secs(),
-            foundry_local_asr_model: default_foundry_local_asr_model(),
-            foundry_local_runtime_source: default_foundry_local_runtime_source(),
-            foundry_local_asr_language_hint: String::new(),
-            foundry_local_asr_keep_loaded_secs: default_local_asr_keep_loaded_secs(),
+            local_dictation_keep_loaded_secs: default_local_asr_keep_loaded_secs(),
             update_channel: UpdateChannel::default(),
             history_retention_days: default_history_retention_days(),
             polish_context_window_minutes: default_polish_context_window_minutes(),

@@ -246,7 +246,7 @@ async fn streaming_composition_update_tick(
 }
 
 #[cfg(target_os = "windows")]
-async fn publish_foundry_streaming_composition(
+async fn publish_local_streaming_composition(
     inner: &Arc<Inner>, session_id: SessionId, text: &str, editor_checked: &mut bool,
 ) {
     if streaming_composition_disabled_by_env() || !inner.prefs.get().streaming_insert

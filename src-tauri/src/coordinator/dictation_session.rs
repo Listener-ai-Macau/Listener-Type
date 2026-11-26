@@ -347,32 +347,15 @@ async fn begin_microphone_session(inner: &Arc<Inner>, translation: bool, wake_to
     // 窗口（50-200ms）内 → 开头几个字物理上录不到。详见 issue 备注。
     #[cfg(target_os = "windows")]
     if is_windows_local_asr_provider(&active_asr) {
-        let prefs = inner.prefs.get();
-        let model_alias = if foundry::model_alias_is_known(&prefs.foundry_local_asr_model) {
-            prefs.foundry_local_asr_model.clone()
-        } else {
-            foundry::DEFAULT_MODEL_ALIAS.to_string()
-        };
-        let language_hint = foundry_language_hint_from_preferences(&prefs);
-        log::info!(
-            "[foundry-asr] language hint selected source={} hint={}",
-            language_hint.source,
-            language_hint.hint.as_deref().unwrap_or("auto")
-        );
-        let local = Arc::new(FoundryLocalWhisperAsr::new(
-            Arc::clone(&inner.foundry_local_runtime),
-            model_alias,
-            prefs.foundry_local_runtime_source.clone(),
-            language_hint.hint,
-        ).with_companion_final(true));
+        let local = Arc::new(CompanionDictationAsr::new());
         if !store_asr_for_session(
             inner,
             current_session_id,
-            ActiveAsr::FoundryLocalWhisper(Arc::clone(&local)),
+            ActiveAsr::CompanionParaformer(Arc::clone(&local)),
         ) { return Ok(()); }
-        let capture = Arc::new(FoundryMicrophoneConsumer::new(local));
+        let capture = Arc::new(LocalMicrophoneConsumer::new(local));
         if start_recorder_for_starting(inner, current_session_id, &active_asr, capture.clone()).await? {
-            spawn_foundry_microphone_tasks(inner, current_session_id, capture, wake_token.is_none());
+            spawn_local_microphone_tasks(inner, current_session_id, capture, wake_token.is_none());
             finish_starting_session(inner, current_session_id).await;
         }
         return Ok(());

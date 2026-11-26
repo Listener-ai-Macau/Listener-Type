@@ -5,12 +5,10 @@
 
 pub mod cache;
 pub mod download;
-pub mod foundry;
-pub mod foundry_native;
-pub mod foundry_provider;
-pub mod foundry_runtime;
 #[cfg(target_os = "windows")]
-mod foundry_language;
+pub(crate) mod companion_provider;
+#[cfg(target_os = "windows")]
+mod wake_audio;
 mod local_provider;
 pub mod models;
 pub mod paraformer;
@@ -21,10 +19,6 @@ pub mod test_run;
 pub mod wake_helper;
 
 pub use cache::LocalAsrCache;
-#[allow(unused_imports)]
-pub use foundry_provider::FoundryLocalWhisperAsr;
-#[allow(unused_imports)]
-pub use foundry_runtime::FoundryLocalRuntime;
 
 #[cfg(target_os = "macos")]
 mod qwen_engine;
@@ -36,7 +30,9 @@ pub use local_provider::LocalQwenAsr;
 #[cfg(target_os = "macos")]
 pub use qwen_engine::QwenAsrEngine;
 
+#[cfg(target_os = "macos")]
 pub use download::{DownloadManager, Mirror};
+#[cfg(target_os = "macos")]
 pub use models::{ModelId, ModelStatus};
 
 /// 本地 Qwen3-ASR 在 active_asr 字段里的标识；与前端 ASR_PRESETS 的 id 对齐。

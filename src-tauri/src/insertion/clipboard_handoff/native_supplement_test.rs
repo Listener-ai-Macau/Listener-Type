@@ -67,7 +67,7 @@ fn saved_revisable_frames_write_only_the_owned_range_and_confirm_without_second_
         let (reply, result) = mpsc::channel();
         commands.send(Command::Revisable(text.into(), PasteShortcut::CtrlV, SessionPasteScope {
             session_id: session, previous_body: previous.into(), replace: !previous.is_empty(),
-        }, reply)).unwrap();
+        }, None, reply)).unwrap();
         result.recv_timeout(Duration::from_secs(8)).unwrap()
     };
     let send_draft = |text: &str, session, previous: &str| {

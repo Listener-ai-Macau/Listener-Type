@@ -3130,7 +3130,9 @@ fn dictation_asr_quality_warning_marks_non_core_engines() {
     assert_eq!(dictation_asr_engine_backend_id("volcengine"), "volcengine");
     assert!(dictation_asr_uses_core_accurate_engine("volcengine"));
     assert_eq!(dictation_asr_quality_warning("volcengine"), None);
-    assert_eq!(dictation_asr_quality_warning("foundry-local-whisper"), None);
+    assert_eq!(dictation_asr_quality_warning(
+        crate::asr::local::companion_paraformer::PROVIDER_ID,
+    ), None);
 
     assert_eq!(
         dictation_asr_engine_backend_id("whisper"),

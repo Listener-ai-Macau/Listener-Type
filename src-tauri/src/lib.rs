@@ -512,24 +512,8 @@ fn load_owned_cli_ota_package(
     Ok((manifest, bytes, hash))
 }
 
-fn construct_business_services() -> (
-    Arc<coordinator::Coordinator>,
-    Arc<asr::local::DownloadManager>,
-    Arc<asr::local::FoundryLocalRuntime>,
-) {
-    let foundry_local_runtime = Arc::new(asr::local::FoundryLocalRuntime::new());
-    #[cfg(target_os = "windows")]
-    let coordinator = Arc::new(coordinator::Coordinator::new_with_foundry_runtime(
-        Arc::clone(&foundry_local_runtime),
-    ));
-    #[cfg(not(target_os = "windows"))]
-    let coordinator = Arc::new(coordinator::Coordinator::new());
-    let local_asr_download_manager = Arc::new(asr::local::DownloadManager::new());
-    (
-        coordinator,
-        local_asr_download_manager,
-        foundry_local_runtime,
-    )
+fn construct_business_services() -> Arc<coordinator::Coordinator> {
+    Arc::new(coordinator::Coordinator::new())
 }
 
 fn construct_business_services_if_needed<T>(
@@ -719,15 +703,15 @@ pub fn run() {
                 }
                 embedded_ble::warm_native_windows_hid_present_pairing_snapshot();
             }
-            let (coordinator, local_asr_download_manager, foundry_local_runtime) =
+            let coordinator =
                 construct_business_services_if_needed(
                     first_run_intent.as_ref(),
                     construct_business_services,
                 )
                 .expect("normal startup must construct business services");
             app.manage(coordinator.clone());
-            app.manage(local_asr_download_manager.clone());
-            app.manage(foundry_local_runtime.clone());
+            #[cfg(target_os = "macos")]
+            app.manage(Arc::new(asr::local::DownloadManager::new()));
             app.manage(commands::MicrophoneMonitorState::new(None));
             app.manage(commands::TrayMicrophoneMenuState::new(Vec::new()));
             log::info!(
@@ -866,8 +850,8 @@ pub fn run() {
             let app_handle = app.handle().clone();
             coordinator.bind_app(app_handle);
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
-            crate::asr::content_recovery_assets::prepare_in_background(
-                &coordinator.prefs().get().owner_content_recovery_locale,
+            crate::asr::content_recovery_assets::prepare_for_preferences(
+                &coordinator.prefs().get(),
             );
             let wake_phrase = coordinator.prefs().get().voice_wake_phrase;
             #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
@@ -1107,18 +1091,31 @@ pub fn run() {
             commands::set_combo_hotkey,
             commands::validate_provider_credentials,
             commands::list_provider_models,
+            #[cfg(target_os = "macos")]
             commands::local_asr_get_settings,
+            #[cfg(target_os = "macos")]
             commands::local_asr_set_active_model,
+            #[cfg(target_os = "macos")]
             commands::local_asr_set_mirror,
+            #[cfg(target_os = "macos")]
             commands::local_asr_list_models,
+            #[cfg(target_os = "macos")]
             commands::local_asr_fetch_remote_info,
+            #[cfg(target_os = "macos")]
             commands::local_asr_download_model,
+            #[cfg(target_os = "macos")]
             commands::local_asr_cancel_download,
+            #[cfg(target_os = "macos")]
             commands::local_asr_delete_model,
+            #[cfg(target_os = "macos")]
             commands::local_asr_test_model,
+            #[cfg(target_os = "macos")]
             commands::local_asr_engine_status,
+            #[cfg(target_os = "macos")]
             commands::local_asr_release_engine,
+            #[cfg(target_os = "macos")]
             commands::local_asr_preload,
+            #[cfg(target_os = "macos")]
             commands::local_asr_set_keep_loaded_secs,
             commands::export_error_log,
             commands::export_diagnostic_package,
@@ -2569,12 +2566,6 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
         }
     };
 
-    let foundry_local_runtime = Arc::new(asr::local::FoundryLocalRuntime::new());
-    #[cfg(target_os = "windows")]
-    let coordinator = Arc::new(coordinator::Coordinator::new_with_foundry_runtime(
-        Arc::clone(&foundry_local_runtime),
-    ));
-    #[cfg(not(target_os = "windows"))]
     let coordinator = Arc::new(coordinator::Coordinator::new());
     sync_headless_embedded_ble_target_name_from_firmware(&coordinator);
 

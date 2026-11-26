@@ -4771,50 +4771,32 @@ fn window_key_matcher_mirrors_windows_trigger_aliases() {
 }
 
 #[test]
-fn foundry_local_provider_is_keyless_and_not_whisper_compatible() {
+fn companion_local_provider_is_keyless_and_not_whisper_compatible() {
     #[cfg(target_os = "windows")]
     assert!(is_keyless_local_asr_provider(
-        crate::asr::local::foundry::PROVIDER_ID
+        crate::asr::local::companion_paraformer::PROVIDER_ID
     ));
     #[cfg(not(target_os = "windows"))]
     assert!(!is_keyless_local_asr_provider(
-        crate::asr::local::foundry::PROVIDER_ID
+        crate::asr::local::companion_paraformer::PROVIDER_ID
     ));
     assert!(!is_whisper_compatible_provider(
-        crate::asr::local::foundry::PROVIDER_ID
+        crate::asr::local::companion_paraformer::PROVIDER_ID
     ));
 }
 
 #[cfg(target_os = "windows")]
 #[test]
-fn coordinator_shares_app_foundry_runtime() {
-    let runtime = Arc::new(crate::asr::local::FoundryLocalRuntime::new());
-    let coordinator = Coordinator::new_with_foundry_runtime(Arc::clone(&runtime));
-
-    assert!(Arc::ptr_eq(
-        &runtime,
-        &coordinator.inner.foundry_local_runtime
-    ));
-}
-
-#[cfg(target_os = "windows")]
-#[test]
-fn foundry_transcribe_skips_global_timeout_for_first_run_provisioning() {
-    let provider = Arc::new(crate::asr::local::FoundryLocalWhisperAsr::new(
-        Arc::new(crate::asr::local::FoundryLocalRuntime::new()),
-        crate::asr::local::foundry::DEFAULT_MODEL_ALIAS.to_string(),
-        "auto".to_string(),
-        None,
-    ));
-    let active_asr = ActiveAsr::FoundryLocalWhisper(provider);
-
+fn local_dictation_owns_its_transcription_timeout() {
+    let provider = Arc::new(crate::asr::local::companion_provider::CompanionDictationAsr::new());
+    let active_asr = ActiveAsr::CompanionParaformer(provider);
     assert!(!asr_transcribe_uses_global_timeout(&active_asr));
 }
 
 #[cfg(target_os = "windows")]
 #[test]
-fn foundry_audio_transcribe_timeout_is_separate_from_prepare() {
-    let timeout = foundry_audio_transcribe_timeout_duration();
+fn local_dictation_transcribe_timeout_is_bounded() {
+    let timeout = local_dictation_transcribe_timeout();
 
     assert_eq!(
         timeout,
@@ -4860,32 +4842,30 @@ fn local_qwen_timeout_handles_zero_duration() {
 
 #[cfg(target_os = "windows")]
 #[test]
-fn foundry_release_uses_foundry_keep_loaded_preference() {
-    let runtime = Arc::new(crate::asr::local::FoundryLocalRuntime::new());
-    let coordinator = Coordinator::new_with_foundry_runtime(runtime);
+fn local_dictation_uses_its_own_keep_loaded_preference() {
+    let coordinator = Coordinator::new();
     let mut prefs = coordinator.inner.prefs.get();
     prefs.local_asr_keep_loaded_secs = 3;
-    prefs.foundry_local_asr_keep_loaded_secs = 7;
+    prefs.local_dictation_keep_loaded_secs = 7;
     coordinator.inner.prefs.set(prefs).unwrap();
 
-    assert_eq!(foundry_local_asr_release_keep_secs(&coordinator.inner), 7);
+    assert_eq!(local_dictation_keep_loaded_secs(&coordinator.inner), 7);
 }
 
 #[cfg(target_os = "windows")]
 #[test]
-fn foundry_release_guard_rejects_stale_session() {
-    let runtime = Arc::new(crate::asr::local::FoundryLocalRuntime::new());
-    let coordinator = Coordinator::new_with_foundry_runtime(runtime);
+fn local_punctuation_release_guard_rejects_stale_session() {
+    let coordinator = Coordinator::new();
     let old_session_id = coordinator.inner.state.lock().session_id;
 
-    assert!(foundry_release_session_is_current(
+    assert!(local_dictation_session_is_current(
         &coordinator.inner,
         old_session_id
     ));
 
     coordinator.inner.state.lock().session_id = new_session_id();
 
-    assert!(!foundry_release_session_is_current(
+    assert!(!local_dictation_session_is_current(
         &coordinator.inner,
         old_session_id
     ));

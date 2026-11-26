@@ -356,41 +356,14 @@ pub fn asr_trace_path_for_session(session_id: &str) -> Result<PathBuf> {
     Ok(recordings_root()?.join(format!("{session_id}.asr-trace.json")))
 }
 
-/// Foundry Local 下载与缓存根目录。DLL 和模型都不打进安装包，和 Qwen3-ASR
-/// 一样放在 Listener Type 的 models 目录下，卸载清理用户数据时可以一起删除。
 #[cfg(target_os = "windows")]
-pub fn foundry_local_root() -> Result<PathBuf> {
-    let dir = data_dir()?.join("models").join("foundry-local");
-    ensure_dir(&dir)?;
-    Ok(dir)
-}
-
-#[cfg(target_os = "windows")]
-pub fn foundry_native_runtime_root() -> Result<PathBuf> {
-    let dir = foundry_local_root()?.join("runtime");
-    ensure_dir(&dir)?;
-    Ok(dir)
-}
-
-#[cfg(target_os = "windows")]
-pub fn foundry_model_cache_root() -> Result<PathBuf> {
-    let dir = foundry_local_root()?;
-    ensure_dir(&dir)?;
-    Ok(dir)
-}
-
-#[cfg(target_os = "windows")]
-pub fn foundry_app_data_root() -> Result<PathBuf> {
-    let dir = foundry_local_root()?.join("app-data");
-    ensure_dir(&dir)?;
-    Ok(dir)
-}
-
-#[cfg(target_os = "windows")]
-pub fn foundry_logs_root() -> Result<PathBuf> {
-    let dir = foundry_local_root()?.join("logs");
-    ensure_dir(&dir)?;
-    Ok(dir)
+pub(crate) fn chinese_punctuation_model() -> Result<PathBuf> {
+    let models = data_dir()?.join("models");
+    let current = models.join("local-punctuation/model.int8.onnx");
+    if current.is_file() {
+        return Ok(current);
+    }
+    Ok(models.join("foundry-local/punctuation/model.int8.onnx"))
 }
 
 /// Atomic write: write to `*.tmp` first, then replace the target path.
@@ -486,6 +459,17 @@ fn read_preferences(path: &Path) -> Result<UserPreferences> {
         .and_then(|value| value.get("activeAsrProvider"))
         .and_then(|provider| provider.as_str())
         .is_some_and(|provider| provider != prefs.active_asr_provider);
+    let retired_local_fields_present = cfg!(target_os = "windows")
+        && raw_prefs.as_ref().is_some_and(|value| {
+            [
+                "foundryLocalAsrModel",
+                "foundryLocalRuntimeSource",
+                "foundryLocalAsrLanguageHint",
+                "foundryLocalAsrKeepLoadedSecs",
+            ]
+            .iter()
+            .any(|key| value.get(key).is_some())
+        });
     let streaming_default_migrated = raw_prefs
         .as_ref()
         .and_then(|value| {
@@ -554,6 +538,7 @@ fn read_preferences(path: &Path) -> Result<UserPreferences> {
         || !device_led_brightness_102_default_migrated
         || !active_asr_provider_default_migrated
         || local_provider_migrated
+        || retired_local_fields_present
         || !remove_filler_words_default_migrated
     {
         match serde_json::to_vec_pretty(&prefs)
@@ -3299,7 +3284,7 @@ mod tests {
         let expected = if cfg!(target_os = "windows") {
             crate::asr::local::companion_paraformer::PROVIDER_ID
         } else {
-            crate::asr::local::foundry::PROVIDER_ID
+            crate::asr::local::companion_paraformer::RETIRED_WHISPER_PROVIDER_ID
         };
         assert_eq!(
             prefs.active_asr_provider,

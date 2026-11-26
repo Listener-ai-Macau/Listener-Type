@@ -1,15 +1,13 @@
 use super::device::*;
-#[cfg(target_os = "windows")]
-use super::release_foundry_runtime_if_inactive;
 use super::*;
 use super::{
-    active_asr_is_keyless_for_validation, active_foundry_model_from_prefs,
+    active_asr_is_keyless_for_validation,
     asr_configured_for_provider, asr_transcriptions_url, diagnostic_recent_errors,
     fetch_provider_models, fetch_provider_models_cached, is_diagnostic_error_line,
     is_gemini_base_url, is_valid_local_pack_id, is_valid_session_id, llm_configured_for_provider,
-    local_asr_release_plan_for_provider, models_url, normalize_foundry_language_hint,
+    models_url,
     parse_gemini_model_ids, parse_model_ids, persist_settings, provider_models_cache,
-    sanitize_diagnostic_log_line, validate_foundry_model_alias, ProviderConfig, SettingsWriter,
+    sanitize_diagnostic_log_line, ProviderConfig, SettingsWriter,
 };
 use crate::coordinator::Coordinator;
 use crate::embedded_audio::{SessionEndReason, SessionErrorCode, SessionStats};
@@ -3229,35 +3227,35 @@ fn credentials_status_follows_active_asr_provider_requirements() {
         &whisper_keyless_ready
     ));
 
-    assert!(asr_configured_for_provider(
+    assert_eq!(asr_configured_for_provider(
         crate::asr::local::PROVIDER_ID,
         &snapshot()
-    ));
+    ), cfg!(any(target_os = "windows", target_os = "macos")));
     #[cfg(target_os = "windows")]
     assert!(asr_configured_for_provider(
-        crate::asr::local::foundry::PROVIDER_ID,
+        crate::asr::local::companion_paraformer::PROVIDER_ID,
         &snapshot()
     ));
     #[cfg(not(target_os = "windows"))]
     assert!(!asr_configured_for_provider(
-        crate::asr::local::foundry::PROVIDER_ID,
+        crate::asr::local::companion_paraformer::PROVIDER_ID,
         &snapshot()
     ));
 }
 
 #[test]
-fn credentials_status_treats_foundry_local_asr_as_configured() {
+fn credentials_status_treats_companion_local_asr_as_configured() {
     #[cfg(target_os = "windows")]
     {
         assert!(asr_configured_for_provider(
-            crate::asr::local::foundry::PROVIDER_ID,
+            crate::asr::local::companion_paraformer::PROVIDER_ID,
             &CredentialsSnapshot::default()
         ));
     }
     #[cfg(not(target_os = "windows"))]
     {
         assert!(!asr_configured_for_provider(
-            crate::asr::local::foundry::PROVIDER_ID,
+            crate::asr::local::companion_paraformer::PROVIDER_ID,
             &CredentialsSnapshot::default()
         ));
     }
@@ -3265,78 +3263,19 @@ fn credentials_status_treats_foundry_local_asr_as_configured() {
 
 #[test]
 fn local_asr_providers_skip_external_validation() {
-    assert!(active_asr_is_keyless_for_validation(
+    assert_eq!(active_asr_is_keyless_for_validation(
         crate::asr::local::PROVIDER_ID
-    ));
+    ), cfg!(any(target_os = "windows", target_os = "macos")));
     #[cfg(target_os = "windows")]
     assert!(active_asr_is_keyless_for_validation(
-        crate::asr::local::foundry::PROVIDER_ID
+        crate::asr::local::companion_paraformer::PROVIDER_ID
     ));
     #[cfg(not(target_os = "windows"))]
     assert!(!active_asr_is_keyless_for_validation(
-        crate::asr::local::foundry::PROVIDER_ID
+        crate::asr::local::companion_paraformer::PROVIDER_ID
     ));
     assert!(!active_asr_is_keyless_for_validation("volcengine"));
     assert!(!active_asr_is_keyless_for_validation("whisper"));
-}
-
-#[test]
-fn provider_switch_release_plan_covers_inactive_local_runtimes() {
-    let qwen = local_asr_release_plan_for_provider(crate::asr::local::PROVIDER_ID);
-    assert!(!qwen.qwen);
-    assert!(qwen.foundry);
-
-    let foundry = local_asr_release_plan_for_provider(crate::asr::local::foundry::PROVIDER_ID);
-    assert!(foundry.qwen);
-    assert!(!foundry.foundry);
-
-    let cloud = local_asr_release_plan_for_provider("volcengine");
-    assert!(cloud.qwen);
-    assert!(cloud.foundry);
-}
-
-#[cfg(target_os = "windows")]
-#[tokio::test]
-async fn provider_switch_release_requests_foundry_prepare_cancel_first() {
-    let runtime = std::sync::Arc::new(crate::asr::local::FoundryLocalRuntime::new());
-
-    release_foundry_runtime_if_inactive(&runtime, true).await;
-
-    assert!(runtime.cancel_prepare_requested_for_tests());
-}
-
-#[test]
-fn foundry_language_hint_accepts_empty_and_lowercase_iso_639_1() {
-    assert_eq!(normalize_foundry_language_hint("").unwrap(), "");
-    assert_eq!(normalize_foundry_language_hint("   ").unwrap(), "");
-    assert_eq!(normalize_foundry_language_hint("zh").unwrap(), "zh");
-    assert_eq!(normalize_foundry_language_hint(" en ").unwrap(), "en");
-}
-
-#[test]
-fn foundry_language_hint_rejects_non_lowercase_iso_639_1() {
-    assert!(normalize_foundry_language_hint("ZH").is_err());
-    assert!(normalize_foundry_language_hint("zho").is_err());
-    assert!(normalize_foundry_language_hint("z1").is_err());
-}
-
-#[test]
-fn foundry_model_alias_validation_rejects_unknown_alias() {
-    assert!(validate_foundry_model_alias(crate::asr::local::foundry::DEFAULT_MODEL_ALIAS).is_ok());
-    assert!(validate_foundry_model_alias("whisper-large").is_err());
-}
-
-#[test]
-fn foundry_active_model_pref_falls_back_to_default_for_unknown_alias() {
-    let prefs = UserPreferences {
-        foundry_local_asr_model: "whisper-large".to_string(),
-        ..Default::default()
-    };
-
-    assert_eq!(
-        active_foundry_model_from_prefs(&prefs),
-        crate::asr::local::foundry::DEFAULT_MODEL_ALIAS
-    );
 }
 
 #[test]

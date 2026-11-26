@@ -534,14 +534,8 @@ export interface UserPreferences {
   /** 本地 ASR 引擎在内存中的保留时长（秒）。0 = 说完话即释放；
    *  300 = 默认 5 分钟；86400 ≈ 不释放（保持加载）。 */
   localAsrKeepLoadedSecs: number;
-  /** Windows Foundry Local Whisper 当前激活的模型 alias。 */
-  foundryLocalAsrModel: string;
-  /** Windows Foundry Local native runtime 下载源。 */
-  foundryLocalRuntimeSource: string;
-  /** Windows Foundry Local Whisper 语言 hint。空字符串表示自动检测。 */
-  foundryLocalAsrLanguageHint: string;
-  /** Windows Foundry Local Whisper 模型在 runtime 中保持加载的秒数。 */
-  foundryLocalAsrKeepLoadedSecs: number;
+  /** Windows Paraformer idle retention in seconds. */
+  localDictationKeepLoadedSecs: number;
   /** 历史记录保留天数。0 = 不按时间清理（仍受 200 条上限）。默认 7。 */
   historyRetentionDays: number;
   /** 对话感知 polish 上下文窗口（分钟）。0 = 关闭。默认 5。详见 PR-A。 */

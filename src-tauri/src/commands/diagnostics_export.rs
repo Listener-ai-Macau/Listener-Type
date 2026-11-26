@@ -162,10 +162,7 @@ struct DiagnosticConfig {
     audio_recording_max_entries: Option<u32>,
     local_asr_active_model: String,
     local_asr_keep_loaded_secs: u32,
-    foundry_local_asr_model: String,
-    foundry_local_runtime_source: String,
-    foundry_local_asr_language_hint_configured: bool,
-    foundry_local_asr_keep_loaded_secs: u32,
+    local_dictation_keep_loaded_secs: u32,
     microphone_device_configured: bool,
     marketplace_backend_configured: bool,
 }
@@ -754,13 +751,7 @@ fn build_diagnostic_package_with_ble_snapshot(
             audio_recording_max_entries: prefs.audio_recording_max_entries,
             local_asr_active_model: prefs.local_asr_active_model.clone(),
             local_asr_keep_loaded_secs: prefs.local_asr_keep_loaded_secs,
-            foundry_local_asr_model: prefs.foundry_local_asr_model.clone(),
-            foundry_local_runtime_source: prefs.foundry_local_runtime_source.clone(),
-            foundry_local_asr_language_hint_configured: !prefs
-                .foundry_local_asr_language_hint
-                .trim()
-                .is_empty(),
-            foundry_local_asr_keep_loaded_secs: prefs.foundry_local_asr_keep_loaded_secs,
+            local_dictation_keep_loaded_secs: prefs.local_dictation_keep_loaded_secs,
             microphone_device_configured: !prefs.microphone_device_name.trim().is_empty(),
             marketplace_backend_configured: !prefs.marketplace_base_url.trim().is_empty(),
         },
@@ -907,6 +898,8 @@ fn is_diagnostic_timeline_line(line: &str) -> bool {
         "[coord]",
         "[asr]",
         "[foundry-asr]",
+        "[companion-paraformer]",
+        "[local-asr-migration]",
         "[local-asr]",
         "[windows-ime]",
         "[capsule]",

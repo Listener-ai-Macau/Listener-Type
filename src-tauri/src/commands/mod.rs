@@ -13,11 +13,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State, Window};
 
-use crate::asr::local::foundry::{
-    model_alias_is_known, FoundryCatalogModel, FoundryPrepareProgressPayload, FoundryRuntimeStatus,
-    DEFAULT_MODEL_ALIAS, PROVIDER_ID as FOUNDRY_LOCAL_PROVIDER_ID,
-};
-use crate::asr::local::FoundryLocalRuntime;
 use crate::coordinator::{
     Coordinator, EmbeddedBleSessionActorDiagnosticRecord, EmbeddedBleWakeRecoverySnapshot,
     FirmwareWakePolicySnapshot,
@@ -616,7 +611,7 @@ pub fn set_settings(
     coord.refresh_microphone_wake();
     coord.refresh_input_source();
     #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
-    crate::asr::content_recovery_assets::prepare_in_background(&prefs.owner_content_recovery_locale);
+    crate::asr::content_recovery_assets::prepare_for_preferences(&prefs);
     if prefs.show_capsule != previous_prefs.show_capsule {
         coord.refresh_capsule_visibility();
     }
@@ -917,33 +912,6 @@ fn configured(field: &Option<String>) -> bool {
         .unwrap_or(false)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct LocalAsrReleasePlan {
-    qwen: bool,
-    foundry: bool,
-}
-
-fn local_asr_release_plan_for_provider(provider: &str) -> LocalAsrReleasePlan {
-    LocalAsrReleasePlan {
-        qwen: provider != crate::asr::local::PROVIDER_ID,
-        foundry: provider != FOUNDRY_LOCAL_PROVIDER_ID,
-    }
-}
-
-async fn release_foundry_runtime_if_inactive(
-    runtime: &Arc<FoundryLocalRuntime>,
-    release_foundry: bool,
-) {
-    if release_foundry {
-        #[cfg(target_os = "windows")]
-        crate::asr::local::punctuation::release_punctuation().await;
-        runtime.request_cancel_prepare();
-        if let Err(error) = runtime.release_now().await {
-            log::warn!("[foundry-asr] release inactive runtime failed: {error:#}");
-        }
-    }
-}
-
 #[tauri::command]
 pub fn set_credential(window: Window, account: String, value: String) -> Result<(), String> {
     ensure_main_window(&window)?;
@@ -958,7 +926,6 @@ pub fn set_credential(window: Window, account: String, value: String) -> Result<
 #[tauri::command]
 pub async fn set_active_asr_provider(
     coord: CoordinatorState<'_>,
-    runtime: State<'_, Arc<FoundryLocalRuntime>>,
     provider: String,
     expected_provider: Option<String>,
 ) -> Result<(), String> {
@@ -966,9 +933,6 @@ pub async fn set_active_asr_provider(
         .to_owned();
     if provider.is_empty() {
         return Err("ASR provider id is empty".to_string());
-    }
-    if provider == FOUNDRY_LOCAL_PROVIDER_ID {
-        return Err("Foundry Local Whisper is no longer a Listener Type dictation provider".to_string());
     }
     let companion = crate::asr::local::companion_paraformer::is_provider(&provider);
     if companion {
@@ -998,22 +962,22 @@ pub async fn set_active_asr_provider(
             }
         }
     }
-    let release_plan = local_asr_release_plan_for_provider(&provider);
     if provider == crate::asr::local::PROVIDER_ID {
         // 切到本地 ASR → 后台预加载模型，下次按 hotkey 时不必等数秒。
         coord.preload_local_asr_in_background();
-    }
-    if release_plan.qwen {
+    } else {
         // 切回云端 → 用户已不需要本地引擎，立刻释放 1.2GB+ RAM；不释放的话只会等到
         // schedule_local_asr_release 的下一次 dictation 才触发，而切回云端后根本不会
         // 再走 local 路径，引擎会驻留到进程退出。
         coord.release_local_asr_engine();
     }
-    release_foundry_runtime_if_inactive(runtime.inner(), release_plan.foundry).await;
     #[cfg(target_os = "windows")]
     if !companion {
+        crate::asr::local::punctuation::release_punctuation().await;
         crate::asr::local::companion_paraformer::release().await;
     }
+    #[cfg(all(target_os = "windows", feature = "target-speaker-extraction"))]
+    crate::asr::content_recovery_assets::prepare_for_preferences(&coord.prefs().get());
     Ok(())
 }
 
@@ -1380,20 +1344,9 @@ async fn validate_bailian_asr_provider() -> Result<(), String> {
 }
 
 fn active_asr_is_keyless_for_validation(provider: &str) -> bool {
-    provider == crate::asr::local::PROVIDER_ID || active_foundry_asr_is_supported(provider)
+    let provider = crate::asr::local::companion_paraformer::canonical_provider(provider);
+    (cfg!(target_os = "macos") && crate::asr::local::is_local_qwen3(provider))
         || (cfg!(target_os = "windows") && crate::asr::local::companion_paraformer::is_provider(provider))
-}
-
-fn active_foundry_asr_is_supported(provider: &str) -> bool {
-    #[cfg(target_os = "windows")]
-    {
-        provider == FOUNDRY_LOCAL_PROVIDER_ID
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = provider;
-        false
-    }
 }
 
 async fn validate_asr_transcription(config: &ProviderConfig, model: &str) -> Result<(), String> {
@@ -2454,11 +2407,15 @@ fn shortcut_bindings_overlap(left: &ShortcutBinding, right: &ShortcutBinding) ->
 
 // ─────────────────────────── local ASR (Qwen3-ASR) ───────────────────────────
 
+#[cfg(target_os = "macos")]
+use crate::asr::local::PROVIDER_ID as LOCAL_PROVIDER_ID;
+#[cfg(target_os = "macos")]
 use crate::asr::local::{
     download::{fetch_remote_info, RemoteInfo},
-    DownloadManager, Mirror, ModelId, ModelStatus, PROVIDER_ID as LOCAL_PROVIDER_ID,
+    DownloadManager, Mirror, ModelId, ModelStatus,
 };
 
+#[cfg(target_os = "macos")]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalAsrSettings {
@@ -2469,6 +2426,7 @@ pub struct LocalAsrSettings {
     pub engine_available: bool,
 }
 
+#[cfg(target_os = "macos")]
 include!("local_asr_commands.rs");
 
 include!("diagnostics_export.rs");
