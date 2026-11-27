@@ -13,6 +13,9 @@ __pycache__/
 artifacts/
 .artifacts/
 docs/validation/
+/docs/release/evidence/**/*.log
+/docs/release/evidence/**/live-log-hits.jsonl
+/docs/release/evidence/**/*-raw.txt
 tests/artifacts/
 tools/ai/repo_features.accepted.jsonl
 .omx/
@@ -37,5 +40,8 @@ src-tauri/gen/
 # MSVC build artifacts (windows-ime native IME DLL)
 windows-ime/obj/
 windows-ime/x64/
+/src-tauri/resources/windows-ime/*/ListenerTypeIme.exp
+/src-tauri/resources/windows-ime/*/ListenerTypeIme.lib
+/src-tauri/resources/windows-ime/*/ListenerTypeIme.pdb
 # root-level ad-hoc build logs
 /work_build_*.log
