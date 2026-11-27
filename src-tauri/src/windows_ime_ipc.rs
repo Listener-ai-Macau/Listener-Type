@@ -3,6 +3,9 @@ use std::time::Duration;
 use crate::windows_ime_protocol::ImeSubmitStatus;
 
 pub const IME_CLIENT_WAIT_TIMEOUT: Duration = Duration::from_millis(700);
+pub(crate) const LOCAL_DICTATION_IME_CLIENT_WAIT: Duration = Duration::from_millis(75);
+#[cfg(target_os = "windows")]
+const IME_EXACT_TARGET_WAIT: Duration = Duration::from_millis(75);
 const IME_OWNER_THREAD_MESSAGE_TIMEOUT_MS: u64 = 3000;
 const IME_ASYNC_EDIT_SESSION_TIMEOUT_MS: u64 = 3000;
 const IME_SUBMIT_TIMEOUT_MARGIN_MS: u64 = 1000;
@@ -209,17 +212,18 @@ impl WindowsImeIpcServer {
     pub async fn submit_text(
         &self,
         request: ImeSubmitRequest,
+        client_wait: Duration,
     ) -> WindowsImeIpcResult<ImeSubmitStatus> {
         #[cfg(target_os = "windows")]
         {
             let _ = self;
-            submit_text_to_platform(request).await
+            submit_text_to_platform(request, client_wait).await
         }
 
         #[cfg(not(target_os = "windows"))]
         {
             let _ = self;
-            let _ = request;
+            let _ = (request, client_wait);
             Err(WindowsImeIpcError::Unavailable(
                 "Listener Type IME IPC is only available on Windows".to_string(),
             ))
@@ -292,8 +296,9 @@ impl Default for WindowsImeIpcServer {
 #[cfg(target_os = "windows")]
 async fn submit_text_to_platform(
     request: ImeSubmitRequest,
+    client_wait: Duration,
 ) -> WindowsImeIpcResult<ImeSubmitStatus> {
-    windows_pipe::submit_text_over_pipe(request).await
+    windows_pipe::submit_text_over_pipe(request, client_wait).await
 }
 
 #[cfg(target_os = "windows")]
@@ -315,7 +320,7 @@ mod windows_pipe {
 
     use super::{
         classify_native_result, ImeSubmitRequest, PendingImeSubmit, WindowsImeIpcError, WindowsImeIpcResult,
-        IME_CLIENT_WAIT_TIMEOUT, IME_PIPE_RETRY_INTERVAL, IME_SUBMIT_TIMEOUT,
+        IME_CLIENT_WAIT_TIMEOUT, IME_EXACT_TARGET_WAIT, IME_PIPE_RETRY_INTERVAL, IME_SUBMIT_TIMEOUT,
     };
     use crate::windows_ime_protocol::{
         decode_message, encode_message, ime_pipe_candidate_names_for_target,
@@ -328,6 +333,7 @@ mod windows_pipe {
 
     pub async fn submit_text_over_pipe(
         request: ImeSubmitRequest,
+        client_wait: Duration,
     ) -> WindowsImeIpcResult<crate::windows_ime_protocol::ImeSubmitStatus> {
         let ImeSubmitRequest {
             session_id,
@@ -341,7 +347,7 @@ mod windows_pipe {
             text,
             created_at,
         };
-        submit_message_over_pipe(message, target, false, || true).await
+        submit_message_over_pipe(message, target, false, client_wait, || true).await
     }
 
     #[cfg(test)]
@@ -387,7 +393,7 @@ mod windows_pipe {
         // A timeout here carries no text. A late binding can only invalidate
         // another unique token, never authorize it.
         match tokio::time::timeout(Duration::from_millis(250),
-            submit_message_over_pipe(binding, Some(target), true, || true)).await {
+            submit_message_over_pipe(binding, Some(target), true, IME_EXACT_TARGET_WAIT, || true)).await {
             Ok(Ok(crate::windows_ime_protocol::ImeSubmitStatus::Committed)) => {},
             Ok(Err(WindowsImeIpcError::NotDispatched)) => return Err(WindowsImeIpcError::NotDispatched),
             _ => return Err(WindowsImeIpcError::NoReadyClient),
@@ -402,11 +408,11 @@ mod windows_pipe {
                 session_id: token, text, expected_document, created_at,
             },
         };
-        submit_message_over_pipe(message, Some(target), true, before_write).await
+        submit_message_over_pipe(message, Some(target), true, IME_EXACT_TARGET_WAIT, before_write).await
     }
 
     async fn probe_foreground_guard(target: super::ImeSubmitTarget) -> WindowsImeIpcResult<()> {
-        let (_, pipe) = open_pipe_with_retry(target, true).await?;
+        let (_, pipe) = open_pipe_with_retry(target, true, IME_EXACT_TARGET_WAIT).await?;
         let (read_half, mut write_half) = tokio::io::split(pipe);
         let mut reader = BufReader::new(read_half);
         let probe = b"{\"type\":\"probeForegroundGuard\",\"protocolVersion\":1,\"sessionId\":\"foreground-capability\",\"text\":\"\"}\n";
@@ -460,13 +466,14 @@ mod windows_pipe {
                 created_at,
             },
         };
-        submit_message_over_pipe(message, target, false, || true).await
+        submit_message_over_pipe(message, target, false, IME_CLIENT_WAIT_TIMEOUT, || true).await
     }
 
     async fn submit_message_over_pipe(
         message: ImePipeMessage,
         target: Option<super::ImeSubmitTarget>,
         exact_only: bool,
+        client_wait: Duration,
         before_write: impl FnOnce() -> bool + Send,
     ) -> WindowsImeIpcResult<crate::windows_ime_protocol::ImeSubmitStatus> {
         let request_session_id = match &message {
@@ -481,7 +488,7 @@ mod windows_pipe {
         };
         let target = target.ok_or(WindowsImeIpcError::NoReadyClient)?;
         let mut pending = PendingImeSubmit::new(request_session_id);
-        let (pipe_name, pipe) = open_pipe_with_retry(target, exact_only).await?;
+        let (pipe_name, pipe) = open_pipe_with_retry(target, exact_only, client_wait).await?;
         let (read_half, mut write_half) = tokio::io::split(pipe);
         let mut reader = BufReader::new(read_half);
 
@@ -555,8 +562,9 @@ mod windows_pipe {
     async fn open_pipe_with_retry(
         target: super::ImeSubmitTarget,
         exact_only: bool,
+        client_wait: Duration,
     ) -> WindowsImeIpcResult<(String, NamedPipeClient)> {
-        let deadline = Instant::now() + if exact_only { Duration::from_millis(75) } else { IME_CLIENT_WAIT_TIMEOUT };
+        let deadline = Instant::now() + client_wait;
         let exact_pipe_name = ime_pipe_name_for_target(target.process_id, target.thread_id);
 
         loop {
@@ -679,6 +687,23 @@ mod tests {
             .is_err());
     }
 
+    #[cfg(target_os = "windows")]
+    #[tokio::test]
+    async fn local_dictation_can_leave_an_unavailable_ime_before_sending_text() {
+        let start = std::time::Instant::now();
+        let result = tokio::time::timeout(Duration::from_millis(500), super::windows_pipe::submit_text_over_pipe(
+            ImeSubmitRequest {
+                session_id: "synthetic-no-client".into(),
+                text: "synthetic".into(),
+                created_at: "test".into(),
+                target: Some(ImeSubmitTarget { process_id: u32::MAX, thread_id: u32::MAX }),
+            },
+            LOCAL_DICTATION_IME_CLIENT_WAIT,
+        )).await.expect("quick fallback must finish before the standard client wait");
+        assert!(matches!(result, Err(WindowsImeIpcError::NoReadyClient | WindowsImeIpcError::Timeout)));
+        println!("No IME client found after {} ms, before dispatch.", start.elapsed().as_millis());
+    }
+
     #[test]
     fn submit_timeout_covers_native_async_commit_path() {
         assert!(IME_SUBMIT_TIMEOUT > Duration::from_millis(IME_NATIVE_ASYNC_COMMIT_TIMEOUT_MS));
@@ -745,7 +770,7 @@ mod tests {
             session_id: "synthetic-session".into(), text: "synthetic".into(),
             created_at: "test".into(),
             target: Some(ImeSubmitTarget { process_id, thread_id }),
-        }).await;
+        }, LOCAL_DICTATION_IME_CLIENT_WAIT).await;
         received.await.unwrap();
         assert!(matches!(result, Err(WindowsImeIpcError::AfterDispatch(_))));
     }

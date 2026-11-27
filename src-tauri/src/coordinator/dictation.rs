@@ -3229,6 +3229,8 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     // （干扰冻结多发生在 STOP 与终稿之间）。
     let mut pause_early_final_clean = false;
     let mut primary_final_native_words = None;
+    #[cfg(target_os = "windows")]
+    let local_microphone_dictation = matches!(&asr, ActiveAsr::CompanionParaformer(_));
     let raw = match asr {
         ActiveAsr::Volcengine(asr) => {
             debug_assert!(uses_global_timeout);
@@ -4292,6 +4294,14 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         should_restore_clipboard_after_dictation(&prefs, retain_plain_dictation);
     let allow_clipboard_fallback = translation_active || retain_plain_dictation;
     let allow_non_tsf_insertion_fallback = prefs.allow_non_tsf_insertion_fallback;
+    #[cfg(target_os = "windows")]
+    let ime_client_wait = if local_microphone_dictation && mode == PolishMode::Raw
+        && !raw_uses_llm && !translation_active && allow_non_tsf_insertion_fallback
+    {
+        crate::windows_ime_ipc::LOCAL_DICTATION_IME_CLIENT_WAIT
+    } else {
+        crate::windows_ime_ipc::IME_CLIENT_WAIT_TIMEOUT
+    };
     let allow_foreground_insert_fallback =
         std::env::var("LISTENER_TYPE_INSERT_INTO_FOREGROUND_FALLBACK")
             .map(|value| value == "1")
@@ -4717,6 +4727,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
                                 delivery_window,
                                 pause_early_paste,
                                 final_paste_scope,
+                                ime_client_wait,
                             )
                             .await;
                             if result.status == InsertStatus::Inserted {

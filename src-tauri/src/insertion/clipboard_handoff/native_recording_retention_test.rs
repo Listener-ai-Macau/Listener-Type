@@ -132,15 +132,18 @@ fn recording_retention_uses_only_its_own_paste_lease() {
     let end = name.iter().position(|c| *c == 0).unwrap_or(name.len());
     assert!(String::from_utf16_lossy(&name[..end]).starts_with("ListenerClipboardCase_"));
 
-    for (completion_first, consumed, foreign, new_copy, expected) in [
-        (false, true, false, false, RetentionResult::Stored),
-        (false, false, false, false, RetentionResult::Unavailable),
-        (false, true, false, true, RetentionResult::Superseded),
-        (false, true, true, false, RetentionResult::Superseded),
-        (true, false, false, false, RetentionResult::StoredWithoutPasteConfirmation),
-        (true, true, false, false, RetentionResult::Stored),
-        (true, false, false, true, RetentionResult::Superseded),
-        (true, false, true, false, RetentionResult::Superseded),
+    for (completion_first, consumed, foreign, new_copy, complete_payload, expected) in [
+        (false, true, false, false, false, RetentionResult::Stored),
+        (false, false, false, false, false, RetentionResult::Unavailable),
+        (false, true, false, true, false, RetentionResult::Superseded),
+        (false, true, true, false, false, RetentionResult::Superseded),
+        (true, false, false, false, false, RetentionResult::StoredWithoutPasteConfirmation),
+        (true, true, false, false, false, RetentionResult::Stored),
+        (true, false, false, true, false, RetentionResult::Superseded),
+        (true, false, true, false, false, RetentionResult::Superseded),
+        (true, false, false, false, true, RetentionResult::Stored),
+        (true, true, false, false, true, RetentionResult::Stored),
+        (true, false, false, true, true, RetentionResult::Superseded),
     ] {
         let session = uuid::Uuid::new_v4();
         let mut board = arboard::Clipboard::new().unwrap();
@@ -148,7 +151,8 @@ fn recording_retention_uses_only_its_own_paste_lease() {
         let origin = ticket();
         // These are the same native transport and generation facts as a sent
         // paste, but no keyboard injection is needed to test retention.
-        let transport = "submitted prefix";
+        let full_text = "submitted prefix plus complete final sentence";
+        let transport = if complete_payload { full_text } else { "submitted prefix" };
         let dispatch_ticket = {
             let owner = begin_external_write();
             super::super::set_clipboard_text(&mut board, transport,
@@ -173,6 +177,7 @@ fn recording_retention_uses_only_its_own_paste_lease() {
             expected_session_document: None, strict_session_edit: false, first_guarded_local_draft: false,
             staged_selection: false,
             dispatch_session: Some(if foreign { uuid::Uuid::new_v4() } else { session }),
+            dispatched: true,
             #[cfg(target_os = "windows")]
             append_caret: None,
         };
@@ -181,20 +186,23 @@ fn recording_retention_uses_only_its_own_paste_lease() {
             |_, _, _| panic!("final clipboard publication must never dispatch another paste"));
         });
         let (reply, results) = mpsc::channel();
-        let final_text = "submitted prefix plus complete final sentence".into();
+        let final_text = full_text.into();
         commands.send(if completion_first {
             Command::PublishRecording(origin, session, final_text, false, reply)
         } else {
             Command::RetainRecording(origin, session, final_text, false, reply)
         }).unwrap();
-        if completion_first && !consumed && !foreign && !new_copy {
+        if completion_first && !consumed && !foreign && !new_copy && !complete_payload {
             assert!(matches!(results.recv_timeout(Duration::from_millis(70)), Err(mpsc::RecvTimeoutError::Timeout)),
                 "a final copy cannot replace the just-dispatched fragment immediately");
             assert_eq!(board.get_text().unwrap(), transport,
                 "a delayed native clipboard read must still receive only its submitted fragment");
         }
         assert_eq!(results.recv_timeout(Duration::from_secs(3)).unwrap(), expected,
-            "completion_first={completion_first} consumed={consumed} foreign={foreign} new_copy={new_copy}");
+            "completion_first={completion_first} consumed={consumed} foreign={foreign} new_copy={new_copy} complete_payload={complete_payload}");
+        if complete_payload && !new_copy {
+            assert!(ticket() == dispatch_ticket, "an identical final transcript must leave the active paste generation and OS clipboard revision intact");
+        }
         assert_eq!(board.get_text().unwrap(), match expected {
             RetentionResult::Stored | RetentionResult::StoredWithoutPasteConfirmation => "submitted prefix plus complete final sentence",
             _ if new_copy => "new user copy",
@@ -242,6 +250,7 @@ fn completion_first_waiting_handoff_preserves_new_user_copy() {
                 observation: PasteObservation::default(), completion: None, session_body: None,
                 observed_document: None, expected_session_document: None, strict_session_edit: false, first_guarded_local_draft: false,
                 staged_selection: false, dispatch_session: Some(session),
+                dispatched: true,
                 #[cfg(target_os = "windows")]
                 append_caret: None,
             };

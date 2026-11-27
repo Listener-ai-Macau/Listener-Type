@@ -13,7 +13,7 @@ use windows::Win32::UI::Accessibility::{
     CUIAutomation, CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationElement, IUIAutomationTextPattern, IUIAutomationTextRange, IUIAutomationValuePattern, UIA_EditControlTypeId, UIA_ButtonControlTypeId, UIA_CheckBoxControlTypeId, UIA_RadioButtonControlTypeId, UIA_HyperlinkControlTypeId,
     UIA_TextPatternId, UIA_WindowControlTypeId, UIA_CONTROLTYPE_ID,
     UIA_ValuePatternId, UIA_PATTERN_ID, UIA_DocumentControlTypeId, UIA_IsReadOnlyAttributeId,
-    TextPatternRangeEndpoint_Start, TextPatternRangeEndpoint_End, TextUnit_Character,
+    TextPatternRangeEndpoint_Start, TextPatternRangeEndpoint_End, TextUnit_Character, TextUnit_Line,
 };
 use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 use super::FocusedInputState;
@@ -78,7 +78,18 @@ impl PasteAppendCaret {
             let text = read_paste_range(
                 &inserted, APPEND_RECEIPT_LIMIT, "paste caret edit exceeds readback limit",
             ).ok()?;
-            (text == payload).then_some(())
+            if text == payload {
+                return Some(());
+            }
+            // A screen buffer can pad the last cell before a wide glyph
+            // wraps to the next rendered row. Ignore only verified row padding.
+            let before_is_padded = !self.right.is_empty() && self.right.bytes().all(|b| b == b' ');
+            let after_is_padded = after.right.bytes().all(|b| b == b' ');
+            if before_is_padded && after_is_padded {
+                confirm_rendered_paste_rows(&inserted, payload)
+            } else {
+                None
+            }
         }
     }
 
@@ -590,6 +601,62 @@ impl WindowsSelectionReader {
     }
 }
 
+fn confirm_rendered_paste_rows(range: &IUIAutomationTextRange, mut expected: &str) -> Option<()> {
+    unsafe {
+        let remaining = range.Clone().ok()?;
+        // The exact-range proof handles ordinary and long edits first. Bound
+        // the slower fallback to a short, genuinely row-spanning edit.
+        for _ in 0..8 {
+            let row = remaining.Clone().ok()?;
+            row.MoveEndpointByRange(
+                TextPatternRangeEndpoint_End, &remaining, TextPatternRangeEndpoint_Start,
+            ).ok()?;
+            row.ExpandToEnclosingUnit(TextUnit_Line).ok()?;
+            if row.CompareEndpoints(
+                TextPatternRangeEndpoint_End, &remaining, TextPatternRangeEndpoint_Start,
+            ).ok()? <= 0 {
+                return None;
+            }
+            if row.CompareEndpoints(
+                TextPatternRangeEndpoint_End, &remaining, TextPatternRangeEndpoint_End,
+            ).ok()? >= 0 {
+                let last = read_paste_range(
+                    &remaining, APPEND_RECEIPT_LIMIT, "paste row exceeds readback limit",
+                ).ok()?;
+                return (last == expected).then_some(());
+            }
+
+            let part = remaining.Clone().ok()?;
+            part.MoveEndpointByRange(
+                TextPatternRangeEndpoint_End, &row, TextPatternRangeEndpoint_End,
+            ).ok()?;
+            let actual = read_paste_range(
+                &part, APPEND_RECEIPT_LIMIT, "paste row exceeds readback limit",
+            ).ok()?;
+            expected = consume_rendered_paste_row(expected, &actual)?;
+            remaining.MoveEndpointByRange(
+                TextPatternRangeEndpoint_Start, &row, TextPatternRangeEndpoint_End,
+            ).ok()?;
+        }
+    }
+    None
+}
+
+fn consume_rendered_paste_row<'a>(expected: &'a str, actual: &str) -> Option<&'a str> {
+    if actual.is_empty() {
+        return None;
+    }
+    if let Some(rest) = expected.strip_prefix(actual) {
+        return Some(rest);
+    }
+    let without_padding = actual.strip_suffix(' ')?;
+    let rest = expected.strip_prefix(without_padding)?;
+    // An extra cell at a row edge is only plausible before a wide glyph.
+    // Keep significant spaces, and reject a gap before ordinary ASCII.
+    rest.chars().next().filter(|ch| unicode_width::UnicodeWidthChar::width(*ch) == Some(2))?;
+    Some(rest)
+}
+
 fn append_right_context_matches(before: &str, after: &str) -> bool {
     // The distance to a screen row's padding can change as its caret advances.
     // The exact inserted range and untouched left anchor are checked separately.
@@ -607,6 +674,17 @@ fn native_text_matches_value(document: &str, value: &str) -> bool {
 #[cfg(test)]
 mod focus_tests {
     use super::*;
+
+    #[test]
+    fn rendered_paste_row_padding_keeps_significant_spaces() {
+        assert_eq!(consume_rendered_paste_row("本地听写尾段", "本地听写 "), Some("尾段"));
+        assert_eq!(consume_rendered_paste_row("本地 听写 尾段", "本地 听写 "), Some("尾段"));
+        assert_eq!(consume_rendered_paste_row("本地听写尾段", "本地 听写"), None);
+        assert_eq!(consume_rendered_paste_row("ordinaryASCII", "ordinary "), None);
+        assert_eq!(consume_rendered_paste_row("texté", "text "), None);
+        assert_eq!(consume_rendered_paste_row("text", ""), None);
+        assert_eq!(consume_rendered_paste_row("词尾", "词  "), None);
+    }
 
     #[test]
     fn windows_paste_readback_accepts_long_drafts_but_never_truncated_utf16() {

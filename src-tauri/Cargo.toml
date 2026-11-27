@@ -97,6 +97,7 @@ objc2-app-kit = "0.2"
 libc = "0.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
+unicode-width = "0.1.14"
 # The bundled speaker runtime supports the ORT 1.23 C API.
 ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "load-dynamic", "api-23"] }
 rustfft = "=6.4.1"

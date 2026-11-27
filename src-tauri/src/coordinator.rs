@@ -3129,6 +3129,7 @@ async fn insert_with_windows_ime_first(
     delivery_window: Option<usize>,
     continue_paste_route: bool,
     paste_scope: crate::insertion::SessionPasteScope,
+    ime_client_wait: Duration,
 ) -> WindowsInsertionResult {
     // All terminal TSF exits retain this recording's append identity. Dropping
     // it here disables fresh native readback recovery in the clipboard worker.
@@ -3232,7 +3233,7 @@ async fn insert_with_windows_ime_first(
         target: ime_target,
     };
 
-    let ime_status = match inner.windows_ime.submit_prepared(&prepared, request).await {
+    let ime_status = match inner.windows_ime.submit_prepared(&prepared, request, ime_client_wait).await {
         Ok(status) => status,
         Err(error) if error.is_session_not_active() => {
             // session not active：录音起点 prepare_session 就没激活 Listener Type profile，

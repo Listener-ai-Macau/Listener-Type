@@ -521,6 +521,7 @@ struct PasteReceipt {
     first_guarded_local_draft: bool,
     staged_selection: bool,
     dispatch_session: Option<uuid::Uuid>,
+    dispatched: bool,
     #[cfg(target_os = "windows")]
     append_caret: Option<crate::selection::PasteAppendCaret>,
 }
@@ -851,6 +852,13 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                     continue;
                 }
                 finish(&mut pending, RetentionResult::Superseded);
+                if receipt.is_some_and(|receipt| receipt.dispatched && receipt.payload == text) {
+                    // The entire transcript already owns this clipboard revision.
+                    // Leave it open for the target to consume and keep its receipt
+                    // observable rather than reopening and rewriting the clipboard.
+                    let _ = reply.send(RetentionResult::Stored);
+                    continue;
+                }
                 if paste_unconfirmed && receipt.is_some_and(|receipt|
                     receipt.dispatched_at.elapsed() < PASTE_RECEIPT_OBSERVATION_BUDGET)
                 {
@@ -1166,8 +1174,17 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                 }
                 #[cfg(target_os = "windows")]
                 let append_caret = if guarded_append {
+                    let continues_caret_proof = scope.as_ref().zip(paste_receipt.as_ref())
+                        .is_some_and(|(scope, prior)| prior.dispatch_session == Some(scope.session_id)
+                            && prior.observation.proof == Some(PasteReceiptProof::CaretEdit));
                     reader.as_ref().and_then(|reader| {
-                        if reader.caret_at_end().ok() == Some(true) { None } else { reader.append_caret() }
+                        // Once a provider required a local caret proof, its
+                        // whole-document endpoints may still shift at a wrap.
+                        if continues_caret_proof || reader.caret_at_end().ok() != Some(true) {
+                            reader.append_caret()
+                        } else {
+                            None
+                        }
                     })
                 } else { None };
                 *owner = owner.wrapping_add(1);
@@ -1242,6 +1259,7 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                     first_guarded_local_draft,
                     staged_selection: false,
                     dispatch_session: scope.as_ref().map(|scope| scope.session_id),
+                    dispatched,
                     #[cfg(target_os = "windows")]
                     append_caret,
                 };
@@ -1807,6 +1825,7 @@ mod tests {
                 dispatched_at,
                 observation: PasteObservation::default(),
                 completion: Some(completion), session_body: None, observed_document: None, expected_session_document: None, strict_session_edit: false, first_guarded_local_draft: false, staged_selection: false, dispatch_session: None,
+                dispatched: false,
                 #[cfg(target_os = "windows")]
                 append_caret: None,
             },
@@ -2069,6 +2088,7 @@ mod tests {
                 dispatched_at: Instant::now(),
                 observation: PasteObservation::default(),
                 completion: None, session_body: None, observed_document: None, expected_session_document: None, strict_session_edit: false, first_guarded_local_draft: false, staged_selection: false, dispatch_session: None,
+                dispatched: false,
                 #[cfg(target_os = "windows")]
                 append_caret: None,
             }), || (None, crate::selection::FocusedInputState::NonEditable)));

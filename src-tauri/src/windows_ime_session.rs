@@ -185,14 +185,6 @@ impl WindowsImeSessionController {
         }
     }
 
-    pub async fn submit_prepared(
-        &self,
-        prepared: &PreparedWindowsImeSession,
-        request: ImeSubmitRequest,
-    ) -> Result<InsertStatus, WindowsImeSessionError> {
-        self.submit_message_prepared(prepared, request).await
-    }
-
     #[cfg(target_os = "windows")]
     pub async fn submit_prepared_exact(
         &self,
@@ -259,10 +251,11 @@ impl WindowsImeSessionController {
         Ok(map_ime_status_to_insert_status(status))
     }
 
-    async fn submit_message_prepared(
+    pub async fn submit_prepared(
         &self,
         prepared: &PreparedWindowsImeSession,
         request: ImeSubmitRequest,
+        client_wait: std::time::Duration,
     ) -> Result<InsertStatus, WindowsImeSessionError> {
         if !prepared.is_ready_for_tsf_submit() {
             return Err(WindowsImeSessionError::Ipc(
@@ -272,7 +265,7 @@ impl WindowsImeSessionController {
 
         let status = self
             .ipc
-            .submit_text(request)
+            .submit_text(request, client_wait)
             .await
             .map_err(session_ipc_error)?;
         if should_fallback_after_ime_result(status) {
@@ -383,6 +376,7 @@ mod tests {
                     created_at: "2026-05-01T12:00:00Z".to_string(),
                     target: None,
                 },
+                crate::windows_ime_ipc::IME_CLIENT_WAIT_TIMEOUT,
             )
             .await;
 
