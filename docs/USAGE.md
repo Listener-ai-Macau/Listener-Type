@@ -2,7 +2,7 @@
 
 这份说明介绍安装、快捷键与设置；产品概览见[主页](../README.zh-CN.md)。
 
-本指南对应当前 `v1.0.6-rc1` 候选版。请从[当前软件发布页](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1)
+本指南适用于当前 Windows x64 编号预发布。请从[软件发布页](https://github.com/Listener-ai-Macau/Listener-Type/releases)
 下载 MSI，并以该页的构建号、SHA-256、已知限制为准；硬件使用配套的[固件 ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)。
 早期 1.0.5 说明保留在[历史发布记录](release/1.0.5.md)，不作为当前设置基线。
 RC1 不保证在任何环境下完全过滤旁人声音；强干扰下请复核正文，并在需要时手动结束。
@@ -12,7 +12,7 @@ RC1 不保证在任何环境下完全过滤旁人声音；强干扰下请复核�
 | 你想先做什么 | 当前可用路径 | 还需要什么 |
 | --- | --- | --- |
 | 先翻译一段中英文字 | 「概览 → 本机中英翻译」；确认原文和译文语言、按需准备组件，翻译后检查或编辑，再保存成稿 | 64位Windows；首次下载组件需联网和磁盘空间。无需硬件／云Key，无逐次翻译API费用；不等于语音识别也已配置 |
-| 先把说的话转成文字 | Windows 本地识别设置中准备 Foundry Local 运行时和 Whisper 模型；在「设置 → 录音」选择电脑麦克风，以默认原文（Raw）试录 | 首次下载需要联网与磁盘空间；运行会使用内存，速度取决于电脑。无需云端识别密钥 |
+| 先把说的话转成文字 | 使用内置 Companion Paraformer Large，在「设置 → 录音」选择电脑麦克风，以原文（Raw）试录 | Windows x64 编号预发布 MSI、麦克风权限 |
 | 自动去口癖、整理长消息 | 在识别之外，配置可用的文字服务，再选 Light / Structured / Formal | 本地语音识别只负责转写，不会同时提供这些整理服务；云端文字服务费用由提供方决定 |
 | 使用已有云端识别账号 | 在提供商设置填写该服务要求的凭据、模型及地址，先用 Raw | 识别额度、地区可用性及费用以该提供方为准 |
 
@@ -28,13 +28,10 @@ RC1 不保证在任何环境下完全过滤旁人声音；强干扰下请复核�
 
 ### Windows 无密钥语音识别：在软件里怎么点
 
-1. 打开 Type 的「设置 → 本地识别」，或从「提供商 → 声音转文字」进入 **“准备本地识别”**。不用先选一个云端厂商，也不用填写 Key。
-2. 在 **“Windows Foundry Local Whisper”** 页面保留默认 **Whisper Small（whisper-small）**。页面另有 Base / Tiny，可减少下载，但识别效果可能下降。
-3. 查看页面的模型大小与运行组件状态。大小来自当前服务目录；显示“未知”时，表示尚未取得大小，不是零下载。总磁盘占用还包括运行组件和解包文件，不能只按模型大小计算。
-4. 点击 **“准备并使用本地识别”**，等待下载、加载和启用完成。取消或失败会保留原识别服务；“仅下载 / 加载”本身不会切换服务。看到已加载模型和当前启用状态后，再开始录音。
-5. 回到「设置 → 录音」，选择电脑麦克风；在风格页保留默认原文（Raw）。需要电脑快捷键时，先到「设置 → 快捷键」自行录入，再把光标放进可编辑输入框，用已设置的录音快捷键开始／结束并复核。
-
-这条路径不包含自动整理，也不是不用下载即可立即开口。下载前可按页面当时的大小选择是否继续；本指南不把尚未取得的体积或运行内存写成固定承诺。
+1. 从[发布页](https://github.com/Listener-ai-Macau/Listener-Type/releases)安装最新编号的 Windows x64 MSI，启动 Listener Type。全新安装默认启用内置的 Companion Paraformer Large。
+2. 如果已有其他识别服务设置，可从「设置 → 本地识别」切换到内置模型，确认模型就绪。
+3. 在「设置 → 录音」选择电脑麦克风，保留原文（Raw）风格。如果还没有录音快捷键，到「设置 → 快捷键」设置一个。
+4. 在记事本放好光标，用同一个快捷键开始和结束，复核写入结果。目标应用要求粘贴时，按提示操作。
 
 ## 先判断你要用哪条路径
 
@@ -59,9 +56,7 @@ Listener Type 有两种输入源：
    应用后点击「检查连接」。
 4. 首次使用建议在记事本中完成一条短句，确认录音、转写和插入都正常。
 
-安装程序会使用 Tauri/WebView2。联网时缺少 WebView2 会自动安装 Evergreen
-Runtime；离线电脑应预先安装 WebView2。当前正式安装包不注册旧版 TSF 输入法；
-Windows 文字插入会按运行时能力选择原生路径，失败时回退到粘贴/剪贴板。
+安装程序会使用 Tauri/WebView2。联网时缺少 WebView2 会自动安装 Evergreen Runtime，离线电脑应预先安装 WebView2。Windows MSI 会注册用于[文字写入的 TSF 组件](platform/windows-ime.md)，目标应用无法接收时会提示粘贴或保留到剪贴板。
 
 ### macOS 和 Linux
 
@@ -179,7 +174,7 @@ Listener Type 后端并完成相应登录后，远程上传、点赞等能力才
 
 Listener Type 不内置开发者 API Key，云端调用使用你自己配置的凭据。可选 ASR
 包括火山引擎流式、OpenAI-compatible 批量、百炼实时、本地 Qwen ASR（macOS）和
-Windows Foundry Local；润色可使用 Ark、DeepSeek 或其他 OpenAI-compatible
+Windows Companion Paraformer Large；润色可使用 Ark、DeepSeek 或其他 OpenAI-compatible
 服务，以「设置 → Provider」中的列表为准。
 
 在「设置 → Provider」选择服务并填写 Key、Base URL、模型等字段；在「设置 → 权限」
@@ -338,7 +333,7 @@ listener-type --cancel-dictation
 
 | 需要什么 | 入口 |
 | --- | --- |
-| Windows Type 软件 | [MSI 与该构建的 SHA-256](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) |
+| Windows Type 软件 | [MSI 与该构建的 SHA-256](https://github.com/Listener-ai-Macau/Listener-Type/releases) |
 | Listener 固件，USB／蓝牙共用 | [固件 ZIP 与该构建的 SHA-256](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1) |
 
 ZIP 是硬件固件，不是桌面软件便携版。Type 内置 USB 有线刷机能力，无需另装 Python、ESP-IDF 或独立刷机软件。

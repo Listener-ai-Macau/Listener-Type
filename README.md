@@ -1,20 +1,16 @@
-# Listener
+# Listener Type
 
-## An AI starter gadget for your desk · US$49
+Open-source voice typing for your computer. Speak into your microphone or a Listener keyboard to put text at the cursor.
 
-A microphone, a recording knob and four customizable keys. Speak a message, email or note into the field you are using with Windows Type.
+[Download for Windows](https://github.com/Listener-ai-Macau/Listener-Type/releases) · [First dictation](#make-your-first-dictation) · [User guide](docs/USAGE.en.md) · [Report an issue](https://github.com/Listener-ai-Macau/Listener-Type/issues/new/choose)
 
-**US$49 is the hardware price. Type is free and open source.**
-
-| Purpose | Direct download |
-| --- | --- |
-| **Windows app** | **[Download MSI · Type build285](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
-| **Firmware: USB flashing / Bluetooth OTA** | **[Download firmware ZIP · both methods](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
-
-<!-- listener-local-text-entry -->
-**Try without hardware or a cloud key:** [Download Windows MSI](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi), open **Overview → Chinese ↔ English on this PC**, then explicitly prepare the required components once. Text translation has no API fee; voice recognition is separate. [Setup details](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/features/translation-shortcut.md).
+The numbered Windows x64 prerelease includes Companion Paraformer Large for local Chinese and English dictation. Choose the latest numbered candidate under Releases and check its SHA-256 in the release notes. You can use a computer microphone without an account or a cloud key.
 
 **English** · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md)
+
+## Listener keyboard
+
+The optional Listener keyboard has a microphone, a recording knob and four customizable keys. The hardware price is US$49. [Firmware and device instructions](https://github.com/Listener-ai-Macau/Listener-Firmware) · [RC1 firmware ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
 <img src="docs/assets/readme/keyboard-front.jpg" alt="Listener hardware: four transparent keys, black knob and six status lights" width="720">
 
@@ -26,9 +22,9 @@ A microphone, a recording knob and four customizable keys. Speak a message, emai
 
 **[Hear a short message become text · 25-second software example](docs/VOICE_EXAMPLE.md).** Prerecorded synthetic voice and actual Type results; no hardware operation shown.
 
-**Before you start:** the full hardware-audio path needs Windows Type and a configured recognition service or local model. Cloud usage is billed separately; no ready-to-use official cloud account or allowance is included in this release.
+The Windows prerelease includes its local speech model. A cloud provider is an optional choice and requires your own credentials.
 
-**RC1 is a prerelease.** Strong-interference separation is incomplete and intermittent early-close cases remain under review. [Current limits and release notes](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1). Hardware purchase link not yet announced.
+**RC1 is a prerelease.** Strong-interference separation is incomplete and intermittent early-close cases remain under review. [Current limits and release notes](https://github.com/Listener-ai-Macau/Listener-Type/releases). Hardware purchase link not yet announced.
 
 [First setup](https://github.com/Listener-ai-Macau/Listener-Type#make-your-first-dictation) · [Look through the user guide when needed](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/USAGE.en.md)
 
@@ -39,9 +35,9 @@ Firmware: **ESP32-S3 N16R8**, build `094f5a60049f59f4`. Select the same ZIP for 
 Type defaults to **USB wired flashing**, with the flasher included in the MSI. No Python, ESP-IDF or separate flashing software is required.
 Device settings are independent: select one USB/Bluetooth device and read its settings. Explicit edits save automatically when editing finishes; reading or switching devices does not write computer defaults. Names, lights, power, keys and knob settings stay on the selected board. Use this paired MSI and firmware ZIP.
 
-Type build285 includes **automatic input selection**: use a ready Listener device first, then the computer microphone when the device disconnects. Active dictation and question recordings finish with their original source. Choose Automatic, Microphone or Listener BLE in Settings → Recording or the tray; saved fixed-source choices are respected. Computer wake still uses its separate optional switch, off by default. Build276 was withdrawn after real owner wake rejections; this release restores build274’s keyword/owner path and retains its known intermittent-wake limits. Includes trailing-word streaming, Volcengine automatic ending and completion-only full copying. Firmware38 is unchanged.
+Automatic input selection uses a ready Listener device first and switches to the computer microphone when the device disconnects. Active sessions finish with their original source. Settings → Recording and the tray offer fixed-source choices.
 
-[Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
+[Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
 </details>
 
@@ -69,7 +65,7 @@ Computer shortcuts start unassigned. Set only the ones you want in **Settings �
 | A computer | Install, allow microphone access, and select **Computer microphone** in Settings → Recording. |
 | A Listener keyboard | Pair `listener` in Settings → Device, check readiness and select **Listener BLE** input. |
 
-Then configure the recognition provider's credentials/model, or prepare a runtime and model in local-ASR settings. Try one sentence in a plain text editor before using it in your daily work.
+The Windows installer selects Companion Paraformer Large by default on a fresh setup. Existing provider preferences are retained. Try one sentence in a plain text editor before adding cloud services.
 
 Windows is the primary installation and full keyboard-audio path. macOS / Linux currently use source builds; see platform scope below.
 
@@ -77,14 +73,14 @@ Windows is the primary installation and full keyboard-audio path. macOS / Linux 
 
 **Local text translation:** Tools → Translation, or Overview → Open text workspace → choose Translate text and an output language. On 64-bit Windows, Chinese ↔ English translation runs on your computer without a text-provider API key or per-translation API fee. Choose the original language and explicitly download its components once (about 113 MB for the first Chinese→English setup, including the runtime). Components stay outside the MSI; later translations use CPU and an on-demand worker. Review the result before using it. Other offline languages are not qualified yet; existing cloud translation remains an explicit option with provider charges. Voice recognition is a separate step and keeps its existing setup and fees.
 
-The app is free; cloud costs are set by each provider. Without an API key, prepare a Windows local model and start with Raw.
+The app is free. Local Raw dictation works with the included speech model. Each cloud provider sets its own fees.
 
 <details>
 <summary>Expand costs, local models and first-use setup</summary>
 
 - **The app:** Listener Type is free and open source. Normal local use needs no Listener account, and the keyboard is optional.
 - **Cloud services:** Bring your own recognition or text-provider credentials. Charges, quotas and trial terms are set by each provider. No cloud keys are bundled.
-- **No API key:** On Windows, prepare the Foundry Local runtime and a Whisper model in local recognition settings. Choose your computer microphone and try Raw dictation. Local recognition needs no cloud ASR key; download the model first. Speed depends on your computer. Styles, translation and voice QA have separate service requirements.
+- **No API key:** Use the bundled Companion Paraformer Large model with a computer microphone and Raw dictation. Recognition speed depends on the computer. Text styles, translation and voice questions have their own setup.
 
 [Recognition services and local model setup](docs/USAGE.en.md#recognition-services-and-local-models)
 
@@ -148,7 +144,7 @@ Choose direct, system-proxy or custom-proxy routing per provider. The remote mar
 | macOS 12+ | Planned: Apple Speech recognition, Accessibility insertion, packaged app. Today: build from source — computer microphone, local-model recognition, global shortcut |
 | Linux | Source build; computer microphone; best-effort X11 shortcuts or desktop-bound CLI commands on Wayland |
 
-The standard installer does not register a system IME. Wake and voiceprint do not guarantee speaker separation at every distance or in every noisy environment.
+The Windows MSI registers the TSF component used for [text insertion](docs/platform/windows-ime.md). Wake and voiceprint work best with a clear speaker signal. Review the result when voices overlap.
 
 <details>
 <summary>View the app interface</summary>
@@ -165,7 +161,7 @@ For connection, recording or insertion problems, start with panel 08 of the fold
 
 [Usage](docs/USAGE.en.md) · [Feature catalog](docs/product/features.en.md) · [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
-Tauri 2 / Rust / React / TypeScript / Vite. Full desktop builds also require the `third_party/denzic-platform` submodule.
+For a frontend or source build, follow [Contributing](CONTRIBUTING.md). Full desktop builds also require the pinned Denzic Platform submodule.
 
 ```bash
 npm ci

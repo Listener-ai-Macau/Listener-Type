@@ -1,22 +1,16 @@
-# Listener
+# Listener Type
 
-## 放在桌邊的 AI 入門小工具 · 49 美元
+開源語音輸入軟體。用電腦麥克風或 Listener 鍵盤說話，把文字寫入游標所在的輸入欄位。
 
+[下載 Windows 版](https://github.com/Listener-ai-Macau/Listener-Type/releases) · [第一次聽寫](#先完成一次輸入) · [使用指南](docs/USAGE.md) · [回報問題](https://github.com/Listener-ai-Macau/Listener-Type/issues/new/choose)
 
+Windows x64 編號預發行安裝包已內含 Companion Paraformer Large，可在電腦上辨識中文和英文。請在 Releases 選最新編號預發行版並核對 SHA-256。使用電腦麥克風即可開始，無需帳號或雲端金鑰。
 
-一個麥克風、一個錄音旋鈕、四顆可自訂按鍵。配合 Windows Type，用說話起草訊息、郵件或筆記，文字進入正在使用的輸入框。
+[English](README.md) · [简体中文](README.zh-CN.md) · **繁體中文**
 
-**49 美元為硬體價格，Type 軟體免費開源。**
+## Listener 鍵盤
 
-| 用途 | 直接下載 |
-| --- | --- |
-| **Windows 軟體** | **[下載 MSI · Type build285](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
-| **韌體：USB 燒寫 / 藍牙 OTA** | **[下載韌體 ZIP · 兩種方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
-
-<!-- listener-local-text-entry -->
-**沒有硬體或雲端 Key，也能先試：** [下載 Windows MSI](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)，開啟「概覽 → 本機中英翻譯」，首次明確下載所需元件即可。文字翻譯無逐次 API 費用；語音識別另行設定。[詳細設定](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/USAGE.md)。
-
-[English](README.md) · **繁體中文** · [简体中文](README.zh-CN.md)
+選購的 Listener 鍵盤內建麥克風、錄音旋鈕與四顆可自訂按鍵，硬體價格為 49 美元。[韌體與硬體說明](https://github.com/Listener-ai-Macau/Listener-Firmware) · [RC1 韌體 ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
 <img src="docs/assets/readme/keyboard-front.jpg" alt="Listener 實物：四顆透明按鍵、黑色旋鈕與六顆狀態燈" width="720">
 
@@ -28,9 +22,9 @@
 
 **[聽一條訊息變成文字 · 約25秒軟體示例](docs/VOICE_EXAMPLE.zh-CN.md)。** 預錄合成人聲與 Type 實際結果，未展示硬體操作；原音為英文。
 
-**開始前需要：** Windows Type，以及已設定的辨識服務或本機模型。雲端用量單獨計費；目前版本不附帶開箱可用的官方雲端帳號或辨識額度。
+Windows 預發行版內含本機辨識模型。需要雲端服務時，可填入自己的憑證，費用與額度由服務商決定。
 
-**RC1 仍為候選版本。** 強干擾分離尚未完善，偶發提前結束仍在跟進，詳見[目前限制與發布說明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1)。硬體購買入口尚未公布。
+**RC1 仍為候選版本。** 強干擾分離尚未完善，偶發提前結束仍在跟進，詳見[目前限制與發布說明](https://github.com/Listener-ai-Macau/Listener-Type/releases)。硬體購買入口尚未公布。
 
 [首次設定](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/README.zh-TW.md#先完成一次輸入) · [需要時再查使用指南](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/USAGE.md)
 
@@ -41,9 +35,9 @@
 Type 預設使用 **USB 有線燒寫**，能力已內建；無需另裝 Python、ESP-IDF 或其他燒寫軟體。
 裝置設定各自獨立：選擇一台有線／藍牙裝置並讀取；完成編輯後自動儲存明確修改，讀取或切換裝置不會寫入電腦預設值。名稱、燈光、電源、按鍵與旋鈕設定儲存在所選裝置。請配套使用本頁 MSI 與韌體 ZIP。
 
-Type build285 支援**輸入源自動選擇**：Listener 錄音通道就緒時優先用裝置，斷開後使用電腦麥克風；進行中的聽寫和問答先沿原來源收尾。在「設定 → 錄音」或系統匣可選自動、固定電腦或固定 Listener，已有固定選擇保留。電腦喚醒仍使用獨立開關，預設關閉。276 因實際本人喚醒被拒已撤回，本版恢復274的喚醒詞／身分判斷，既有間歇喚醒限制仍保留。包含尾句串流、火山識別自動結束和完成後僅完整複製，韌體仍為 Firmware38。
+自動輸入來源優先使用就緒的 Listener 裝置，斷線時切回電腦麥克風。進行中的錄音沿原來源收尾。也可以在「設定 → 錄音」或系統匣固定輸入來源。
 
-[Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
+[Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
 </details>
 
@@ -56,9 +50,9 @@ Type build285 支援**輸入源自動選擇**：Listener 錄音通道就緒時�
 | 只有電腦 | 安裝 MSI，允許麥克風存取，在「設定 → 錄音」選擇**電腦麥克風**。 |
 | 已有 Listener | 在「設定 → 裝置」配對，確認就緒；錄音來源選 **Listener BLE**。 |
 
-接著設定辨識服務所需憑證與模型，或在本機辨識設定中準備執行環境及模型。電腦快捷鍵首次均未設定，需要時到「設定 → 快捷鍵」自行錄入；更新保留既有個人綁定。把游標放進可編輯欄位，用已設定的錄音快捷鍵開始／結束；使用 Listener 時也可單擊旋鈕開始／結束。
+Windows 全新安裝預設使用 Companion Paraformer Large，更新保留既有辨識服務設定。先在純文字編輯器試一句，再視需要設定雲端服務。電腦快捷鍵可在「設定 → 快捷鍵」指定。
 
-軟體免費，正常本機使用無需 Listener 帳號。雲端服務自備憑證，費用、額度與試用條件由提供方決定；軟體不內附雲端密鑰。Windows 可準備 Foundry Local 與 Whisper 進行本機原文辨識，首次需下載，速度取決於電腦。文字整理、翻譯與語音問答另有服務需求。
+軟體免費。原文聽寫可使用內附模型，辨識速度取決於電腦。文字整理、翻譯與語音問答按功能要求個別設定。
 
 ## 原文與整理按需要選擇
 
@@ -93,13 +87,13 @@ Type build285 支援**輸入源自動選擇**：Listener 錄音通道就緒時�
 | macOS 12+ | 目前從原始碼建置：電腦麥克風、本機模型與全域快速鍵；Apple Speech、輔助使用插入及正式安裝包仍規劃中 |
 | Linux | 原始碼建置、電腦麥克風；X11 快速鍵盡力支援，Wayland 使用桌面綁定 CLI 命令 |
 
-標準安裝包不註冊系統輸入法。喚醒與聲紋不保證在任意距離、噪音或多人同說時可靠分離。
+Windows MSI 會註冊用於[文字寫入的 TSF 元件](docs/platform/windows-ime.md)。喚醒與聲紋依賴清晰人聲，多人同時說話時請檢查結果。
 
 ## 文件與開發
 
 [使用指南（簡體中文）](docs/USAGE.md) · [English guide](docs/USAGE.en.md) · [功能目錄](docs/product/features.md) · [問題回報](https://github.com/Listener-ai-Macau/Listener-Type/issues) · [發布記錄](https://github.com/Listener-ai-Macau/Listener-Type/releases)
 
-Listener Type 使用 Tauri 2、Rust、React、TypeScript 與 Vite；完整桌面建置還需 `third_party/denzic-platform` 子模組。
+原始碼開發請參考[貢獻指南](CONTRIBUTING.zh-CN.md)，完整桌面建置需要固定版本的 Denzic Platform 子模組。
 
 ```bash
 npm ci

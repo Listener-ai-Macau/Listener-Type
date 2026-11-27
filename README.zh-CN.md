@@ -1,22 +1,16 @@
-# Listener
+# Listener Type
 
-## 放在桌边的 AI 入门小工具 · 49 美元
+开源语音输入软件。用电脑麦克风或 Listener 键盘说话，把文字写入光标所在的输入框。
 
+[下载 Windows 版](https://github.com/Listener-ai-Macau/Listener-Type/releases) · [第一次听写](#先完成一次输入) · [使用指南](docs/USAGE.md) · [反馈问题](https://github.com/Listener-ai-Macau/Listener-Type/issues/new/choose)
 
-
-一个麦克风、一个录音旋钮、四颗可自定义按键。配合 Windows Type，用说话起草消息、邮件或笔记，文字进入正在使用的输入框。
-
-**49 美元为硬件价格，Type 软件免费开源。**
-
-| 用途 | 直接下载 |
-| --- | --- |
-| **Windows 软件** | **[下载 MSI · Type build285](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)** |
-| **固件：USB 烧写 / 蓝牙 OTA** | **[下载固件 ZIP · 两种方式共用](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/download/v1.0.6-rc1/ListenerFirmware_1.0.6-rc1_ESP32S3.zip)** |
-
-<!-- listener-local-text-entry -->
-**没有硬件或云 Key，也能先试：** [下载 Windows MSI](https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.0.6-rc1/ListenerType_1.0.6-rc1_x64_en-US.msi)，打开「概览 → 本机中英翻译」，首次明确下载所需组件即可。文字翻译无逐次 API 费用；语音识别另行配置。[具体设置](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/USAGE.md)。
+Windows x64 编号预发布包内含 Companion Paraformer Large，可本地转写中文和英文。请在 Releases 选最新编号预发布，并核对该页的 SHA-256。用电脑麦克风即可开始，无需账号或云端密钥。
 
 [English](README.md) · **简体中文** · [繁體中文](README.zh-TW.md)
+
+## Listener 键盘
+
+可选的 Listener 键盘自带麦克风、录音旋钮和四颗可自定义按键，硬件价格为 49 美元。[固件及硬件说明](https://github.com/Listener-ai-Macau/Listener-Firmware) · [RC1 固件 ZIP](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
 <img src="docs/assets/readme/keyboard-front.jpg" alt="Listener 实物：四颗透明按键、黑色旋钮与六颗状态灯" width="720">
 
@@ -28,9 +22,9 @@
 
 **[听一条消息变成文字 · 约25秒软件示例](docs/VOICE_EXAMPLE.zh-CN.md)。** 预录合成人声与 Type 实际结果，未展示硬件操作；原音为英文。
 
-**开始前需要：** Windows Type，以及已配置的识别服务或本地模型。云端用量单独计费；当前版本不附带开箱可用的官方云账号或识别额度。
+Windows 预发布包自带本地识别模型。需要使用云服务时，可填写自己的凭据，费用和额度由服务方决定。
 
-**RC1 仍为候选版本。** 强干扰分离尚未完善，偶发提前结束仍在跟进，详见[当前限制与发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1)。硬件购买入口尚未公布。
+**RC1 仍为候选版本。** 强干扰分离尚未完善，偶发提前结束仍在跟进，详见[当前限制与发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases)。硬件购买入口尚未公布。
 
 [首次设置](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/README.zh-CN.md#先完成一次输入) · [需要时再查使用指南](https://github.com/Listener-ai-Macau/Listener-Type/blob/master/docs/USAGE.md)
 
@@ -41,9 +35,9 @@
 Type 默认使用 **USB 有线刷机**，刷机能力已内置；客户无需另装 Python、ESP-IDF 或其它刷机软件。
 设备设置各自独立：选择一台有线／蓝牙设备并读取；完成编辑后自动保存明确修改，读取或切换设备不会写入电脑默认值。名称、灯光、电源、按键和旋钮设置保存在所选设备中。请配套使用本页 MSI 与固件 ZIP。
 
-Type build285 支持**输入源自动选择**：Listener 录音通道就绪时优先用设备，断开后使用电脑麦克风；正在进行的听写和问答先沿原来源收尾。在「设置 → 录音」或托盘可选自动、固定电脑或固定 Listener，已有固定选择保留。电脑唤醒仍使用独立开关，默认关闭。276 因实际本人唤醒被拒已撤回，本版恢复274的唤醒词／身份判断，既有间歇唤醒限制仍保留。包含尾句流式、火山识别自动结束和完成后仅完整复制，固件仍为 Firmware38。
+自动输入源优先使用就绪的 Listener 设备，设备断开时切到电脑麦克风。进行中的录音沿原输入源收尾。也可在「设置 → 录音」或托盘固定输入源。
 
-[Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
+[Release notes / 发布说明](https://github.com/Listener-ai-Macau/Listener-Type/releases) · [Firmware / 固件](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1)
 
 </details>
 
@@ -71,20 +65,20 @@ Type build285 支持**输入源自动选择**：Listener 录音通道就绪时�
 | 只有电脑 | 安装软件，允许麦克风访问，在「设置 → 录音」选择**电脑麦克风**。 |
 | 已有 Listener 键盘 | 在「设置 → 设备」配对 `listener`，确认就绪；录音来源选 **Listener BLE**。 |
 
-接着选识别服务：填写提供方要求的凭据与模型，或在本地识别设置中准备运行时和模型。先在记事本试一句话，看到文字再开始日常使用。
+Windows 全新安装默认使用 Companion Paraformer Large。已有的识别服务设置会保留。先在记事本试录一句，再按需设置云服务。
 
 Windows 是主要安装与完整键盘音频路径。macOS / Linux 当前从源码构建，详见下方平台说明。
 
 ### 软件免费，服务费用分别计算
 
-软件免费；云服务费用由提供方决定。没有云端密钥，可先准备 Windows 本地模型并用原文模式（Raw）听写。
+软件免费。原文听写可用内置本地模型，云服务费用由各提供方决定。
 
 <details>
 <summary>展开费用、本地模型与首次配置说明</summary>
 
 - **软件：** Listener Type 免费开源；正常本机使用不需要 Listener 账号，也不必先买键盘。
 - **云服务：** 使用你自己的语音识别或文字服务凭据，费用、额度和试用条件由对应提供方决定。软件不附带云端密钥。
-- **没有云端密钥：** Windows 可先在本地识别设置中准备 Foundry Local 运行时与 Whisper 模型，选择电脑麦克风，用原文模式（Raw）试录。本地识别无需云端识别密钥；首次需下载模型，速度取决于电脑。整理、翻译与语音问答另有服务配置要求。
+- **无云端密钥：** 用内置 Companion Paraformer Large 和电脑麦克风进行原文（Raw）听写。识别速度取决于电脑。文字整理、翻译和语音问答按各功能要求单独配置。
 
 [查看识别服务与本地模型设置](docs/USAGE.md#识别服务与网络)
 
@@ -149,7 +143,7 @@ Windows 是主要安装与完整键盘音频路径。macOS / Linux 当前从源�
 | macOS 12+ | 规划中：Apple Speech 识别、辅助功能插入、正式安装包。当前可从源码构建：电脑麦克风、本地模型识别、全局快捷键 |
 | Linux | 源码构建；电脑麦克风；X11 快捷键尽力支持，Wayland 使用桌面快捷键绑定 CLI |
 
-标准安装包不注册系统输入法。自动唤醒与声纹不保证在任意距离、噪声或多人重叠场景下可靠分离。
+Windows MSI 会注册用于[文字写入的 TSF 组件](docs/platform/windows-ime.md)。自动唤醒和声纹依赖清晰人声，多人同时说话时请复核结果。
 
 <details>
 <summary>查看软件界面</summary>
@@ -166,7 +160,7 @@ Windows 是主要安装与完整键盘音频路径。macOS / Linux 当前从源�
 
 [使用说明](docs/USAGE.md) · [功能目录](docs/product/features.md) · [发布记录](https://github.com/Listener-ai-Macau/Listener-Type/releases) · [贡献指南](CONTRIBUTING.zh-CN.md) · [安全](SECURITY.zh-CN.md)
 
-Tauri 2 / Rust / React / TypeScript / Vite。完整桌面构建还需要 `third_party/denzic-platform` 子模块。
+从源码开发请看[贡献指南](CONTRIBUTING.zh-CN.md)，完整桌面构建需要固定版本的 Denzic Platform 子模块。
 
 ```bash
 npm ci

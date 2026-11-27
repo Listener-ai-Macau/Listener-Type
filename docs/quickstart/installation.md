@@ -6,10 +6,10 @@ RC1 provides a Windows MSI. macOS and Linux currently require source builds; see
 
 ## Windows
 
-1. Download the Windows `.msi` from [Listener Type Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases). Verify it against the SHA-256 table in the release description.
+1. Select the latest numbered Windows x64 prerelease in [Listener Type Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases). Verify the MSI against the SHA-256 in that release description.
 2. Run the installer. The production installer is per-machine so Windows may ask for administrator approval.
 3. Launch Listener Type from the Start menu.
-4. On first launch, grant microphone/hotkey permissions, then follow the Listener BLE pairing prompt. Use **Start pairing** to switch into the OOBE pairing flow; you should not need Node.js, Rust, ESP-IDF, a serial port, or UUID entry.
+4. On first launch, allow microphone access. New profiles select the included Companion Paraformer Large model by default. For a computer microphone, follow the [first-dictation guide](../USAGE.en.md#install-and-make-your-first-dictation). If you have a Listener keyboard, choose **Start pairing** and follow the guided Bluetooth setup.
 5. If pairing gets stuck, open **Settings -> About -> Device recovery**. Listener Type stops the current recording/BLE session and opens Windows Bluetooth; remove `listener`, then return to Recording -> Listener BLE and pair again.
 6. If first launch or pairing still fails, open **Settings -> About -> Export diagnostic package** and save the JSON file. The package includes app version, BLE/config status, recent errors and a timeline; it does not include transcripts or API keys, but saved debug recordings may be attached. Debug recording is off by default; review the package and logs before sharing.
 
@@ -25,7 +25,7 @@ Listener Type uses five user-facing states during the Voice Keyboard OOBE:
 | Error | Connection, subscription, recording, or transcription failed | Retry or export diagnostics |
 | Recovery | Reconnect or re-pair is needed | Remove `listener` in Windows Bluetooth and pair again |
 
-The Windows installer should not install a system input method. Listener Type uses the normal Windows insertion/fallback path by default; the TSF IME bridge is an optional developer validation path and is not registered by the product installer. If an older test package registered `Listener Type Voice Input`, the current installer attempts to unregister that legacy input method during install/uninstall.
+The Windows MSI registers the [TSF insertion component](../platform/windows-ime.md). If the target app cannot accept TSF insertion, follow the paste prompt or recover the final text from History.
 
 ### WebView2 Runtime
 

@@ -21,7 +21,7 @@
 - Vault payloads are chunked because Windows Credential Manager has a small per-entry blob limit.
 - Legacy credential files or old keyring accounts are migrated into the current vault format when possible.
 - Provider validation and model listing run through the active provider config rather than hardcoded defaults.
-- Local ASR providers such as Qwen3-ASR and Foundry Local Whisper are treated as keyless for credential validation.
+- Companion Paraformer Large and Qwen3-ASR are treated as keyless for credential validation.
 - Diagnostic export includes app/device/config status, recent errors, and redacted timeline data; it does not export audio, transcripts, inserted text, or credential values.
 
 ## Verification

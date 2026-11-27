@@ -2,13 +2,13 @@
 
 **English** · [Chinese](USAGE.md)
 
-This guide covers the current [v1.0.6-rc1 Windows candidate](https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.0.6-rc1). Check its build, checksum and known limits on the release page, and use the paired [firmware release](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1). The keyboard is optional; use a computer microphone to try the app first. Earlier 1.0.5 release documents are historical.
+This guide covers the numbered [Windows x64 prerelease](https://github.com/Listener-ai-Macau/Listener-Type/releases). Check its build, checksum and known limits on the release page, and use the paired [firmware release](https://github.com/Listener-ai-Macau/Listener-Firmware/releases/tag/v1.0.6-rc1). The keyboard is optional; use a computer microphone to try the app first. Earlier 1.0.5 release documents are historical.
 
 ## No API key: choose a starting point
 
 | What you want | Current path | What it requires |
 | --- | --- | --- |
-| Turn speech into text | Prepare Foundry Local and a Whisper model in Windows local-recognition settings; select Computer microphone and start with default Raw | Internet and disk space for the first download; memory while running. Speed depends on the computer. No cloud ASR key |
+| Turn speech into text | Use the included Companion Paraformer Large model, choose Computer microphone, and start with Raw | The numbered Windows x64 MSI and microphone permission |
 | Remove fillers or organize a message automatically | Configure an available text service, then select Light, Structured or Formal | Separate from recognition; a downloaded speech model does not also provide these text services. Provider charges may apply |
 | Use your existing cloud recognizer | Enter that provider's required credentials, endpoint and model, then try Raw | Provider availability, quota and charges |
 
@@ -16,29 +16,26 @@ You can view, edit and import/export built-in style packs locally. **That does n
 
 ### Windows clicks for the no-key path
 
-1. Open **Settings → Providers**. In the speech-recognition section, click **Prepare local recognition**. You do not need to select a cloud provider or enter a key first.
-2. On **Windows Foundry Local Whisper**, keep the default **Whisper Small (whisper-small)**. Base and Tiny are smaller alternatives with a possible accuracy tradeoff.
-3. Check the displayed model size and runtime status. Size comes from the current catalog; “unknown” means it has not been obtained, not a zero-byte download. Total disk use also includes the runtime and extracted files.
-4. Click **Prepare and use local recognition** and wait for download, loading and activation. Cancel or failure preserves the old provider. **Download / load only** does not activate it. Check the loaded-model and active status before recording.
-5. Select **Computer microphone** in Recording settings and keep default **Raw** in Styles. If you want a computer shortcut, assign one in **Settings → Shortcuts** first. Focus a writable field and use that configured recording shortcut to start and stop, then review the text.
-
-This path does not provide automatic polishing or instant use before downloading. Use the size currently shown to decide whether to proceed; unknown download and running-memory sizes are not fixed promises.
+1. Install the latest numbered Windows x64 MSI from [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) and open Listener Type. A new installation selects the included Companion Paraformer Large model by default.
+2. If you previously chose a different recognizer, open **Settings → Local Recognition** and select the included model. Confirm that it is ready.
+3. Choose **Computer microphone** in **Settings → Recording** and keep **Raw** in Styles. Assign a recording shortcut in **Settings → Shortcuts** if it is unset.
+4. Put the cursor in a text editor, use the shortcut to start, speak a short sentence, then use the same shortcut to stop. Review the inserted text or follow the paste prompt.
 
 ## Install and make your first dictation
 
 1. Download the current Windows MSI from [Releases](https://github.com/Listener-ai-Macau/Listener-Type/releases). Match its checksum against the SHA-256 table in the release description; filenames and hashes belong to the specific release.
 2. Install and open Listener Type. Allow microphone access. Windows installation uses WebView2; prepare its runtime first on an offline computer.
 3. In Settings → Recording, choose Computer microphone. To use a keyboard, charge it over USB-C, click the knob to power on, and start pairing in Settings → Device. Select `listener` in Windows Bluetooth, return to Type and check the connection. Choose Listener BLE as the recording source.
-4. Configure a recognition provider's credentials and model, or prepare the Windows local recognition runtime and model. Try Raw in a plain text editor before adding other services.
+4. Confirm the included local recognizer is ready. Try Raw in a plain text editor before adding other services.
 5. Focus the destination field. Use your configured recording shortcut or click the keyboard knob to start and stop. Review the final text. If the application blocks insertion, follow the paste prompt or copy from History.
 
-Press Esc while recording to cancel the session. The recording capsule displays a preview; its text does not establish that insertion has succeeded. Streaming insertion is enabled in preferences by default, but actual incremental insertion depends on the platform, provider and mode. The standard installer does not register a system input method.
+Press Esc while recording to cancel the session. The recording capsule shows a preview. Check the destination field to confirm insertion. Incremental insertion depends on the platform, provider and mode. The Windows MSI registers the [TSF insertion component](platform/windows-ime.md).
 
 ## Recognition services and local models
 
 The app is free and open source. Normal local use needs no Listener account. Cloud recognition and text providers charge separately; the app does not include cloud keys.
 
-Choose the provider in Settings and enter the required credentials, endpoint and model. Check the provider's own account and quota. For Windows local recognition, prepare Foundry Local and a Whisper model before recording. Downloading a model requires network access; recognition speed depends on the computer. Local recognition needs no cloud ASR key.
+Windows local recognition uses the packaged Companion Paraformer Large model without a cloud ASR key. If you choose cloud recognition in Settings, enter the provider’s credentials, endpoint and model, and check its quota.
 
 Raw is the default and filler cleanup is off by default. Styles, translation and selection questions require a text provider. Voice questions specifically require Volcengine streaming ASR App Key / Access Key as well; a different dictation provider or local model does not replace that configuration.
 

@@ -1,5 +1,13 @@
 # Listener Type Documentation
 
+## Start here
+
+- [Windows installation and checksums](quickstart/installation.md)
+- [Usage in English](USAGE.en.md) · [简体中文](USAGE.md)
+- [Local speech recognition](features/local-asr-management.md)
+- [Help and reporting](../SUPPORT.md) · [Security reports](../SECURITY.md)
+- [Contributing](../CONTRIBUTING.md) · [贡献指南](../CONTRIBUTING.zh-CN.md)
+
 This documentation set is organized so product behavior, implementation files and release safety can be checked together.
 
 ## Product
@@ -32,7 +40,10 @@ This documentation set is organized so product behavior, implementation files an
 - [Windows build](platform/windows-build.md)
 - [Windows IME](platform/windows-ime.md)
 
-## Release And Security
+## Releases and security
+
+- [App releases](https://github.com/Listener-ai-Macau/Listener-Type/releases) · [Firmware releases](https://github.com/Listener-ai-Macau/Listener-Firmware/releases)
+- [1.0.6 RC1 release notes](release/1.0.6-rc1.md)
 
 - [1.0.5 release notes](release/1.0.5.md)
 - [Updater](release/updater.md)
@@ -46,6 +57,8 @@ This documentation set is organized so product behavior, implementation files an
 - [Feature traceability](../specs/traceability/features.md)
 - [File traceability](../specs/traceability/files.md)
 
-## Provenance
+## Historical references
+
+- [Engineering goals](goals/) · [Release evidence](release/evidence/)
 
 - [Migration provenance](archive/upstream-provenance.md) records the upstream documentation set that was reviewed and adapted during the Listener Type migration.

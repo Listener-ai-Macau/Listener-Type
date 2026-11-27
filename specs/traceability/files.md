@@ -12,41 +12,111 @@ Historical file inventory, retained for lookup. It is not a per-change checklist
 | `scripts/build-mac.sh` | Automation and audits | Node/PowerShell script tests |
 | `scripts/capture-live-wake-attempts.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/capture-live-wake-attempts.test.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-audio-file-cancel-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-audio-file-result-reachability-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-audio-file-trial-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-audio-setup-return-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-audio-text-workspace-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-audio-workspace-provider-setup-ui.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-brand-residue.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-buffered-source-facts-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-buffered-translation-facts-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-capture-control-trace.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-cloud-services.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-concise-style-choice-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-credential-edit-ack-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-customer-settings-ui.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-dark-mode.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-device-autosave-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-device-key-practice-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-device-layout-autosave-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-device-layouts-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-device-recovery-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-diagnostic-export-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-dictation-guide-input-source-ui.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-dirty-change-inventory.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-doc-inheritance.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-draft-refinement-handoff-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-earlier-trial-result-ui.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-ec11-type-recovery-randomized.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-ec11-type-recovery-speed.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-embedded-ble-processing-led.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-first-use-entry-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-first-use-overview-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-guide-scroll-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-hardware-layout-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-history-copy-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-history-example-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-history-recording-lifetime-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-history-selection-ui.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-hotkey-injection.mjs` | Global hotkeys | Hotkey tests and manual smoke |
 | `scripts/check-hotkey-recorder.mjs` | Global hotkeys | Hotkey tests and manual smoke |
+| `scripts/check-intermittent-endpoint.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-key-page-practice-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-layout-editor-stability-ui.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-live-wake-endpoint.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-live-wake-endpoint.test.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-live-wake-only.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-live-wake-only.test.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-local-translation-preservation.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-local-translation-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-local-wording-without-service-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-long-audio-ui.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-module-budgets.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-network-health-state.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-offline-wording-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-onboarding-ui.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-ota-transfer-speed-log.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-ota-transfer-speed-log.test.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-overview-credentials-ui.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-performance-baselines.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-polite-edit-suggestions-ui.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-preproduction-bench-contract.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-preproduction-operator-note-triage.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-primary-navigation-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-protected-translation-ui.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-pwsh-entrypoints.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-recording-consumption-evidence.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-recording-consumption-evidence.test.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-recording-consumption-runner.test.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-recording-failure-history-ui.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-recording-low-latency-regression.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-regression-guard-commits.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-regression-guard-commits.test.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-release-root-artifacts.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-release-version.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-release-version.test.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-repo-hygiene.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-result-key-phrase-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-result-reading-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-saved-layout-phrases-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-saved-message-reuse-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-saved-text-drafts-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-selected-usb-exchange.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-style-draft-readiness-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-style-editor-locales-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-style-text-trial-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-style-trial-availability-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-style-trial-comparison-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-style-trial-handoff-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-style-trial-layout-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-style-trial-readiness-identity-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-style-workspace-settings-return-ui.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-tauri-info.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-text-first-onboarding-ui.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-traceability.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-translation-guidance-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-translation-text-trial-ui.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-type-startup-reconnect-speed.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-ui-clarity-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-unassigned-shortcuts-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-vocabulary-ui.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-volcengine-low-latency-preview.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-window-hotkey-fallback.mjs` | Global hotkeys | Hotkey tests and manual smoke |
+| `scripts/check-wording-error-recovery-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-workspace-action-visibility-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-workspace-result-reachability-ui.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-workspace-source-continuation-ui.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/collect-listener-1.0.4-diagnostics.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/dirty-change-inventory.json` | Automation and audits | Node/PowerShell script tests |
 | `scripts/listener-1.0.4-requirement-test-map.json` | Automation and audits | Node/PowerShell script tests |
@@ -54,8 +124,13 @@ Historical file inventory, retained for lookup. It is not a per-change checklist
 | `scripts/multi-speaker-timeline-scenarios.json` | Automation and audits | Node/PowerShell script tests |
 | `scripts/owner-accept-1.0.4-recording-ux.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/performance-baselines.json` | Automation and audits | Node/PowerShell script tests |
+| `scripts/publish-release-asset-safely.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/publish-release-asset-safely.test.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/record-preproduction-machine-acceptance.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/regression-guard-commits.json` | Automation and audits | Node/PowerShell script tests |
+| `scripts/regression-history-windows-links.test.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/regression-history.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/regression-history.test.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/release-check.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/release-human-review-evidence.json` | Automation and audits | Node/PowerShell script tests |
 | `scripts/release-version-gate.json` | Automation and audits | Node/PowerShell script tests |
@@ -72,12 +147,30 @@ Historical file inventory, retained for lookup. It is not a per-change checklist
 | `scripts/run-synthetic-speaker-ab.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-target-speaker-overlap-regressions.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-v1.0.2-regression.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/shared_log_reader.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/show-cn-interference-development-acceptance.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/show-cn-interference-final-acceptance.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/show-interference-playback-acceptance.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/show-live-wake-acceptance.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/show-live-wake-acceptance.test.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/speaker-evaluation-manifest.example.json` | Automation and audits | Node/PowerShell script tests |
+| `scripts/test-background-type-control.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/test-ble-rename-notice.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/test-frontend.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/test-ota-aligned-packing.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/test-ota-exclusive-prepare.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/test-ota-lease-release.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/test-ota-native-interval.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/test-ota-optional-data-lane.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/test-speaker-runtime-init.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/test_translation_currency_fidelity.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/test_translation_date_fidelity.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/test_translation_light_worker.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/test_translation_result_fidelity.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/test_translation_sentence_boundaries.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/test_translation_signed_number_fidelity.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/test_translation_time_fidelity.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/test_windows_credential_scope.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/validation/run_ble_recording_cancel_matrix.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/verify-frontend.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/verify-listener-1.0.4-clean-env.ps1` | Automation and audits | Node/PowerShell script tests |
@@ -124,6 +217,7 @@ Historical file inventory, retained for lookup. It is not a per-change checklist
 | `scripts/windows-startup-lifecycle-contract.test.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-terminal-clipboard-restore-smoke.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-ui-config.test.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/windows_credential_scope.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/write-updater-manifest.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/write-updater-manifest.test.mjs` | Automation and audits | Node/PowerShell script tests |
 | `services/voiceprint_gateway/.env.example` | Optional account and voiceprint gateway | Gateway unit/integration tests, deployment smoke |
@@ -148,33 +242,42 @@ Historical file inventory, retained for lookup. It is not a per-change checklist
 | `src-tauri/src/asr/cloud_gateway.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/cloud_voiceprint.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/content_consensus.rs` | ASR providers | Provider tests, dictation smoke |
-| `src-tauri/src/asr/content_recovery_worker.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/content_recovery_assets.rs` | Optional content model download, bounded fingerprinted cache and legacy reuse | Targeted download/cache and installed worker checks |
+| `src-tauri/src/asr/content_recovery_worker.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/fixtures/content-consensus-20261006.json` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/frame.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/local/cache.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/local/companion_paraformer.rs` | Windows local ASR | Provider tests, packaged dictation smoke |
+| `src-tauri/src/asr/local/companion_provider.rs` | Windows local ASR | Provider tests, packaged dictation smoke |
 | `src-tauri/src/asr/local/download.rs` | ASR providers | Provider tests, dictation smoke |
-| `src-tauri/src/asr/local/foundry.rs` | ASR providers | Provider tests, dictation smoke |
-| `src-tauri/src/asr/local/foundry_native.rs` | ASR providers | Provider tests, dictation smoke |
-| `src-tauri/src/asr/local/foundry_provider.rs` | ASR providers | Provider tests, dictation smoke |
-| `src-tauri/src/asr/local/foundry_runtime.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/local/local_provider.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/local/mod.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/local/models.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/local/paraformer.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/local/punctuation.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/local/qwen_engine.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/local/qwen_ffi.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/local/test_run.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/local/wake_audio.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/local/wake_helper.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/mod.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/multitalker_native.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/owner_content_extraction.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/target_speaker_extraction.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/target_speaker_output.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/testdata/source_snapshot_synthetic_frames.json` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/testdata/source_snapshot_synthetic_no_context.json` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/tracked_source_audio.rs` | Retained, unlinked research candidate for source-audio tracking; not a production module or current model-research authorization | Historical candidate bindings in the Listener handoff progress record; no current runtime claim |
+| `src-tauri/src/asr/tracked_source_presence.rs` | Retained, unlinked research candidate for source presence; no default endpoint authority | Historical source/weak-owner failures and withdrawals; not included by the active module graph |
+| `src-tauri/src/asr/tracked_source_worker.rs` | Retained, unlinked research source worker; not reactivated by decoder lifecycle repairs | Historical candidate artifact/source bindings; do not treat file presence as installed functionality |
 | `src-tauri/src/asr/volcengine.rs` | ASR providers, source permissions and raw/audio consumption independent of rendered delivery | Saved native response/endpoint replay, provider revision and capture-boundary contracts |
+| `src-tauri/src/asr/volcengine_api_key_live_probe.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/volcengine_cloud_owner.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/volcengine_cloud_owner_recorded_fixture.json` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/volcengine_native_cache.rs` | Retained unlinked candidate for capture/enrollment/PCM scoped observations; isolated while the History/clipboard fix is delivered, not compiled in current runtime | Candidate source ZIP and five ownership regressions in handoff work/source-evidence-cause-20261015; no installed interference claim |
+| `src-tauri/src/asr/volcengine_native_identity.rs` | Enrollment-bound RAM natural reference with bounded non-starving acquisition and exact native PCM identity; separates raw activity from mixed context protection without owning STOP | Saved native/PCM replay, weak owner counterexamples, current source and profile lifecycle |
 | `src-tauri/src/asr/volcengine_owner_gap_fixture.json` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/volcengine_pending_source.rs` | Independent exact-suffix endpoint obligation evidence after body consumption; asynchronous bounded enrollment scoring, with no text deletion or STOP authority | Saved slow-tail and owner-continuation replay; capture/profile reset and detector-positive veto |
 | `src-tauri/src/asr/volcengine_platform.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/volcengine_secondary_timing_empty_row_fixture.json` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/volcengine_snapshot_confirmation.rs` | ASR providers | Provider tests, dictation smoke |
@@ -182,16 +285,9 @@ Historical file inventory, retained for lookup. It is not a per-change checklist
 | `src-tauri/src/asr/volcengine_snapshot_runtime_tests.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/volcengine_snapshot_timing_fixture.json` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/volcengine_source_snapshot.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/volcengine_speaker_ledger.rs` | Ordinary ASR source revisions, separate identity/activity protection and dual-evidence foreign tail projection | Owner preservation, valid empty occurrences, source revision, overlap and late positive evidence |
 | `src-tauri/src/asr/volcengine_speaker_partition.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/volcengine_transcript.rs` | Native row/word rendering reconciliation, recognition confirmation and transcript merging | Provider transcript contracts and saved missing-row response replay |
-| `src-tauri/src/asr/volcengine_speaker_ledger.rs` | Ordinary ASR source revisions, separate identity/activity protection and dual-evidence foreign tail projection | Owner preservation, valid empty occurrences, source revision, overlap and late positive evidence |
-| `src-tauri/src/asr/volcengine_native_identity.rs` | Enrollment-bound RAM natural reference with bounded non-starving acquisition and exact native PCM identity; separates raw activity from mixed context protection without owning STOP | Saved native/PCM replay, weak owner counterexamples, current source and profile lifecycle |
-| `src-tauri/src/asr/volcengine_native_cache.rs` | Retained unlinked candidate for capture/enrollment/PCM scoped observations; isolated while the History/clipboard fix is delivered, not compiled in current runtime | Candidate source ZIP and five ownership regressions in handoff work/source-evidence-cause-20261015; no installed interference claim |
-| `src-tauri/src/asr/tracked_source_audio.rs` | Retained, unlinked research candidate for source-audio tracking; not a production module or current model-research authorization | Historical candidate bindings in the Listener handoff progress record; no current runtime claim |
-| `src-tauri/src/asr/tracked_source_presence.rs` | Retained, unlinked research candidate for source presence; no default endpoint authority | Historical source/weak-owner failures and withdrawals; not included by the active module graph |
-| `src-tauri/src/asr/tracked_source_worker.rs` | Retained, unlinked research source worker; not reactivated by decoder lifecycle repairs | Historical candidate artifact/source bindings; do not treat file presence as installed functionality |
-| `src-tauri/src/coordinator/dictation_endpoint_probe.rs` | Retained, unlinked research endpoint probe, separate from the installed coordinator | Historical modeled receipts and source-evidence limitations; no editor or physical STOP claim |
-| `src-tauri/src/asr/volcengine_pending_source.rs` | Independent exact-suffix endpoint obligation evidence after body consumption; asynchronous bounded enrollment scoring, with no text deletion or STOP authority | Saved slow-tail and owner-continuation replay; capture/profile reset and detector-positive veto |
 | `src-tauri/src/asr/volcengine_untimed_merge.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/wav.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/whisper.rs` | ASR providers | Provider tests, dictation smoke |
@@ -202,20 +298,27 @@ Historical file inventory, retained for lookup. It is not a per-change checklist
 | `src-tauri/src/capsule_placement.rs` | Capsule position and persistence | Build and targeted geometry/persistence tests |
 | `src-tauri/src/cli.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/combo_hotkey.rs` | Global hotkeys | Hotkey tests and manual smoke |
+| `src-tauri/src/commands/audio_file_trial.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/commands/cloud_account.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/commands/device/ble.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/commands/device/firmware.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/commands/device/mod.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/commands/device/settings.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/commands/device/settings_selection.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/commands/device/wired_boot_reset.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/commands/diagnostics_export.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/commands/local_asr_commands.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/commands/local_device_layouts.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/commands/marketplace.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/commands/mod.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/commands/saved_text_drafts.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/commands/style_pack_commands.rs` | Local data and style packs | Rust unit tests, local import/export smoke |
+| `src-tauri/src/commands/style_trial_delivery.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/commands_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation.rs` | Dictation lifecycle, current-cursor tail append, witnessed middle supplementation and complete recovery retention | Build and saved continuation/final-delivery regressions |
 | `src-tauri/src/coordinator/dictation_asr_selection.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_capture_control_trace.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_content_probe.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_delivery_diagnostics.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_device_ai.rs` | Session-owned, revision-ordered device processing hints; conditional guard/timer cleanup | Build; queued stale/reordered hint and warning-preservation regressions |
@@ -227,28 +330,48 @@ Historical file inventory, retained for lookup. It is not a per-change checklist
 | `src-tauri/src/coordinator/dictation_embedded_submit.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_endpoint_clock.rs` | Owner endpoint, unresolved recognition obligations, activity-bound settling and matching editor receipt ownership | Build and affected recognition/activity/dispatch/receipt regressions |
 | `src-tauri/src/coordinator/dictation_endpoint_policy.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_endpoint_probe.rs` | Retained, unlinked research endpoint probe, separate from the installed coordinator | Historical modeled receipts and source-evidence limitations; no editor or physical STOP claim |
+| `src-tauri/src/coordinator/dictation_input_health.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_local_microphone.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_local_speech_activity.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_microphone_endpoint.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_native_composition.rs` | Revisable Owner editor range, immutable committed prefix, fresh native confirmation and session-scoped input failure finalization | Saved complete provider-to-editor replay, range revocation and receipt clock regressions |
+| `src-tauri/src/coordinator/dictation_native_endpoint_diagnostic.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_pending_tail_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_preview.rs` | Raw consumption transaction, rendered reconciliation, native confirmation and source-bound continuation | Saved native/rendered-prefix replay, display transforms, delivery/rollback and timed continuation |
 | `src-tauri/src/coordinator/dictation_session.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/coordinator/dictation_native_composition.rs` | Revisable Owner editor range, immutable committed prefix, fresh native confirmation and session-scoped input failure finalization | Saved complete provider-to-editor replay, range revocation and receipt clock regressions |
 | `src-tauri/src/coordinator/dictation_streaming_composition.rs` | Optional TSF composition using revisable Owner snapshots and native commit/cancel ownership | Affected delivery and native composition regressions |
 | `src-tauri/src/coordinator/dictation_target_speaker_update.rs` | Physical STOP admission with current presence and pending-body revalidation | Build and affected STOP admission contracts |
 | `src-tauri/src/coordinator/dictation_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_volcengine_callbacks.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_wake_capture_startup.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_diagnostic_retention.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_diagnostics.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_fusion.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_fusion_core.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_wake_keyword_check.rs` | Candidate-owned asynchronous keyword assessment, frozen PCM/candidate identity and decoder-only rejection | Retained false-wake helper/candidate replay; pending, stale input, complete intent and worker-unavailable behavior |
+| `src-tauri/src/coordinator/dictation_wake_keyword_check_tests.rs` | Regression evidence for asynchronous keyword assessment and retained ordinary-speech failure | Targeted candidate lifecycle and actual helper IPC live/terminal replay; no editor or device control |
 | `src-tauri/src/coordinator/dictation_wake_owner_gate.rs` | Shared live/terminal complete-intent qualification and separate owner arbitration | Complete-intent behavioral regressions and product build |
 | `src-tauri/src/coordinator/dictation_wake_polish.rs` | Candidate state, immutable local phrase proof and accepted control-prefix propagation in every transcript mode | Accepted activation/source-coordinate regressions and product build |
-| `src-tauri/src/coordinator/dictation_wake_keyword_check_tests.rs` | Regression evidence for asynchronous keyword assessment and retained ordinary-speech failure | Targeted candidate lifecycle and actual helper IPC live/terminal replay; no editor or device control |
-| `src-tauri/src/coordinator/dictation_wake_keyword_check.rs` | Candidate-owned asynchronous keyword assessment, frozen PCM/candidate identity and decoder-only rejection | Retained false-wake helper/candidate replay; pending, stale input, complete intent and worker-unavailable behavior |
 | `src-tauri/src/coordinator/dictation_wake_prefix_retry.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_wake_recovery_task.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_wake_recovery_task_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation_wake_verification_source.rs` | Wake verification provenance and input-bound complete local command proof | Complete-intent behavioral regressions and product build |
 | `src-tauri/src/coordinator/dictation_wake_verification_source_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/embedded_ble_runtime.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/hotkey_device_runtime.rs` | Global hotkeys | Hotkey tests and manual smoke |
+| `src-tauri/src/coordinator/input_source.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/input_source_tests.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/microphone_wake.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/microphone_wake_buffer.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/microphone_wake_confirmation.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/microphone_wake_decoder.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/microphone_wake_onset.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/onboard_key_sync.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/qa.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/qa_asr_finalization.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/qa_question_context.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/qa_voice_capture.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/recording_gate.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/resources.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/source_integrity.rs` | Core app | Build and targeted tests |
@@ -257,45 +380,65 @@ Historical file inventory, retained for lookup. It is not a per-change checklist
 | `src-tauri/src/coordinator_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/correction.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/device_control_platform.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/device_key_profile.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/device_layouts.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/embedded_ble/mod.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/embedded_ble/mod_tests.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_ble/ota_hardware_identity.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_ble/ota_target_identity.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_ble/settings_target.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/embedded_ble/windows_ble/capture_events.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/embedded_ble/windows_ble/gatt_open.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/embedded_ble/windows_ble/mod.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/embedded_ble/windows_ble/notify_open.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/embedded_ble/windows_ble/ota_open.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/embedded_ble/windows_ble/ota_wire.rs` | Negotiated bounded OTA transport encoding; canonical image integrity | OTA wire codec and capability tests |
 | `src-tauri/src/embedded_ble/windows_ble/ota_transfer.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_ble/windows_ble/ota_wire.rs` | Negotiated bounded OTA transport encoding; canonical image integrity | OTA wire codec and capability tests |
 | `src-tauri/src/embedded_ble/windows_ble/pairing.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/embedded_ble/windows_ble/pnp_cache.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/embedded_ble/windows_ble/recording_control.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_ble/windows_ble/settings_target.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/embedded_ble/windows_ble/unpair.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/embedded_ble/windows_ble_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/firmware_ota.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/github_oauth.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/global_hotkey_runtime.rs` | Global hotkeys | Hotkey tests and manual smoke |
+| `src-tauri/src/history_metadata.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/hotkey.rs` | Global hotkeys | Hotkey tests and manual smoke |
 | `src-tauri/src/insertion.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/insertion/clipboard_handoff.rs` | Clipboard transport, actual receipts and continuous native session-range ownership | Paste receipt, retention, changed-editor and source-supplement regressions |
+| `src-tauri/src/insertion/clipboard_handoff/native_recording_retention_test.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/insertion/clipboard_handoff/native_supplement_test.rs` | Explicit original-renderer replay of saved source supplementation through the production worker and native adapter | Requires idle clipboard, fixture process ownership and an actual native edit receipt; no cloud or spoken re-recording |
 | `src-tauri/src/lib.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/llm_gemini.rs` | Polish providers | Rust unit tests, provider smoke |
+| `src-tauri/src/local_translation.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/local_translation/enhanced.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/local_translation/supervised.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/main.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/main_window_navigation.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/marketplace_backend.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/net_health.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/network_health_state.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/observability.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/observability/pipeline_diagnostics.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/original_speaker_identity.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/permissions.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/persistence.rs` | Local data and style packs | Rust unit tests, local import/export smoke |
+| `src-tauri/src/persistence/credential_scope.rs` | Local data and style packs | Rust unit tests, local import/export smoke |
 | `src-tauri/src/personal_vad.rs` | Exact sample coverage, original-coordinate context publication, typed projection/endpoint identity permissions and complete-history reconciliation | Packet/batch continuity, pending revisions, owner vetoes, partial-snapshot protection and editor-receipt timing |
 | `src-tauri/src/personal_vad_queue.rs` | Byte-bounded, source-coordinate personal activity mailbox; generation-owned publication and consumer lifetime | Original 54-second startup PCM, overrun/gap retirement, partial-chunk source windows and consumer unwind |
 | `src-tauri/src/personal_vad_windows.rs` | Same-window bounded parallel activity/identity inference; frozen enrollment and separate qualified projection/endpoint histories | Native score parity, selected private-history model replay, premature-stop preservation, foreign-tail submission and build |
 | `src-tauri/src/polish.rs` | Polish providers | Rust unit tests, provider smoke |
 | `src-tauri/src/protected_voice_profile.rs` | Atomic publication of a complete enrollment generation | Failed writes, binding integrity and replacement/delete regressions |
+| `src-tauri/src/qa_calendar_context.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/qa_hotkey.rs` | Global hotkeys | Hotkey tests and manual smoke |
+| `src-tauri/src/qa_overlay_layout.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/recorder.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/recorder/acceptance_microphone.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/saved_text_drafts.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/selection.rs` | Shared native editor identity, readback and exact owned suffix selection adapter | Native range and focused-input validation; macOS runtime validation required on macOS |
 | `src-tauri/src/selection/windows_uia.rs` | Bounded UIA editor permission, native identity and exact owned suffix selection | Windows source-supplement and focused-input validation |
+| `src-tauri/src/sensitive_diagnostics.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/shortcut_binding.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/shortcut_dispatch.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/speaker_channel_binding.rs` | Core app | Build and targeted tests |
@@ -309,10 +452,14 @@ Historical file inventory, retained for lookup. It is not a per-change checklist
 | `src-tauri/src/startup_evidence.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/timeline.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/transcript_boundary.rs` | Raw/rendered source mapping and native final append versus owned-range supplementation | Saved continuation/omission, multilingual rendering, correction expansion and ambiguous-source regressions |
+| `src-tauri/src/tray_locale.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/types.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/unicode_keystroke.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/voice_command.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/wake_admission_diagnostics.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/wake_phrase.rs` | Sensitive complete-keyword and recall streams, detector/recorded-recall origins, exact recall input and audio coordinates | Native continuation, recorded-recall admission, near-phrase controls and audio-boundary regressions |
 | `src-tauri/src/wake_phrase_competition.rs` | Same-source competing keyword paths using complete native timestamps and per-stream keyword graphs | Complete raw/enhanced agreement, same acoustic occurrence and retained false-wake comparison |
+| `src-tauri/src/wake_voice_commands.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/windows_ime_ipc.rs` | Windows IME insertion | Windows static and runtime smoke |
 | `src-tauri/src/windows_ime_profile.rs` | Windows IME insertion | Windows static and runtime smoke |
 | `src-tauri/src/windows_ime_protocol.rs` | Windows IME insertion | Windows static and runtime smoke |
@@ -347,30 +494,82 @@ Historical file inventory, retained for lookup. It is not a per-change checklist
 | `src-tauri/wix/listener-type-ime-cleanup.wxs` | Windows IME insertion | Windows static and runtime smoke |
 | `src-tauri/wix/listener-type-ime.wxs` | Windows IME insertion | Windows static and runtime smoke |
 | `src/App.tsx` | Main-window initialization, kept outside overlay import graphs | Frontend build and window-entry dependency checks |
+| `src/components/AudioFileTrial.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/AutoUpdate.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/AutoUpdateGate.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/Capsule.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/DeviceKeyActionPreview.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/DeviceLayoutMap.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/DeviceLayoutPractice.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/DeviceLayoutsDialog.css` | React UI | TypeScript build and visual smoke |
+| `src/components/DeviceLayoutsDialog.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/DeviceRecoveryControl.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/EmbeddedBleStatusPanel.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/ErrorBoundary.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/FloatingShell.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/HelpCenter.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/HistoryClearDialog.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/Icon.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/LocalTranslationSetup.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/MarketplaceModal.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/Onboarding.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/PoliteEditSuggestions.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/ProviderPurposePanels.css` | React UI | TypeScript build and visual smoke |
+| `src/components/ProviderPurposePanels.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/ProviderSettingsDialog.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/ProviderSetupGuide.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/QaAnswerDraftSave.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/QaPreparation.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/QuickStyleTextTrial.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/SaveTextDraft.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/SavedLayoutPhrases.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/SavedTextDraftCopyEditor.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/SavedTextDraftsDialog.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/SavedToast.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/SettingsModal.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/ShortcutRecorder.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/StyleTextTrial.css` | React UI | TypeScript build and visual smoke |
+| `src/components/StyleTextTrial.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/StyleTrialAvailability.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/TextWorkspaceTask.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/WindowChrome.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/ui/Row.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/ui/SelectLite.tsx` | React UI | TypeScript build and visual smoke |
+| `src/i18n/audioFile.ts` | Localization | TypeScript build |
+| `src/i18n/conciseDraft.ts` | Localization | TypeScript build |
+| `src/i18n/deviceAutosave.ts` | Localization | TypeScript build |
+| `src/i18n/deviceMaintenance.ts` | Localization | TypeScript build |
 | `src/i18n/en.ts` | Localization | TypeScript build |
+| `src/i18n/enDeviceMaintenance.ts` | Localization | TypeScript build |
+| `src/i18n/firstUse.ts` | Localization | TypeScript build |
+| `src/i18n/guidedSetup.ts` | Localization | TypeScript build |
+| `src/i18n/hardwareLayout.ts` | Localization | TypeScript build |
 | `src/i18n/index.ts` | Localization | TypeScript build |
 | `src/i18n/ja.ts` | Localization | TypeScript build |
 | `src/i18n/ko.ts` | Localization | TypeScript build |
+| `src/i18n/localTranslation.ts` | Localization | TypeScript build |
+| `src/i18n/messageDraft.ts` | Localization | TypeScript build |
+| `src/i18n/networkHealth.ts` | Localization | TypeScript build |
+| `src/i18n/offlineHelp.ts` | Localization | TypeScript build |
+| `src/i18n/politeEdits.ts` | Localization | TypeScript build |
+| `src/i18n/qaPreparation.ts` | Localization | TypeScript build |
+| `src/i18n/recordingFailure.ts` | Localization | TypeScript build |
+| `src/i18n/savedDraftCopy.ts` | Localization | TypeScript build |
+| `src/i18n/settingsFeedback.ts` | Localization | TypeScript build |
+| `src/i18n/settingsOrganization.ts` | Localization | TypeScript build |
+| `src/i18n/shortcutDefaults.ts` | Localization | TypeScript build |
+| `src/i18n/simpleTextWorkflow.ts` | Localization | TypeScript build |
+| `src/i18n/sourceFacts.ts` | Localization | TypeScript build |
+| `src/i18n/styleEditor.ts` | Localization | TypeScript build |
+| `src/i18n/textDraft.ts` | Localization | TypeScript build |
+| `src/i18n/textWorkspace.ts` | Localization | TypeScript build |
 | `src/i18n/zh-CN.ts` | Localization | TypeScript build |
 | `src/i18n/zh-TW.ts` | Localization | TypeScript build |
 | `src/lib/appVersion.ts` | Core app | Build and targeted tests |
 | `src/lib/bleRecoveryUi.test.ts` | Core app | Build and targeted tests |
 | `src/lib/bleRecoveryUi.ts` | Core app | Build and targeted tests |
+| `src/lib/bufferedSourceFacts.test.ts` | Core app | Build and targeted tests |
+| `src/lib/bufferedSourceFacts.ts` | Core app | Build and targeted tests |
 | `src/lib/capsuleActionRules.test.ts` | Core app | Build and targeted tests |
 | `src/lib/capsuleActionRules.ts` | Core app | Build and targeted tests |
 | `src/lib/capsuleDisplayMessage.test.ts` | Core app | Build and targeted tests |
@@ -381,68 +580,110 @@ Historical file inventory, retained for lookup. It is not a per-change checklist
 | `src/lib/capsuleLayout.ts` | Core app | Build and targeted tests |
 | `src/lib/capsulePreviewRules.test.ts` | Core app | Build and targeted tests |
 | `src/lib/capsulePreviewRules.ts` | Core app | Build and targeted tests |
+| `src/lib/compressedAudio.ts` | Core app | Build and targeted tests |
+| `src/lib/conciseDraftStyle.ts` | Core app | Build and targeted tests |
+| `src/lib/credentialsStatusEvents.ts` | Core app | Build and targeted tests |
 | `src/lib/demoMode.test.ts` | Core app | Build and targeted tests |
 | `src/lib/demoMode.ts` | Core app | Build and targeted tests |
 | `src/lib/deviceHealth.test.ts` | Core app | Build and targeted tests |
 | `src/lib/deviceHealth.ts` | Core app | Build and targeted tests |
+| `src/lib/deviceKeyLayouts.ts` | Core app | Build and targeted tests |
 | `src/lib/deviceSettingsDefaults.ts` | Core app | Build and targeted tests |
+| `src/lib/deviceSettingsDraft.test.ts` | Core app | Build and targeted tests |
+| `src/lib/deviceSettingsDraft.ts` | Core app | Build and targeted tests |
 | `src/lib/deviceSettingsMock.ts` | Core app | Build and targeted tests |
 | `src/lib/deviceSettingsMockWrite.test.ts` | Core app | Build and targeted tests |
 | `src/lib/deviceSettingsRefresh.test.ts` | Core app | Build and targeted tests |
 | `src/lib/deviceSettingsRefresh.ts` | Core app | Build and targeted tests |
+| `src/lib/deviceSettingsSaveQueue.test.ts` | Core app | Build and targeted tests |
+| `src/lib/deviceSettingsSaveQueue.ts` | Core app | Build and targeted tests |
 | `src/lib/embeddedBleProbe.ts` | Core app | Build and targeted tests |
+| `src/lib/everydayListStyle.ts` | Core app | Build and targeted tests |
 | `src/lib/firmwareOta.test.ts` | Core app | Build and targeted tests |
 | `src/lib/firmwareOta.ts` | Core app | Build and targeted tests |
 | `src/lib/firstRunPairingWizard.test.ts` | Core app | Build and targeted tests |
 | `src/lib/firstRunPairingWizard.ts` | Core app | Build and targeted tests |
+| `src/lib/firstUseOverview.test.ts` | Core app | Build and targeted tests |
+| `src/lib/firstUseOverview.ts` | Core app | Build and targeted tests |
 | `src/lib/fontScale.ts` | Core app | Build and targeted tests |
+| `src/lib/historyUpdates.ts` | Core app | Build and targeted tests |
 | `src/lib/hotkey.ts` | Global hotkeys | Hotkey tests and manual smoke |
 | `src/lib/hotkeyRecorder.test.ts` | Global hotkeys | Hotkey tests and manual smoke |
 | `src/lib/hotkeyRecorder.ts` | Global hotkeys | Hotkey tests and manual smoke |
 | `src/lib/ipc.ts` | Core app | Build and targeted tests |
 | `src/lib/localAsr.ts` | Core app | Build and targeted tests |
+| `src/lib/localTranslation.ts` | Core app | Build and targeted tests |
+| `src/lib/longAudio.test.ts` | Core app | Build and targeted tests |
+| `src/lib/longAudio.ts` | Core app | Build and targeted tests |
+| `src/lib/mainWindowNavigation.test.ts` | Core app | Build and targeted tests |
+| `src/lib/mainWindowNavigation.ts` | Core app | Build and targeted tests |
 | `src/lib/marketplaceDiscovery.test.ts` | Core app | Build and targeted tests |
 | `src/lib/marketplaceDiscovery.ts` | Core app | Build and targeted tests |
+| `src/lib/messageDraftStyle.test.ts` | Core app | Build and targeted tests |
+| `src/lib/messageDraftStyle.ts` | Core app | Build and targeted tests |
 | `src/lib/mockData.ts` | Core app | Build and targeted tests |
+| `src/lib/networkHealth.test.ts` | Core app | Build and targeted tests |
+| `src/lib/networkHealth.ts` | Core app | Build and targeted tests |
+| `src/lib/politeEdits.test.ts` | Core app | Build and targeted tests |
+| `src/lib/politeEdits.ts` | Core app | Build and targeted tests |
+| `src/lib/protectedTranslation.test.ts` | Core app | Build and targeted tests |
+| `src/lib/protectedTranslation.ts` | Core app | Build and targeted tests |
 | `src/lib/providerSetup.test.ts` | Core app | Build and targeted tests |
 | `src/lib/providerSetup.ts` | Core app | Build and targeted tests |
+| `src/lib/providerSetupLinks.ts` | Core app | Build and targeted tests |
+| `src/lib/providerWriteBarrier.ts` | Core app | Build and targeted tests |
 | `src/lib/qaMarkdown.test.ts` | Core app | Build and targeted tests |
 | `src/lib/qaMarkdown.ts` | Core app | Build and targeted tests |
 | `src/lib/savedEvent.ts` | Core app | Build and targeted tests |
+| `src/lib/styleEditorCopy.test.ts` | Core app | Build and targeted tests |
+| `src/lib/styleEditorCopy.ts` | Core app | Build and targeted tests |
+| `src/lib/stylePackPresentation.test.ts` | Core app | Build and targeted tests |
+| `src/lib/stylePackPresentation.ts` | Core app | Build and targeted tests |
+| `src/lib/textProcessingNotice.test.ts` | Core app | Build and targeted tests |
+| `src/lib/textProcessingNotice.ts` | Core app | Build and targeted tests |
+| `src/lib/translationTrial.ts` | Core app | Build and targeted tests |
 | `src/lib/types.ts` | Core app | Build and targeted tests |
+| `src/lib/useTextDraftSave.ts` | Core app | Build and targeted tests |
 | `src/lib/vocab-presets.json` | Core app | Build and targeted tests |
+| `src/lib/vocabPresetPresentation.ts` | Core app | Build and targeted tests |
 | `src/lib/vocabPresets.ts` | Core app | Build and targeted tests |
-| `src/lib/voiceprintEnrollmentUi.ts` | Map enrollment failure stages to recording or saving actions | Enrollment failure action regression and frontend build |
 | `src/lib/voiceprintEnrollmentUi.test.ts` | Regress storage failures without requesting new speech or blaming audio | Node TypeScript test |
+| `src/lib/voiceprintEnrollmentUi.ts` | Map enrollment failure stages to recording or saving actions | Enrollment failure action regression and frontend build |
 | `src/lib/windowHotkeyFallback.test.ts` | Core app | Build and targeted tests |
 | `src/lib/windowHotkeyFallback.ts` | Core app | Build and targeted tests |
 | `src/main.tsx` | Select and preload one window entry during i18n preparation | Compiled overlay dependency graph and frontend build |
-| `src/pages/SettingsVisual.tsx` | Development-only settings visual entry | Frontend build |
+| `src/pages/History.css` | React UI | TypeScript build and visual smoke |
 | `src/pages/History.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/LocalAsr.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/Marketplace.tsx` | React UI | TypeScript build and visual smoke |
+| `src/pages/Overview.css` | React UI | TypeScript build and visual smoke |
 | `src/pages/Overview.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/QaPanel.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/SelectionAsk.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/Settings.tsx` | React UI | TypeScript build and visual smoke |
+| `src/pages/SettingsVisual.tsx` | Development-only settings visual entry | Frontend build |
 | `src/pages/Style.tsx` | React UI | TypeScript build and visual smoke |
+| `src/pages/Tools.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/Translation.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/Vocab.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/_atoms.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/AboutUpdateControl.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/AdvancedSection.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/DeviceSection.tsx` | React UI | TypeScript build and visual smoke |
+| `src/pages/settings/DictationOutputSettings.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/FirmwareOtaPanel.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/LanguageSection.tsx` | React UI | TypeScript build and visual smoke |
+| `src/pages/settings/MicrophoneWakeSettings.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/PermissionsSection.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/ProvidersSection.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/RecordingSection.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/ShortcutsSection.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/VoiceprintEnrollmentWizard.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/shared.tsx` | React UI | TypeScript build and visual smoke |
+| `src/state/DevicePageNavigationContext.ts` | Core app | Build and targeted tests |
 | `src/state/HotkeySettingsContext.tsx` | Core app | Build and targeted tests |
-| `src/state/useDarkMode.ts` | Shared window theme and listener ownership without main-shell imports | Frontend build and window-entry dependency checks |
 | `src/state/useAppState.ts` | Core app | Build and targeted tests |
+| `src/state/useDarkMode.ts` | Shared window theme and listener ownership without main-shell imports | Frontend build and window-entry dependency checks |
 | `src/styles/global.css` | Design system | Visual smoke |
 | `src/styles/tokens.css` | Design system | Visual smoke |
 | `src/types/tauri-plugin-autostart.d.ts` | Core app | Build and targeted tests |
@@ -455,14 +696,22 @@ Historical file inventory, retained for lookup. It is not a per-change checklist
 | `windows-ime/src/ListenerTypeIme.def` | Windows IME insertion | Windows static and runtime smoke |
 | `windows-ime/src/class_factory.cpp` | Windows IME insertion | Windows static and runtime smoke |
 | `windows-ime/src/class_factory.h` | Windows IME insertion | Windows static and runtime smoke |
+| `windows-ime/src/context_document_guard.h` | Windows IME insertion | Windows static and runtime smoke |
 | `windows-ime/src/dllmain.cpp` | Windows IME insertion | Windows static and runtime smoke |
 | `windows-ime/src/edit_session.cpp` | Windows IME insertion | Windows static and runtime smoke |
 | `windows-ime/src/edit_session.h` | Windows IME insertion | Windows static and runtime smoke |
+| `windows-ime/src/focus_context_guard.h` | Windows IME insertion | Windows static and runtime smoke |
 | `windows-ime/src/guids.h` | Windows IME insertion | Windows static and runtime smoke |
 | `windows-ime/src/ipc_client.cpp` | Windows IME insertion | Windows static and runtime smoke |
 | `windows-ime/src/ipc_client.h` | Windows IME insertion | Windows static and runtime smoke |
+| `windows-ime/src/pending_request_registry.h` | Windows IME insertion | Windows static and runtime smoke |
 | `windows-ime/src/registry.cpp` | Windows IME insertion | Windows static and runtime smoke |
 | `windows-ime/src/registry.h` | Windows IME insertion | Windows static and runtime smoke |
 | `windows-ime/src/resource.rc` | Windows IME insertion | Windows static and runtime smoke |
+| `windows-ime/src/terminal_tail_guard.h` | Windows IME insertion | Windows static and runtime smoke |
 | `windows-ime/src/text_service.cpp` | Windows IME insertion | Windows static and runtime smoke |
 | `windows-ime/src/text_service.h` | Windows IME insertion | Windows static and runtime smoke |
+| `windows-ime/tests/edit_session_lifetime_test.cpp` | Windows IME insertion | Windows static and runtime smoke |
+| `windows-ime/tests/pending_request_registry_test.cpp` | Windows IME insertion | Windows static and runtime smoke |
+| `windows-ime/tests/stop_guard_private_test.cpp` | Windows IME insertion | Windows static and runtime smoke |
+| `windows-ime/tests/terminal_tail_guard_private_test.cpp` | Windows IME insertion | Windows static and runtime smoke |

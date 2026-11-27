@@ -1,3 +1,3 @@
 # Listener development
 
-Read AGENTS.md for this project's requirements. General development mechanisms follow the global rules.
+See [AGENTS.md](AGENTS.md) for repository guidance and [CONTRIBUTING.md](CONTRIBUTING.md) for build and validation.

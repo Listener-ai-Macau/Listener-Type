@@ -1,38 +1,20 @@
-# Local ASR Management
+# Local speech recognition
 
-## Status
+## Windows
 
-- status: `implemented`
-- scope: local ASR model/runtime management for Qwen3-ASR and Windows Foundry Local Whisper
+Numbered Windows x64 prereleases include Companion Paraformer Large for local Chinese and English dictation. Fresh Windows profiles select it by default. Existing recognizer choices are retained. Use **Settings → Local Recognition** to select the included model after using another provider.
 
-## Source Map
+Local recognition processes audio on the PC. Recognition speed and running memory depend on the system. Text processing has separate settings, including optional downloads for local text translation.
 
-- UI: `src/pages/LocalAsr.tsx`, `src/pages/settings/AdvancedSection.tsx`
-- IPC wrappers and types: `src/lib/localAsr.ts`, `src/lib/ipc.ts`, `src/lib/types.ts`
-- Command layer: `src-tauri/src/commands.rs`
-- Runtime/model code: `src-tauri/src/asr/local/`
-- macOS Qwen3-ASR vendor bridge: `src-tauri/vendor/qwen-asr/`, `src-tauri/build.rs`
-- Windows Foundry native/runtime preparation: `src-tauri/src/asr/local/foundry_native.rs`, `src-tauri/src/asr/local/foundry_runtime.rs`
-- Probe and prepare tools: `tools/foundry_asr_probe/`, `tools/foundry_runtime_prepare/`
+The runtime loads the verified bundled model for CPU inference. The Windows packaging script stages the model and its license and notice files. Source builds may need those files before local dictation becomes available.
 
-## Behavior
+## macOS
 
-- Users manage local ASR models from Settings -> Advanced.
-- Switching to a local ASR provider releases inactive engines and avoids external credential validation for local providers.
-- Foundry Local runtime preparation is explicit and cancellable.
-- Foundry Local Whisper is the Windows local-ASR path and includes runtime component preparation, model catalog/status, model prepare, release, and probe tooling.
-- Qwen3-ASR is the macOS local-ASR path and uses the vendored native bridge plus local model registry/status commands.
-- Qwen3-ASR model download and local model status are tracked separately from cloud ASR credentials.
+Source builds expose the experimental Qwen3-ASR path. Its model is prepared separately. The vendor bridge is in [src-tauri/vendor/qwen-asr](../../src-tauri/vendor/qwen-asr).
 
-## Verification
+## Implementation
 
-```powershell
-cargo test --manifest-path src-tauri\Cargo.toml --lib --no-run
-npm run build
-```
-
-## Known Limits
-
-- Foundry Local is Windows-only.
-- Runtime downloads and model availability depend on upstream package/model sources.
-- Direct Rust test execution may be blocked by local Windows runtime/DLL state; `--no-run` is the current low-risk compile gate.
+- [Local recognition settings](../../src/pages/LocalAsr.tsx)
+- [Frontend IPC](../../src/lib/localAsr.ts)
+- [Provider and runtime](../../src-tauri/src/asr/local)
+- [Windows packaging](../platform/windows-build.md)
