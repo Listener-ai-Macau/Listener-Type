@@ -59,6 +59,6 @@ This documentation set is organized so product behavior, implementation files an
 
 ## Historical references
 
-- [Engineering goals](goals/) · [Release evidence](release/evidence/)
+- [Engineering goals](goals/) · [Historical release summaries](release/evidence/)
 
 - [Migration provenance](archive/upstream-provenance.md) records the upstream documentation set that was reviewed and adapted during the Listener Type migration.
