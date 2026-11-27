@@ -1946,6 +1946,8 @@ pub(super) struct PauseEarlyDeliveryLedger {
     /// remainder must continue on that route instead of waiting for a TSF
     /// client that did not deliver this session's preceding chunks.
     pub(super) paste_delivered_session: Option<SessionId>,
+    /// A submitted Companion phrase uses the guarded append protocol through STOP.
+    pub(super) guarded_local_paste_session: Option<SessionId>,
     /// 一次性门诊断：同一会话同一原因只记一行，防止看门狗 20/s 刷屏。
     pub(super) gate_blocked_logged: Option<(SessionId, &'static str)>,
     /// 2026-09-23 tkg 后诊断:tick 首达行(证明看门狗路径活着+当时门状态)。
@@ -3450,7 +3452,7 @@ async fn pause_early_delivery_tick(
                         return;
                     }
                     let result = insert_via_non_tsf_fallback_scoped(inner, delta, restore_clipboard, prefs.paste_shortcut,
-                        Some(crate::insertion::SessionPasteScope { session_id, previous_body: delivered_display.clone(), replace: false }));
+                        Some(crate::insertion::SessionPasteScope { session_id, previous_body: delivered_display.clone(), replace: false, require_owned_append: false }));
                     (result.status, result.route, result.receipt)
                 }
                 EarlyTsfOutcome::Cancelled => {
@@ -3475,7 +3477,7 @@ async fn pause_early_delivery_tick(
             (status, DeliveryRoute::Paste, None)
         } else {
             let submission = inner.inserter.insert_session_paste(delta, prefs.paste_shortcut,
-                crate::insertion::SessionPasteScope { session_id, previous_body: delivered_display.clone(), replace: false });
+                crate::insertion::SessionPasteScope { session_id, previous_body: delivered_display.clone(), replace: false, require_owned_append: false });
             (submission.status, DeliveryRoute::Paste, submission.receipt)
         }
     };

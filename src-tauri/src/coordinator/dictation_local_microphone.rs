@@ -8,6 +8,7 @@ const LOCAL_PREVIEW_TAIL_MS: u64 = 250;
 const LOCAL_PHRASE_QUIET_MS: u64 = 720;
 const LOCAL_PHRASE_TAIL_MS: u64 = 200;
 const LOCAL_PHRASE_MIN_NEW_AUDIO_MS: u64 = 500;
+const LOCAL_PHRASE_RETRY_DELAY: Duration = Duration::from_millis(240);
 
 struct LocalMicrophoneConsumer {
     asr: Arc<CompanionDictationAsr>,
@@ -136,11 +137,27 @@ fn spawn_companion_phrase_delivery(
                 continue;
             };
             let phrase = crate::asr::local::punctuation::restore_chinese_punctuation(phrase, false).await;
-            let delivery = Arc::clone(&inner);
-            let asr = Arc::clone(&capture.asr);
-            let _ = tokio::task::spawn_blocking(move || {
-                append_companion_phrase(&delivery, owner, &asr, delivered_end, cut, &phrase);
-            }).await;
+            let phrase: Arc<str> = phrase.into();
+            for attempt in 0..2 {
+                if attempt != 0 {
+                    tokio::time::sleep(LOCAL_PHRASE_RETRY_DELAY).await;
+                    let evidence = *capture.evidence.lock();
+                    if !local_editor_target_is_listening(&inner, owner)
+                        || local_phrase_boundary(evidence, delivered_end) != Some(cut)
+                    {
+                        break;
+                    }
+                }
+                let delivery = Arc::clone(&inner);
+                let asr = Arc::clone(&capture.asr);
+                let phrase = Arc::clone(&phrase);
+                let retry = tokio::task::spawn_blocking(move || {
+                    append_companion_phrase(&delivery, owner, &asr, delivered_end, cut, &phrase)
+                }).await.unwrap_or(false);
+                if !retry {
+                    break;
+                }
+            }
         }
     });
 }
@@ -148,36 +165,36 @@ fn spawn_companion_phrase_delivery(
 fn append_companion_phrase(
     inner: &Arc<Inner>, owner: SessionId, asr: &Arc<CompanionDictationAsr>,
     start: u64, end: u64, phrase: &str,
-) {
+) -> bool {
     use crate::asr::local::companion_provider::join_local_phrases;
 
     if phrase.trim().is_empty() || !crate::insertion::clipboard_transport_is_reversible() {
-        return;
+        return false;
     }
     let Some(origin) = inner.dictation_clipboard_origin.lock().as_ref()
         .filter(|(session, _)| *session == owner).map(|(_, ticket)| *ticket)
-    else { return; };
+    else { return false; };
 
     // Serialize an accepted append and its audio boundary with the STOP
     // decoder. A late phrase can't advance the cut without dispatching.
     let mut prefix = asr.local_phrase_prefix.blocking_lock();
     if prefix.end_ms != start || !local_editor_target_is_listening(inner, owner) {
-        return;
+        return false;
     }
     let raw = join_local_phrases(&prefix.raw_text, phrase.trim());
     let Some(display) = pause_early_display_text(inner, owner, &raw) else {
-        return;
+        return false;
     };
     let (before, _) = pause_early_delivery_session_state(inner, owner);
     let Some(delta) = display.strip_prefix(&before) else {
-        return;
+        return false;
     };
     if delta.trim().is_empty() {
-        return;
+        return false;
     }
     let key = embedded_audio_partial_preview_stability_key(&display);
     if key.is_empty() || !local_editor_target_is_listening(inner, owner) {
-        return;
+        return false;
     }
     pause_early_delivery_reserve(inner, owner, display.clone(), key.clone(), key);
     let guard = Arc::clone(inner);
@@ -185,18 +202,26 @@ fn append_companion_phrase(
     let result = crate::insertion::guarded_local_append_with_receipt(
         delta, shortcut, crate::insertion::SessionPasteScope {
             session_id: owner, previous_body: before, replace: false,
+            require_owned_append: false,
         }, origin, move || local_editor_target_is_listening(&guard, owner),
     );
     if matches!(result.status, InsertStatus::PasteSent | InsertStatus::Inserted) {
         pause_early_delivery_confirm(inner, owner);
-        inner.embedded_audio_pause_early_delivery.lock().paste_delivered_session = Some(owner);
+        let mut ledger = inner.embedded_audio_pause_early_delivery.lock();
+        ledger.paste_delivered_session = Some(owner);
+        ledger.guarded_local_paste_session = Some(owner);
+        drop(ledger);
         prefix.raw_text = raw;
         prefix.end_ms = end;
         log::info!("[companion-paraformer] phrase appended session_id={owner} audio_end_ms={end} chars={} status={:?}",
             delta.chars().count(), result.status);
+        false
     } else {
         pause_early_delivery_rollback(inner, owner);
         log::info!("[companion-paraformer] phrase deferred session_id={owner} status={:?}", result.status);
+        // Deferred means no paste shortcut was sent. A dispatched but
+        // unconfirmed paste never replays at the same audio boundary.
+        result.status == InsertStatus::DeferredNoTarget
     }
 }
 

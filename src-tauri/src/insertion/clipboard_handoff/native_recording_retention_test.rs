@@ -173,6 +173,8 @@ fn recording_retention_uses_only_its_own_paste_lease() {
             expected_session_document: None, strict_session_edit: false, first_guarded_local_draft: false,
             staged_selection: false,
             dispatch_session: Some(if foreign { uuid::Uuid::new_v4() } else { session }),
+            #[cfg(target_os = "windows")]
+            append_caret: None,
         };
         run_with_capture_and_dispatch(receiver, Some(receipt),
             || (None, crate::selection::FocusedInputState::NonEditable),
@@ -240,6 +242,8 @@ fn completion_first_waiting_handoff_preserves_new_user_copy() {
                 observation: PasteObservation::default(), completion: None, session_body: None,
                 observed_document: None, expected_session_document: None, strict_session_edit: false, first_guarded_local_draft: false,
                 staged_selection: false, dispatch_session: Some(session),
+                #[cfg(target_os = "windows")]
+                append_caret: None,
             };
             run_with_capture_and_dispatch(receiver, Some(receipt),
                 || (None, crate::selection::FocusedInputState::Unknown),

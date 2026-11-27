@@ -4309,6 +4309,8 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     // 丢失也绝不允许终稿整段重贴（2026-09-23 用户实锤"一毛一样粘贴两次"）。
     let pause_early_sticky = pause_early_ever_delivered(inner, current_session_id);
     let pause_early_paste = pause_early_paste_delivered(inner, current_session_id);
+    let guarded_local_paste = inner.embedded_audio_pause_early_delivery.lock()
+        .guarded_local_paste_session == Some(current_session_id);
     let pause_early_source_key = pause_early_delivery_source_key(inner, current_session_id);
     let pause_early_raw_consumption = pause_early_committed_body_consumption(inner, current_session_id);
     let pause_early_delivered = take_pause_early_delivery(inner, current_session_id);
@@ -4392,7 +4394,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
     let final_supplement = source_supplement.or_else(||
         unresolved_owned_replacement.then(|| polished.clone()));
     let terminal_suffix_expected = pause_early_delivered.as_ref()
-        .filter(|_| pause_early_terminal_punctuation_only(&insert_text))
+        .filter(|_| !guarded_local_paste && pause_early_terminal_punctuation_only(&insert_text))
         .map(|(display, _)| display.as_str());
     let mut terminal_suffix_skipped = false;
     // 组字流式终局(2026-09-22 切片3):composition 活着 → 余量/恢复尾
@@ -4503,7 +4505,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
         let expected = &pause_early_delivered.as_ref().expect("supplement has delivered body").0;
         execute_delivery_submission(DeliveryRequest { text: supplement.clone(), ..delivery_request.clone() }, |_| async {
             let scope = crate::insertion::SessionPasteScope { session_id: current_session_id,
-                previous_body: expected.clone(), replace: true };
+                previous_body: expected.clone(), replace: true, require_owned_append: false };
             let mut submission = if unresolved_owned_replacement {
                 inner.inserter.insert_session_paste_with_restore(supplement, restore_clipboard, paste_shortcut, scope)
             } else {
@@ -4655,6 +4657,7 @@ async fn finish_end_session_after_stop_transition_with_source_integrity(
             previous_body: pause_early_delivered.as_ref()
                 .map(|(body, _)| body.clone()).unwrap_or_default(),
             replace: false,
+            require_owned_append: guarded_local_paste,
         };
         dispatch_delivery_request(
             delivery_request.clone(),

@@ -13,7 +13,7 @@ use windows::Win32::UI::Accessibility::{
     CUIAutomation, CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationElement, IUIAutomationTextPattern, IUIAutomationTextRange, IUIAutomationValuePattern, UIA_EditControlTypeId, UIA_ButtonControlTypeId, UIA_CheckBoxControlTypeId, UIA_RadioButtonControlTypeId, UIA_HyperlinkControlTypeId,
     UIA_TextPatternId, UIA_WindowControlTypeId, UIA_CONTROLTYPE_ID,
     UIA_ValuePatternId, UIA_PATTERN_ID, UIA_DocumentControlTypeId, UIA_IsReadOnlyAttributeId,
-    TextPatternRangeEndpoint_Start, TextPatternRangeEndpoint_End,
+    TextPatternRangeEndpoint_Start, TextPatternRangeEndpoint_End, TextUnit_Character,
 };
 use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 use super::FocusedInputState;
@@ -23,6 +23,79 @@ const PASTE_SELECTION_LIMIT: usize = 8_192;
 // Long drafts need more room than selection reads, but a native provider may
 // still expose a much larger document. Keep every read bounded.
 const PASTE_DOCUMENT_LIMIT: usize = 65_536;
+const APPEND_CONTEXT_UNITS: i32 = 24;
+const APPEND_RECEIPT_LIMIT: usize = 2_048;
+
+pub(crate) struct PasteAppendCaret {
+    position: IUIAutomationTextRange,
+    left: String,
+    right: String,
+}
+
+impl PasteAppendCaret {
+    fn read(pattern: &IUIAutomationTextPattern) -> Option<Self> {
+        unsafe {
+            let ranges = pattern.GetSelection().ok()?;
+            if ranges.Length().ok()? != 1 {
+                return None;
+            }
+            let position = ranges.GetElement(0).ok()?;
+            if position.CompareEndpoints(
+                TextPatternRangeEndpoint_Start, &position, TextPatternRangeEndpoint_End,
+            ).ok()? != 0 {
+                return None;
+            }
+            let left = Self::text_near(&position, true).ok()?;
+            let right = Self::text_near(&position, false).ok()?;
+            Some(Self { position, left, right })
+        }
+    }
+
+    fn agrees_with(&self, fresh: &Self) -> bool {
+        self.left == fresh.left && self.right == fresh.right
+            && unsafe { self.position.CompareEndpoints(
+                TextPatternRangeEndpoint_Start, &fresh.position, TextPatternRangeEndpoint_Start,
+            ) }.ok() == Some(0)
+    }
+
+    fn confirms_append(&self, after: &Self, payload: &str) -> Option<()> {
+        if payload.trim().is_empty() || payload.contains(['\r', '\n'])
+            || payload.encode_utf16().count() > APPEND_RECEIPT_LIMIT
+            || !append_right_context_matches(&self.right, &after.right)
+            || Self::text_near(&self.position, true).ok()? != self.left {
+            return None;
+        }
+        unsafe {
+            if self.position.CompareEndpoints(
+                TextPatternRangeEndpoint_Start, &after.position, TextPatternRangeEndpoint_Start,
+            ).ok()? >= 0 {
+                return None;
+            }
+            let inserted = self.position.Clone().ok()?;
+            inserted.MoveEndpointByRange(
+                TextPatternRangeEndpoint_End, &after.position, TextPatternRangeEndpoint_Start,
+            ).ok()?;
+            let text = read_paste_range(
+                &inserted, APPEND_RECEIPT_LIMIT, "paste caret edit exceeds readback limit",
+            ).ok()?;
+            (text == payload).then_some(())
+        }
+    }
+
+    fn text_near(
+        position: &IUIAutomationTextRange, to_left: bool,
+    ) -> Result<String, String> {
+        let range = unsafe { position.Clone() }.map_err(|error| error.to_string())?;
+        let (endpoint, units) = if to_left {
+            (TextPatternRangeEndpoint_Start, -APPEND_CONTEXT_UNITS)
+        } else {
+            (TextPatternRangeEndpoint_End, APPEND_CONTEXT_UNITS)
+        };
+        unsafe { range.MoveEndpointByUnit(endpoint, TextUnit_Character, units) }
+            .map_err(|error| error.to_string())?;
+        read_paste_range(&range, APPEND_RECEIPT_LIMIT, "paste caret context exceeds readback limit")
+    }
+}
 
 fn checked_paste_text(value: &[u16], limit: usize, overflow: &str) -> Result<String, String> {
     if value.len() > limit {
@@ -472,6 +545,29 @@ impl WindowsSelectionReader {
         Ok(())
     }
 
+    /// Observe a collapsed insertion point and its immediate surroundings.
+    /// Some providers expose a screen buffer rather than an editable value.
+    /// The span between two observed carets can still prove an exact append.
+    pub(crate) fn append_caret(&self) -> Option<PasteAppendCaret> {
+        if !self.is_current() {
+            return None;
+        }
+        let caret = PasteAppendCaret::read(&self.pattern)?;
+        self.is_current().then_some(caret)
+    }
+
+    pub(crate) fn append_caret_matches(&self, known: &PasteAppendCaret) -> bool {
+        self.append_caret().is_some_and(|fresh| known.agrees_with(&fresh))
+    }
+
+    pub(crate) fn confirm_caret_append(
+        &self, before: &PasteAppendCaret, payload: &str,
+    ) -> Option<PasteAppendCaret> {
+        let after = self.append_caret()?;
+        before.confirms_append(&after, payload)?;
+        self.append_caret_matches(&after).then_some(after)
+    }
+
     pub(crate) fn caret_at_end(&self) -> Result<bool, String> {
         unsafe {
             let ranges = self.pattern.GetSelection().map_err(|err| err.to_string())?;
@@ -492,6 +588,13 @@ impl WindowsSelectionReader {
             Ok(text.chars().all(|ch| matches!(ch, '\r' | '\n')))
         }
     }
+}
+
+fn append_right_context_matches(before: &str, after: &str) -> bool {
+    // The distance to a screen row's padding can change as its caret advances.
+    // The exact inserted range and untouched left anchor are checked separately.
+    let padding_only = |value: &str| value.chars().all(|ch| matches!(ch, ' ' | '\r' | '\n'));
+    before == after || (padding_only(before) && padding_only(after))
 }
 
 fn native_text_matches_value(document: &str, value: &str) -> bool {

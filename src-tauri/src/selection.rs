@@ -299,6 +299,9 @@ mod native_edit_tests {
     }
 }
 
+#[cfg(target_os = "windows")]
+pub(crate) use windows_uia::PasteAppendCaret;
+
 /// Read the editor captured before a paste, even if focus moves afterwards.
 /// Selection is available only for an exact receipted session suffix. It never
 /// copies, activates an application, or selects the whole editor by shortcut.
@@ -349,6 +352,23 @@ impl PasteReader {
     #[cfg(target_os = "windows")]
     pub(crate) fn local_append_fits_readback(document: &str, payload: &str) -> bool {
         windows_uia::local_append_fits_readback(document, payload)
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(crate) fn append_caret(&self) -> Option<PasteAppendCaret> {
+        self.reader.append_caret()
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(crate) fn append_caret_matches(&self, caret: &PasteAppendCaret) -> bool {
+        self.reader.append_caret_matches(caret)
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(crate) fn confirm_caret_append(
+        &self, before: &PasteAppendCaret, payload: &str,
+    ) -> Option<PasteAppendCaret> {
+        self.reader.confirm_caret_append(before, payload)
     }
 
     pub(crate) fn before(&self) -> Result<(String, String), String> {

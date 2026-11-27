@@ -67,6 +67,7 @@ fn saved_revisable_frames_write_only_the_owned_range_and_confirm_without_second_
         let (reply, result) = mpsc::channel();
         commands.send(Command::Revisable(text.into(), PasteShortcut::CtrlV, SessionPasteScope {
             session_id: session, previous_body: previous.into(), replace: !previous.is_empty(),
+            require_owned_append: false,
         }, None, reply)).unwrap();
         result.recv_timeout(Duration::from_secs(8)).unwrap()
     };
@@ -206,6 +207,7 @@ fn saved_final_supplement_writes_native_range_without_duplicate_or_prefix_loss()
         for clause in delivered.split_inclusive('。') {
             confirmed(send(&commands, clause, Some(SessionPasteScope {
                 session_id: session, previous_body: previous.clone(), replace: false,
+                require_owned_append: false,
             })), &written_revision);
             previous.push_str(clause);
             assert_eq!(read_editor(), format!("{prefix}{previous}"));
@@ -214,6 +216,7 @@ fn saved_final_supplement_writes_native_range_without_duplicate_or_prefix_loss()
         assert_eq!(previous, delivered);
         let receipt = confirmed(send(&commands, &repaired, Some(SessionPasteScope {
             session_id: session, previous_body: delivered.into(), replace: true,
+            require_owned_append: false,
         })), &written_revision);
         let actual = read_editor();
         assert_eq!(actual, format!("{prefix}{repaired}"));
@@ -239,6 +242,7 @@ fn saved_final_supplement_writes_native_range_without_duplicate_or_prefix_loss()
         let revision_before = clipboard_revision();
         let blocked = send(&commands, &repaired, Some(SessionPasteScope {
             session_id: session, previous_body: repaired.clone(), replace: true,
+            require_owned_append: false,
         }));
         assert_eq!(blocked.status, InsertStatus::DeferredNoTarget);
         assert!(blocked.receipt.is_none());
@@ -248,6 +252,7 @@ fn saved_final_supplement_writes_native_range_without_duplicate_or_prefix_loss()
         let cleared_document = reader.document().unwrap();
         let blocked = send(&commands, &repaired, Some(SessionPasteScope {
             session_id: session, previous_body: repaired.clone(), replace: true,
+            require_owned_append: false,
         }));
         assert_eq!(blocked.status, InsertStatus::DeferredNoTarget);
         assert_eq!(clipboard_revision(), revision_before);

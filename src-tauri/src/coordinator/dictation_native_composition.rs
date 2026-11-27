@@ -93,6 +93,7 @@ impl NativeCompositionState {
                 session_id,
                 previous_body: previous_body.into(),
                 replace: !previous_body.is_empty(),
+                require_owned_append: false,
             },
         );
         self.submit_attempts = self.submit_attempts.saturating_add(1);

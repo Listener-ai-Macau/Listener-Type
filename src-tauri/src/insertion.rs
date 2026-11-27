@@ -204,13 +204,13 @@ impl TextInserter {
         expected: &str, suffix: &str, restore: bool, shortcut: PasteShortcut)
         -> Result<InsertStatus, TerminalAppendDecision> {
         clipboard_handoff::paste_terminal_suffix(expected, suffix, restore, shortcut,
-            Some(SessionPasteScope { session_id: session, previous_body: expected.into(), replace: false }))
+            Some(SessionPasteScope { session_id: session, previous_body: expected.into(), replace: false, require_owned_append: false }))
     }
 
     pub(crate) fn insert_session_terminal_suffix(&self, session: uuid::Uuid,
         expected: &str, suffix: &str, shortcut: PasteShortcut) -> Result<InsertStatus, TerminalAppendDecision> {
         clipboard_handoff::paste_terminal_suffix(expected, suffix, false, shortcut,
-            Some(SessionPasteScope { session_id: session, previous_body: expected.into(), replace: false }))
+            Some(SessionPasteScope { session_id: session, previous_body: expected.into(), replace: false, require_owned_append: false }))
     }
 
     pub(crate) fn retain_session_clipboard(
@@ -742,6 +742,16 @@ fn insert_with_clipboard_restore_now(
     restore_clipboard_after_paste: bool,
     paste_shortcut: PasteShortcut,
 ) -> InsertStatus {
+    insert_with_clipboard_restore_guarded_now(text, restore_clipboard_after_paste, paste_shortcut, || true)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn insert_with_clipboard_restore_guarded_now(
+    text: &str,
+    restore_clipboard_after_paste: bool,
+    paste_shortcut: PasteShortcut,
+    still_current: impl FnOnce() -> bool,
+) -> InsertStatus {
     let restore_plan = match copy_to_clipboard_with_restore_plan(text) {
         Ok(plan) => plan,
         Err(err) => {
@@ -750,6 +760,9 @@ fn insert_with_clipboard_restore_now(
         }
     };
 
+    if !still_current() {
+        return InsertStatus::CopiedFallback;
+    }
     if let Err(err) = simulate_paste(paste_shortcut) {
         log::warn!("[insertion] simulated paste failed: {}", err);
         return InsertStatus::CopiedFallback;

@@ -45,6 +45,10 @@ pub(crate) enum PasteReceiptProof {
     OwnedSessionRange,
     /// A same-control ValuePattern change proves consumption, not range ownership.
     ValueReadback,
+    /// The exact newly inserted bytes were read between two carets. This
+    /// grants append continuity only, never permission to replace the draft.
+    #[cfg(target_os = "windows")]
+    CaretEdit,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -244,6 +248,9 @@ pub(crate) struct SessionPasteScope {
     pub session_id: uuid::Uuid,
     pub previous_body: String,
     pub replace: bool,
+    /// A terminal continuation of an already dispatched local phrase still
+    /// needs the same editor, cursor and positively receipted range.
+    pub require_owned_append: bool,
 }
 
 struct PasteResult {
@@ -514,6 +521,8 @@ struct PasteReceipt {
     first_guarded_local_draft: bool,
     staged_selection: bool,
     dispatch_session: Option<uuid::Uuid>,
+    #[cfg(target_os = "windows")]
+    append_caret: Option<crate::selection::PasteAppendCaret>,
 }
 
 #[derive(Default)]
@@ -590,6 +599,8 @@ impl PasteReceipt {
         }
         self.log_pattern_diagnostic("timeout");
         self.complete(observed_at, PasteReceiptOutcome::TimedOut);
+        #[cfg(target_os = "windows")]
+        { self.append_caret = None; }
         self.reader = None;
         self.before = None;
         true
@@ -684,6 +695,26 @@ impl PasteReceipt {
                         self.observation.proof = None;
                     }
                 }
+                #[cfg(target_os = "windows")]
+                let caret_receipt = if !self.strict_session_edit && !value_receipt
+                    && self.session_body.as_ref().is_some_and(|(_, body)| {
+                        !self.observation.consumed || !session_document_proves_range(
+                            self.expected_session_document.as_deref(), body, &self.payload,
+                            self.observation.proof, &after, false,
+                        )
+                    })
+                {
+                    self.append_caret.as_ref().and_then(|caret| {
+                        self.reader.as_ref()?.confirm_caret_append(caret, &self.payload)
+                    }).is_some_and(|after| {
+                        self.append_caret = Some(after);
+                        self.observation.consumed = true;
+                        self.observation.proof = Some(PasteReceiptProof::CaretEdit);
+                        true
+                    })
+                } else { false };
+                #[cfg(not(target_os = "windows"))]
+                let caret_receipt = false;
                 if first_changed_read && !self.observation.consumed {
                     log::info!("[insertion] paste readback changed without receipt ticket={} shape={:?} before_lines={} after_lines={} payload_chars={}",
                         self.ticket, self.observation.last_shape, before.matches('\n').count(), after.matches('\n').count(), self.payload.chars().count());
@@ -691,7 +722,7 @@ impl PasteReceipt {
                 if value_receipt {
                     self.session_body = None;
                     self.observed_document = None;
-                } else if self.observation.consumed {
+                } else if self.observation.consumed && !caret_receipt {
                     let caret = self.reader.as_ref().and_then(|r| r.caret_at_end().ok());
                     self.observe_session_document(&after, caret);
                 }
@@ -726,6 +757,9 @@ impl PasteReceipt {
 
 impl Drop for PasteReceipt {
     fn drop(&mut self) {
+        // Release the native range while its reader still owns the COM apartment.
+        #[cfg(target_os = "windows")]
+        { self.append_caret = None; }
         self.complete(Instant::now(), PasteReceiptOutcome::Superseded);
     }
 }
@@ -854,7 +888,7 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                     continue;
                 }
                 let capture_started = Instant::now();
-                let (captured_reader, focus) = capture();
+                let (captured_reader, mut focus) = capture();
                 if !paste_dispatch_allowed(focus) {
                     log::info!("[insertion] paste deferred: focused target is a non-editor payload_chars={} capture_ms={}",
                         text.chars().count(), capture_started.elapsed().as_millis());
@@ -898,6 +932,7 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                     if let Some((recovered_reader, snapshot)) = recovered {
                         reader = Some(recovered_reader);
                         before = Some(snapshot);
+                        focus = crate::selection::FocusedInputState::Editable;
                         log::info!("[insertion] recovered fresh paste readback from same-session native editor after lookup failure");
                     }
                 }
@@ -912,10 +947,25 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                         && before.as_ref().is_some_and(|(doc, selected)|
                             prior.observed_document.as_ref() == Some(doc) && selected == &scope.previous_body)
                 });
+                let local_append = revisable_guard.is_some() && !revisable;
+                let guarded_tail = scope.as_ref().is_some_and(|scope| scope.require_owned_append);
+                let guarded_append = local_append || guarded_tail;
                 let chain = staged || scope.as_ref().is_some_and(|scope| {
-                    scope.previous_body.is_empty() && !scope.replace || paste_receipt.as_ref().is_some_and(|prior| {
+                    scope.previous_body.is_empty() && !scope.replace && !guarded_tail
+                        || paste_receipt.as_ref().is_some_and(|prior| {
                         let same_target = prior.reader.as_ref().zip(reader.as_ref())
                             .is_some_and(|(old, new)| old.same_target(new));
+                        #[cfg(target_os = "windows")]
+                        if same_target && guarded_append && !scope.replace && !scope.previous_body.is_empty()
+                            && !text.contains(['\r', '\n'])
+                            && prior.observation.proof == Some(PasteReceiptProof::CaretEdit)
+                            && prior.session_body.as_ref().is_some_and(|(session, body)|
+                                *session == scope.session_id && body == &scope.previous_body)
+                            && prior.append_caret.as_ref().zip(reader.as_ref())
+                                .is_some_and(|(caret, reader)| reader.append_caret_matches(caret))
+                        {
+                            return true;
+                        }
                         session_range_owned(prior.session_body.as_ref().map(|(id, body)| (*id, body.as_str())),
                             prior.observation.consumed, prior.observed_document.as_deref(),
                             scope.session_id, &scope.previous_body,
@@ -923,18 +973,17 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                             same_target, reader.as_ref().and_then(|r| r.caret_at_end().ok()))
                     })
                 });
-                let local_append = revisable_guard.is_some() && !revisable;
-                if local_append && (focus != crate::selection::FocusedInputState::Editable
+                if guarded_append && (focus != crate::selection::FocusedInputState::Editable
                     || !chain
                     || !before.as_ref().is_some_and(|(_, selection)| selection.is_empty())
                     || reader.as_ref().and_then(|r| r.current_observation().ok()) != Some(true))
                 {
-                    log::info!("[insertion] local phrase deferred: chain={chain} focus={focus:?}");
+                    log::info!("[insertion] local phrase deferred: chain={chain} focus={focus:?} terminal={guarded_tail}");
                     let _ = reply.send(rejected());
                     continue;
                 }
                 #[cfg(target_os = "windows")]
-                if local_append && before.as_ref().is_some_and(|(document, _)| {
+                if guarded_append && before.as_ref().is_some_and(|(document, _)| {
                     !crate::selection::PasteReader::local_append_fits_readback(document, &text)
                 }) {
                     // Keep the session's previous receipt and audio boundary;
@@ -1083,7 +1132,7 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                         continue;
                     }
                 }
-                if scope.as_ref().is_some_and(|s| s.replace || (local_append && !s.previous_body.is_empty()))
+                if scope.as_ref().is_some_and(|s| s.replace || (guarded_append && !s.previous_body.is_empty()))
                     && !paste_receipt.as_ref().is_some_and(|prior|
                     still_owns_transport(prior.ticket, *owner, prior.revision, clipboard_revision())) {
                     log::warn!("[insertion] session transport permission changed before dispatch ticket={:?} owner={} previous_revision={:?} current_revision={:?}",
@@ -1105,11 +1154,22 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                         continue;
                     }
                 }
+                if guarded_tail
+                    && reader.as_ref().and_then(|reader| reader.current_observation().ok()) != Some(true) {
+                    let _ = reply.send(rejected());
+                    continue;
+                }
                 // A value changed while preparing this paste is not its baseline.
                 if value_before.as_ref().is_some_and(|baseline|
                     reader.as_ref().and_then(|r| r.paste_value().ok()).as_ref() != Some(baseline)) {
                     value_before = None;
                 }
+                #[cfg(target_os = "windows")]
+                let append_caret = if guarded_append {
+                    reader.as_ref().and_then(|reader| {
+                        if reader.caret_at_end().ok() == Some(true) { None } else { reader.append_caret() }
+                    })
+                } else { None };
                 *owner = owner.wrapping_add(1);
                 let current_ticket = *owner;
                 #[cfg(not(target_os = "macos"))]
@@ -1119,6 +1179,22 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                 } else if let Some(guard) = revisable_guard.as_ref() {
                     super::insert_explicit_target_now(&text, shortcut, || (guard.current)()
                         && reader.as_ref().and_then(|reader| reader.current_observation().ok()) == Some(true))
+                } else if guarded_tail {
+                    #[cfg(target_os = "windows")]
+                    {
+                        super::insert_with_clipboard_restore_guarded_now(&text, restore, shortcut, || {
+                            reader.as_ref().is_some_and(|reader| {
+                                reader.current_observation().ok() == Some(true)
+                                    && match append_caret.as_ref() {
+                                        Some(caret) => reader.append_caret_matches(caret),
+                                        None => reader.before().ok().as_ref() == before.as_ref()
+                                            && reader.caret_at_end().ok() == Some(true),
+                                    }
+                            })
+                        })
+                    }
+                    #[cfg(not(target_os = "windows"))]
+                    { dispatch(&text, restore, shortcut) }
                 } else { dispatch(&text, restore, shortcut) };
                 #[cfg(target_os = "macos")]
                 let result = {
@@ -1166,6 +1242,8 @@ fn run_with_capture_and_dispatch(receiver: Receiver<Command>, initial_receipt: O
                     first_guarded_local_draft,
                     staged_selection: false,
                     dispatch_session: scope.as_ref().map(|scope| scope.session_id),
+                    #[cfg(target_os = "windows")]
+                    append_caret,
                 };
                 receipt.complete_unsupported_if_needed(dispatched_at);
                 paste_receipt = Some(receipt);
@@ -1569,7 +1647,7 @@ mod tests {
             ("最后一句", "。", "最后一句。"),
         ] {
             let scope = SessionPasteScope { session_id: session,
-                previous_body: before.into(), replace: false };
+                previous_body: before.into(), replace: false, require_owned_append: false };
             let recovered = recover_scoped_paste_snapshot(Some(scope.session_id),
                 Some((Some(session), true, &capability)), |reader|
                     Some((*reader, (before.to_string(), String::new())))).unwrap();
@@ -1584,6 +1662,32 @@ mod tests {
             assert!(observation.consumed, "new observed tail releases complete same-session recovery");
             assert_ne!(whole, payload, "retained History contains more than the transport suffix");
         }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn guarded_final_tail_does_not_dispatch_without_an_owned_editor_range() {
+        let session = uuid::Uuid::new_v4();
+        let (commands, receiver) = mpsc::channel();
+        let worker = std::thread::spawn(move || run_with_capture_and_dispatch(
+            receiver, None, || (None, crate::selection::FocusedInputState::Editable),
+            |_, _, _| panic!("an unconfirmed prefix must not start a second paste lease"),
+        ));
+        for previous_body in ["previously dispatched", ""] {
+            let (reply, result) = mpsc::channel();
+            commands.send(Command::Paste("final tail".into(), false, PasteShortcut::CtrlV, None,
+                Some(SessionPasteScope {
+                    session_id: session,
+                    previous_body: previous_body.into(),
+                    replace: false,
+                    require_owned_append: true,
+                }), reply)).unwrap();
+            let submission = result.recv_timeout(Duration::from_secs(2)).unwrap();
+            assert_eq!(submission.status, InsertStatus::DeferredNoTarget);
+            assert!(submission.receipt.is_none());
+        }
+        drop(commands);
+        worker.join().unwrap();
     }
 
     #[test]
@@ -1617,7 +1721,7 @@ mod tests {
             let (reply, result) = mpsc::channel();
             commands.send(Command::Paste(body.into(), false, PasteShortcut::CtrlV,
                 None, Some(SessionPasteScope { session_id: session,
-                    previous_body: previous.into(), replace: false }), reply)).unwrap();
+                    previous_body: previous.into(), replace: false, require_owned_append: false }), reply)).unwrap();
             let result = result.recv_timeout(Duration::from_secs(2)).unwrap();
             assert_eq!(result.status, InsertStatus::DeferredNoTarget);
             assert!(result.receipt.is_none(), "readonly Codex document cannot create a fake paste lease");
@@ -1641,6 +1745,7 @@ mod tests {
                 session_id: uuid::Uuid::new_v4(),
                 previous_body: String::new(),
                 replace: false,
+                require_owned_append: false,
             },
             Some(RevisableDispatchGuard { origin, current: Box::new(|| false) }),
             reply,
@@ -1663,7 +1768,7 @@ mod tests {
             ("previously written body", SessionRangePermission::Revoked)] {
             let (reply, result) = mpsc::channel();
             send.send(Command::Revisable("next body".into(), PasteShortcut::CtrlV,
-                SessionPasteScope { session_id, previous_body: body.into(), replace: !body.is_empty() }, None, reply)).unwrap();
+                SessionPasteScope { session_id, previous_body: body.into(), replace: !body.is_empty(), require_owned_append: false }, None, reply)).unwrap();
             let result = result.recv().unwrap();
             assert_eq!(result.status, InsertStatus::DeferredNoTarget);
             assert_eq!(result.range_permission, permission);
@@ -1702,6 +1807,8 @@ mod tests {
                 dispatched_at,
                 observation: PasteObservation::default(),
                 completion: Some(completion), session_body: None, observed_document: None, expected_session_document: None, strict_session_edit: false, first_guarded_local_draft: false, staged_selection: false, dispatch_session: None,
+                #[cfg(target_os = "windows")]
+                append_caret: None,
             },
             PasteReceiptHandle {
                 ticket,
@@ -1962,6 +2069,8 @@ mod tests {
                 dispatched_at: Instant::now(),
                 observation: PasteObservation::default(),
                 completion: None, session_body: None, observed_document: None, expected_session_document: None, strict_session_edit: false, first_guarded_local_draft: false, staged_selection: false, dispatch_session: None,
+                #[cfg(target_os = "windows")]
+                append_caret: None,
             }), || (None, crate::selection::FocusedInputState::NonEditable)));
             let (reply, results) = mpsc::channel();
             commands.send(Command::Retain(ClipboardTicket { id: ticket, revision: transport_revision }, final_body.clone(), true, reply)).unwrap();
