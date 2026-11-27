@@ -68,7 +68,9 @@ if (selectedRepo && !Object.hasOwn(manifest.repositories, selectedRepo)) fail(`u
 for (const [id, repo] of Object.entries(manifest.repositories)) {
   requireString(repo.path, `repositories.${id}.path`);
   if (selectedRepo && id !== selectedRepo) continue;
-  const repoRoot = resolve(listenerRoot, repo.path);
+  const repoRoot = id === 'type' && repo.path === 'Listener-Type'
+    ? typeRoot
+    : resolve(listenerRoot, repo.path);
   if (!existsSync(repoRoot)) fail(`repository ${id} path does not exist: ${repoRoot}`);
   repoRoots.set(id, repoRoot);
 }
