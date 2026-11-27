@@ -91,7 +91,7 @@
     {
       "id": "local_asr_management",
       "status": "implemented",
-      "summary": "Local ASR UI and command layer manage macOS Qwen3-ASR and Windows Foundry Local Whisper model/runtime lifecycle.",
+      "summary": "Windows uses the bundled Companion Paraformer Large model. macOS source builds can use experimental Qwen3-ASR.",
       "doc": "local-asr-management.md",
       "primary_paths": [
         "src/pages/LocalAsr.tsx",
@@ -101,15 +101,14 @@
         "src-tauri/vendor/qwen-asr/",
         "src-tauri/build.rs",
         "src-tauri/src/commands.rs",
-        "tools/foundry_asr_probe/",
-        "tools/foundry_runtime_prepare/"
+        "scripts/windows-package-msvc.ps1"
       ],
       "validation": [
         "cargo test --manifest-path src-tauri/Cargo.toml --lib --no-run",
         "npm run build"
       ],
       "known_limits": [
-        "Foundry Local is Windows-only",
+        "Windows source builds need the local model files to enable local dictation",
         "Qwen3-ASR runtime support is platform-specific and may be model/download constrained"
       ]
     },
