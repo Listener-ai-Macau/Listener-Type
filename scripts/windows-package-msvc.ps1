@@ -27,7 +27,14 @@ if ($env:NODE_TLS_REJECT_UNAUTHORIZED -eq "0") {
 }
 
 $appRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$releaseRoot = Join-Path $appRoot "src-tauri\target\x86_64-pc-windows-msvc\release"
+$tauriRoot = Join-Path $appRoot "src-tauri"
+$cargoTarget = $env:CARGO_TARGET_DIR
+if ([string]::IsNullOrWhiteSpace($cargoTarget)) {
+  $cargoTarget = Join-Path $tauriRoot "target"
+} elseif (-not [System.IO.Path]::IsPathRooted($cargoTarget)) {
+  $cargoTarget = Join-Path $tauriRoot $cargoTarget
+}
+$releaseRoot = Join-Path $cargoTarget "x86_64-pc-windows-msvc\release"
 if ([string]::IsNullOrWhiteSpace($ArtifactsRoot)) {
   $ArtifactsRoot = Join-Path $appRoot ".artifacts\windows-msvc"
 }
