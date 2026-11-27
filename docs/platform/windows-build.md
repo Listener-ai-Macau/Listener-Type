@@ -20,6 +20,7 @@ unregister a legacy Listener Type TSF IME left by an older package.
 ## Build
 
 Use a Windows runner with Visual Studio Build Tools and Rust installed.
+For a shared Cargo build cache, set `CARGO_TARGET_DIR` to its absolute path. Packaging uses the same target directory for the release executable and WiX files.
 
 ```powershell
 npm ci
